@@ -1,6 +1,5 @@
 
 # Calypso Blueprint for Web Applications
-Perfect — now we can generalize the **WHAT** into a **universal Calypso blueprint for any web application**, stripping out references to the newsletter project but keeping all the **architecture, process, and deployment prescriptions**.
 
 ## 0. Development Prerequisites
 
