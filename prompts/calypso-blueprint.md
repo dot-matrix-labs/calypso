@@ -14,7 +14,7 @@
 **Linux Host Dependencies**
 Before bootstrapping a Calypso project, the bare-metal Linux host must have the following system dependencies installed:
 1. `git`: Version control.
-2. `gh` (GitHub CLI): Must be installed and fully authenticated to allow the agent to manage pull requests and Nightshift workflows.
+2. `gh` (GitHub CLI): Must be installed and fully authenticated via HTTPS (`gh auth login -p https -w`) to allow the agent to manage pull requests and Nightshift workflows.
 3. `tmux`: Required to persist the agent's session remotely.
 4. `bun`: The core JavaScript runtime.
 5. **The AI Agent CLI:** The specific CLI tool for the chosen agent (e.g., Claude Code, Cursor server, Gemini CLI).
@@ -101,7 +101,11 @@ Before bootstrapping a Calypso project, the bare-metal Linux host must have the 
 * Avoid cascading dependencies.
 
 ## 3. Process
-0. **Scaffold:** Create the workspace with the [Nightshift](https://github.com/dot-matrix-labs/nightshift) methodology (adding context, reasoning ledgers, and git-hook quality gates) and the Calypso Blueprint below.
+0. **Quickstart / Scaffold:** 
+   * **Version Control:** Initialize git (`git init`), authenticate GitHub CLI using HTTPS (`gh auth login -p https -w`), and create the remote repository (`gh repo create`).
+   * **CI Setup:** Immediately create the CI jobs (e.g., GitHub Actions in `.github/workflows/`) so they run from day one.
+   * **TDD Environment:** You should not develop by opening a browser on localhost. You should always use a headless instance, execute headless browser tests (e.g., Playwright), and strictly do Test-Driven Development (TDD).
+   * **Workspace:** Create the workspace with the [Nightshift](https://github.com/dot-matrix-labs/nightshift) methodology (adding context, reasoning ledgers, and git-hook quality gates) and the Calypso Blueprint below.
 1. **Collect Specifications:** The AI agent must generate an `.md` document containing comprehensive onboarding interview questions for the Product Owner to extract requirements. An explicit template prompt is provided to instruct the agent on generating these questions. The agent then writes a canonical Product Requirements Doc to `docs/prd.md` (per Nightshift documentation rules) based on the answers. The Product Owner/Manager will own and update this document moving forward.
 2. **Prototype:** mock data, minimal UI, basic flows, no persistence.
 3. **Demoware:** partial integrations, realistic UI, stable demo workflows.
