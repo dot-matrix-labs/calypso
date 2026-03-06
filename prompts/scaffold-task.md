@@ -50,6 +50,7 @@ Before executing the checklist below, **detect the host environment you are curr
 - [ ] The project is completely clear of any mocking libraries (e.g., `jest.mock`, `msw`).
 - [ ] There are stub tests (no-ops) for all categories of tests; server (unit, module, integration) and browser (unit, component, e2e). 
 - [ ] You can run a full test suite (all categories) and see all tests pass.
+- [ ] There are no lint or format warnings.
 
 ### 4. Deployment Posture
 - [ ] The project includes `.env` file templates.
