@@ -27,8 +27,8 @@ Before executing the checklist below, **detect the host environment you are curr
 4. Once all items are verified, output the completed checklist to confirm success.
 
 ### 0. Agent Setup
-- [ ] You have a `.calypso/` folder in the project root which includes the .md files with the various standards that agents should follow
-
+- [ ] You have a `docs/standards/` folder in the project root containing copies of all standards from the Calypso template (documentation-standard.md, development-standards.md, git-standards.md, etc.)
+- [ ] At the **start of every session**, you (the agent) read all files in `docs/standards/` to understand current project conventions, regardless of which AI vendor/model is being used.
 
 ### 1. Architecture & Stack Integrity
 - [ ] The repository strictly uses TypeScript, Bun, React, and Tailwind CSS.
@@ -37,6 +37,7 @@ Before executing the checklist below, **detect the host environment you are curr
 - [ ] All local dependencies of a module in the monorepo are built ahead of the target model
 - [ ] All modules succeed with `bun run build`
 - [ ] All package.json scripts are run with `bunx`, not calling a globally intalled binary, (e.g. `bunx vitest` is correct, not `vitest`)
+- [ ] Linting and formatting rules have been created
 
 ### 2. Requirements & Documentation
 - [ ] The Product Owner interview has been conducted natively via your prompt interactions.
