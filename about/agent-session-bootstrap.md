@@ -302,6 +302,8 @@ These are common agent defaults that violate the Calypso method. Do not do them.
 - **Committing without updating planning docs.** The pre-commit hook enforces this, but do not attempt to bypass it. Both `implementation-plan.md` and `next-prompt.md` must be staged with every commit.
 - **Adding heavy state management.** Do not add Redux, Zustand, Jotai, or MobX. Use React hooks and minimal context.
 - **Writing a retroactive prompt that describes the diff.** The `retroactive_prompt` field in `GIT_BRAIN_METADATA` must describe *how to reproduce the change*, not summarise what changed. "Added auth middleware" is wrong. A specific, actionable instruction is correct.
+- **Batching too much into one commit.** Each commit must represent one logical change. If you are staging more than ~10 files (excluding planning docs), you are doing too much at once — split the work and commit incrementally. Commit early, commit often.
+- **Accumulating a large PR.** A pull request that changes more than ~30 files is too large to review meaningfully. Push small, focused PRs frequently. If a feature requires many changes, break it into sequential PRs — each building on the last — rather than one large batch.
 ```
 
 ## Deploy Script: `scripts/install-agent-config.sh`

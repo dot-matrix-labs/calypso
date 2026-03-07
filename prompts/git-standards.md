@@ -126,11 +126,13 @@ GIT_BRAIN_METADATA:
 
 | Stage | Check | Behaviour |
 |---|---|---|
-| pre-commit | Planning docs not staged | **BLOCKS** — the only commit block |
+| pre-commit | Planning docs not staged | **BLOCKS** |
+| pre-commit | Commit touches > 10 files (excl. planning docs) | **Warns** — appended to next-prompt.md |
 | pre-commit | Lint / format | Auto-fixes applied; unfixable remainder **appended to next-prompt.md** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
-| pre-push | Lint / format / type failures | **BLOCKS** — clean code is required to push |
-| pre-push | Test suite failures | **Allows push** — but appends failing tests to next-prompt.md |
+| pre-push | PR changes > 30 files vs. main | **BLOCKS** — split the PR |
+| pre-push | Lint / format / type failures | **BLOCKS** |
+| pre-push | Test suite failures | **Allows push** — appends failing tests to next-prompt.md |
 
 ---
 
@@ -182,6 +184,31 @@ if [ ${#PLAN_ERRORS[@]} -gt 0 ]; then
   echo "                           advances from one task to the next." >&2
   echo "" >&2
   exit 1
+fi
+
+# Commit size advisory — warn if too many files changed in one commit
+PLANNING_DOCS="docs/plans/implementation-plan.md docs/plans/next-prompt.md"
+STAGED_COUNT=$(echo "$STAGED" | grep -v "^$" | grep -vF "$PLANNING_DOCS" | wc -l | tr -d ' ')
+COMMIT_FILE_LIMIT=10
+
+if [ "$STAGED_COUNT" -gt "$COMMIT_FILE_LIMIT" ]; then
+  echo "" >&2
+  echo "COMMIT SIZE WARNING: This commit touches ${STAGED_COUNT} files (limit: ${COMMIT_FILE_LIMIT})." >&2
+  echo "Calypso commits should be small and focused — one logical change per commit." >&2
+  echo "Consider splitting this work into multiple commits." >&2
+  echo "This warning has been appended to next-prompt.md." >&2
+  echo "" >&2
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## Commit Size Warning
+
+The previous commit touched ${STAGED_COUNT} files, exceeding the recommended limit of ${COMMIT_FILE_LIMIT}.
+Commits should be small and focused — one logical change, committed frequently.
+If the next task involves many files, split it into smaller commits before pushing.
+EOF
 fi
 
 # Lint and format: auto-fix first, then capture what could not be fixed
@@ -367,6 +394,26 @@ if [ $QUALITY_FAILED -ne 0 ]; then
   echo "These were warned about at commit time. Fix them, update next-prompt.md, and commit." >&2
   echo "" >&2
   exit 1
+fi
+
+# PR size gate — block if too many files changed vs. main
+PR_FILE_LIMIT=30
+MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo "")
+
+if [ -n "$MERGE_BASE" ]; then
+  PR_FILE_COUNT=$(git diff --name-only "$MERGE_BASE"...HEAD | wc -l | tr -d ' ')
+  if [ "$PR_FILE_COUNT" -gt "$PR_FILE_LIMIT" ]; then
+    echo "" >&2
+    echo "PUSH BLOCKED: This PR changes ${PR_FILE_COUNT} files (limit: ${PR_FILE_LIMIT})." >&2
+    echo "" >&2
+    echo "Pull requests must be small and reviewable. Split this branch into smaller PRs:" >&2
+    echo "  1. Identify a logical subset of changes that can stand alone." >&2
+    echo "  2. Create a new branch from main with only those changes." >&2
+    echo "  3. Open a PR for that subset, get it merged." >&2
+    echo "  4. Repeat for the remaining changes." >&2
+    echo "" >&2
+    exit 1
+  fi
 fi
 
 echo "pre-push: running full test suite..." >&2
