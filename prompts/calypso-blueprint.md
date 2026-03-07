@@ -158,10 +158,10 @@ These standards are the **source of truth** for this project. Users may customiz
 1b. **Next Prompt:** Alongside the implementation plan, the agent maintains `docs/plans/next-prompt.md`. This file contains a single, self-contained, immediately executable prompt describing the **very next action** the agent should take.
 
    * It is updated at **every git commit**, enforced by the same pre-commit hook as the implementation plan.
-   * It is written in second person, addressed to the next agent session: "Read X, then do Y, paying attention to Z."
-   * It must include enough context to act without human input — what was just completed, what comes next, and any constraints or gotchas relevant to the next step.
-   * At session start, the agent reads this file and executes it autonomously. This closes the loop: each session ends by writing the next session's instruction, creating a **self-advancing state machine** that can make progress without a human prompt.
-   * Humans can override the next step at any time by editing `docs/plans/next-prompt.md` directly before starting a session.
+   * It is written in second person, addressed to the agent picking up the next commit: "Read X, then do Y, paying attention to Z."
+   * It must include enough context to begin the next task without human input — what was just completed, what comes next, and any constraints or gotchas relevant to that work.
+   * This closes the loop: each commit ends by writing the prompt for the next commit, creating a **self-advancing state machine**. A commit is the unit of progress; an agent session spans many commits and may execute them continuously without waiting for a human prompt between each one.
+   * Humans can override the next task at any time by editing `docs/plans/next-prompt.md` directly.
 
    The relationship between the three planning documents:
    | File | Scope | Owner |

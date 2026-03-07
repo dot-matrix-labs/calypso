@@ -9,9 +9,9 @@ At the start of every session, in this order:
 1. `docs/standards/calypso-blueprint.md` — architecture, stack, process, and testing standards
 2. `docs/prd.md` — the canonical product requirements for this project
 3. `docs/plans/implementation-plan.md` — full task checklist; understand what is done and what remains
-4. `docs/plans/next-prompt.md` — the immediate next action, written by the previous session; **execute this**
+4. `docs/plans/next-prompt.md` — the prompt for the next commit, written at the previous commit; **execute this**
 
-Files 1 and 2 establish constraints. Files 3 and 4 establish state. The agent reads all four, then acts on `next-prompt.md` without waiting for human input. This is the self-advancing loop.
+Files 1 and 2 establish constraints. Files 3 and 4 establish state. The agent reads all four, then executes `next-prompt.md` as the first task. A commit is the unit of work in Calypso — an agent session spans many commits and can chain them continuously by re-reading `next-prompt.md` after each one.
 
 If the standards files do not yet exist locally, bootstrap them first:
 
@@ -261,18 +261,20 @@ At the start of every session, read these files in order:
 If the standards files are missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
 
-After reading all four files, execute docs/plans/next-prompt.md autonomously.
-Do not wait for further human input before beginning work.
+After reading all four files, execute docs/plans/next-prompt.md as your first task.
+Do not wait for further human input. A commit is the unit of work — after each commit,
+re-read next-prompt.md and continue to the next task.
 
 ## Commit Requirements
 
 Every commit must stage both planning files:
 - docs/plans/implementation-plan.md  — check off completed tasks; add newly discovered tasks
-- docs/plans/next-prompt.md          — overwrite with the complete prompt for the next session
+- docs/plans/next-prompt.md          — overwrite with the complete, self-contained prompt
+                                       for the next commit to execute
 
-next-prompt.md is the state machine. You write the next agent's instruction before
-you commit. The next session reads it and acts. This is how work advances without
-a human prompt between every session.
+next-prompt.md is the state machine cursor. Each commit ends by writing the prompt for
+the next commit. This is how the agent advances from task to task without a human prompt
+between each one. An agent session spans many commits.
 ```
 
 ## Deploy Script: `scripts/install-agent-config.sh`

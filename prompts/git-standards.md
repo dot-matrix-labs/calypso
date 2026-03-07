@@ -143,9 +143,9 @@ Every commit must stage updates to both planning documents. This is a hard block
 | File | What to update |
 |---|---|
 | `docs/plans/implementation-plan.md` | Check off completed tasks; add or reorder tasks discovered during the work |
-| `docs/plans/next-prompt.md` | Overwrite with the single, self-contained prompt for the next session to execute |
+| `docs/plans/next-prompt.md` | Overwrite with the single, self-contained prompt for the next commit to execute |
 
-`next-prompt.md` is the state machine cursor. Each session reads it, does the work, then writes the next session's instruction before committing. This allows the agent to advance autonomously without a human prompt.
+`next-prompt.md` is the state machine cursor. A commit is the unit of work in Calypso. Each commit ends by writing the prompt for the next commit. An agent session spans many commits and can execute them continuously by reading and acting on this file after each commit, without waiting for a human prompt.
 
 Add the following to `.git/hooks/pre-commit`:
 
@@ -174,9 +174,9 @@ if [ ${#ERRORS[@]} -gt 0 ]; then
   echo "At every commit:" >&2
   echo "  implementation-plan.md — check off completed tasks; add or reorder discovered tasks." >&2
   echo "  next-prompt.md         — write the complete, self-contained prompt for the next" >&2
-  echo "                           agent session to execute. It must be specific enough to" >&2
-  echo "                           act on without human input. This is how the agent advances" >&2
-  echo "                           autonomously between sessions." >&2
+  echo "                           commit to execute. It must be specific enough to act on" >&2
+  echo "                           without human input. A commit is the unit of work;" >&2
+  echo "                           this is how the agent advances from one commit to the next." >&2
   echo "" >&2
   exit 1
 fi
