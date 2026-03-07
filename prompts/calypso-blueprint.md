@@ -53,7 +53,7 @@ These standards are the **source of truth** for this project. Users may customiz
 * Language: TypeScript only; no other languages permitted.
 * Runtime: Bun (server and build tasks).
 * UI: React (latest stable).
-* Styling: Tailwind CSS.
+* Styling: Tailwind CSS (vanilla CSS, no processors).
 * State Management: React hooks or minimal context; no heavy state libraries.
 * Testing: Vitest (unit), Playwright (browser/E2E).
 
