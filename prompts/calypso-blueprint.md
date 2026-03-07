@@ -1,6 +1,10 @@
 
 # Calypso Blueprint for Web Applications
 
+> [!IMPORTANT]
+> **Agent Development Gate:** You are only to proceed with feature development after all steps in [scaffold-task.md](https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/scaffold-task.md) are verified as complete.
+
+
 ## 0. Development Prerequisites
 
 **Environment & Setup**
@@ -26,24 +30,29 @@ Before bootstrapping a Calypso project, the bare-metal Linux host must have the 
 * Different agent vendors (Claude, Codex, Gemini) have different ways of producing instructions for agents. These are currently defined as .md txt files. 
 You should have a `docs/standards/` folder in the project root which includes the .md files with the various standards that agents should follow.
 
+
 ## Agent Standards Folder
 
-When bootstrapping a new project, create a `.docs/standards/` directory in the project root containing template standards:
+When bootstrapping a new project, create a `docs/standards/` directory in the project root containing template standards copied from `./prompts/` in this repository:
+
 
 ```
-.calypso/
-├── standards/
-│   ├── documentation-standard.md
-│   ├── development-standards.md
-│   ├── git-standards.md
-│   └── ...
+docs/
+└── standards/
+    ├── calypso-blueprint.md
+    ├── documentation-standard.md
+    ├── development-standards.md
+    ├── git-standards.md
+    └── ...
 ```
 
-These standards are the **source of truth** for this project. Users may customize them in `.calypso/standards/` to fit their specific requirements.
+These standards are the **source of truth** for this project. Users may customize them in `docs/standards/` to fit their specific requirements.
+
 
 ### Agent Session Requirement
 
-**At the start of every session**, the agent MUST read all files in `.docs/standards/` to understand the current project conventions. This applies regardless of which AI vendor or model is being used. Failure to do so may result in work that violates project standards.
+**At the start of every session**, the agent MUST read all files in `docs/standards/` to understand the current project conventions. This applies regardless of which AI vendor or model is being used. Failure to do so may result in work that violates project standards.
+
 
 
 ## 1. Architecture
