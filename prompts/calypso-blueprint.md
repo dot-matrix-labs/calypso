@@ -33,7 +33,13 @@ You should have a `docs/standards/` folder in the project root which includes th
 
 ## Agent Standards Folder
 
-When bootstrapping a new project, create a `docs/standards/` directory in the project root containing template standards copied from `./prompts/` in this repository:
+**[CRITICAL] Bootstrap Requirement:** When starting a new project or session, the agent MUST first bootstrap the Calypso standards by running:
+
+  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+
+The agent MUST then read these local files in `./docs/standards/` as the first action of the session. Do NOT proceed with any development or documentation tasks until these standards are read; otherwise, you may fabricate conventions that violate the Calypso architecture.
+
+Create the `docs/standards/` directory if it does not exist:
 
 
 ```
@@ -51,7 +57,7 @@ These standards are the **source of truth** for this project. Users may customiz
 
 ### Agent Session Requirement
 
-**At the start of every session**, the agent MUST read all files in `docs/standards/` to understand the current project conventions. This applies regardless of which AI vendor or model is being used. Failure to do so may result in work that violates project standards.
+**At the start of every session**, the agent MUST verify that all files in `docs/standards/` are up to date with the latest templates and read them to understand the current project conventions. This applies regardless of which AI vendor or model is being used. Failure to do so may result in work that violates project standards or the fabrication of incorrect development practices.
 
 
 

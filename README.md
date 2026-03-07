@@ -11,9 +11,15 @@ Software rarely fails due to code quality; it fails because of unclear requireme
 To bootstrap a new Calypso project instantly, copy and paste this heavily structured prompt to your preferred AI agent:
 
 ```text
-Agent, I want to build a project tracking app with Calypso using the scaffold task found here: https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/scaffold-task.md
+Agent, I want to build a project tracking app with Calypso. 
 
-Context: I work in software development, and I have a team of 3 developers. I am replacing GitHub Projects because it's ugly and confusing. Please begin the scaffold process and conduct the mandatory Product Owner interview.
+CRITICAL: Before beginning, you MUST bootstrap the Calypso standards by running:
+
+  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+
+Please start by reading the local docs/standards/calypso-blueprint.md
+
+Context: I work in software development, and I have a team of 3 developers. I am replacing GitHub Projects because it's ugly and confusing. 
 ```
 
 ## A Calypso for Every Developer
