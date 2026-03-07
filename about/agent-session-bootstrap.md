@@ -252,6 +252,9 @@ Create `AGENT.md` once per project:
 # Calypso Project
 
 @docs/standards/calypso-blueprint.md
+@docs/standards/git-standards.md
+@docs/standards/documentation-standard.md
+@docs/standards/development-standards.md
 @docs/prd.md
 
 ---
@@ -261,12 +264,39 @@ Create `AGENT.md` once per project:
 - **Commit = unit of work.** Each commit completes one task. An agent session spans many commits.
 - **State machine.** `docs/plans/next-prompt.md` holds the prompt for the next commit. Each commit overwrites it. The agent reads it, acts, commits, then reads it again — advancing without human prompting.
 - **Implementation plan.** `docs/plans/implementation-plan.md` is the full task checklist. Check off completed tasks and add newly discovered ones at every commit.
-- **TDD, no exceptions.** Write failing tests first. Never open a browser — use headless Playwright. All server and browser tests run on Linux only.
+- **Plan → Stub → Implement.** For any non-trivial feature: plan first (identify risks, write checklist), stub structure before logic, then implement via TDD. Never jump straight to implementation.
+- **TDD, no exceptions.** Write the failing test first. Red → Green → Refactor. Never open a browser — use headless Playwright only.
 - **No mocks, ever.** Test against real services. Record golden fixtures from real production responses. Never fabricate fixture data.
-- **Stack is fixed.** TypeScript + Bun + React + Tailwind. No additions without explicit justification. No other languages.
-- **Hyper-minimal dependencies.** Default to DIY. Only import a package if the functionality is genuinely infeasible to build internally (see blueprint § Dependency Policy).
+- **Stack is fixed.** TypeScript + Bun + React + Tailwind. No other languages. No npm — use `bun` for everything.
+- **Hyper-minimal dependencies.** Default to DIY. Only add a package if the functionality is genuinely infeasible to build internally in reasonable effort.
 - **Bare metal Linux.** No Docker. Apps run natively under systemd. Dev port is 31415.
-- **Every commit carries a retroactive prompt** in `GIT_BRAIN_METADATA`. Write the prompt you *would have given* to produce this diff — not the one you were given.
+- **Every commit carries a retroactive prompt** in `GIT_BRAIN_METADATA`. Write the instruction you *would have given* to produce this diff cleanly — not a summary of what changed.
+- **Small commits, small PRs.** Commit one logical change at a time. A PR over ~30 files is a review burden — split it.
+
+---
+
+## Philosophy
+
+**Calypso subscribes to:**
+
+- **TDD** (Beck / XP) — tests define correctness; implementation satisfies them
+- **YAGNI** (XP) — build only what is needed now; the future is unknowable
+- **UNIX Philosophy** — small tools that do one thing well, composed simply
+- **Choose Boring Technology** (McKinley) — proven and dull beats novel and exciting; novelty has a cost budget
+- **Worse is Better** (Gabriel) — simplicity of implementation is the primary virtue
+- **Locality of Behaviour** (Gross) — behaviour should be visible at the call site, not hidden in distant abstractions
+- **Risk-First** — tackle the biggest unknowns earliest; the scariest task goes first on the checklist
+- **12-Factor App** — config in environment, stateless processes, explicit dependencies
+
+**Calypso explicitly does NOT subscribe to:**
+
+- **Microservices by default** — monolith until you have a demonstrated, specific reason to decompose
+- **Resume-Driven Development** — do not add technology because it is impressive or trending
+- **DRY at all costs** — duplication is cheaper than the wrong abstraction; abstract only when you have three concrete cases
+- **GitFlow** — too complex; feature branches off main, small PRs, delete on merge
+- **Big Design Up Front** — plan enough to start, then iterate; do not design systems you have not yet built
+- **Abstraction-first** — write the concrete thing first; extract the abstraction when the pattern is proven
+- **Framework layering** — the stack is prescribed; do not add frameworks on top of frameworks
 
 ---
 
@@ -285,25 +315,40 @@ If standards files are missing, run:
 
 ---
 
+## Standards Reference
+
+| Topic | Document |
+|---|---|
+| Architecture, stack, process, testing | `docs/standards/calypso-blueprint.md` |
+| Git commits, hooks, metadata schema | `docs/standards/git-standards.md` |
+| Documentation structure (fractal README) | `docs/standards/documentation-standard.md` |
+| New feature development (Plan→Stub→TDD) | `docs/standards/development-standards.md` |
+| Product requirements | `docs/prd.md` |
+| Task checklist | `docs/plans/implementation-plan.md` |
+| Next task prompt | `docs/plans/next-prompt.md` |
+
+---
+
 ## Antipatterns — Calypso Explicitly Forbids These
 
-These are common agent defaults that violate the Calypso method. Do not do them.
-
-- **Mocking in tests.** Never mock APIs, databases, the DOM, or external services. No `jest.mock`, no `sinon.stub`, no `vi.mock` on external dependencies. Test against the real thing.
-- **Fabricating test fixtures.** Never invent or estimate fixture data. Golden fixtures must be recorded from real production requests. If you do not have a fixture, write the tool that records one.
-- **Skipping or disabling failing tests.** Never add `.skip()`, `.todo()`, `xit()`, or comments that disable a test to make a suite pass. Failing tests must be fixed or rewritten.
-- **Installing a package for something buildable.** Do not `bun add` a utility library (date formatting, string helpers, simple validators) that can be implemented cleanly in under 50 lines. Build it.
+- **Writing any language other than TypeScript.** No Python, Go, Rust, Ruby, or shell scripts beyond simple git hooks. All logic — server, client, scripts, tooling — is TypeScript running on Bun.
+- **Using npm or npx.** Use `bun`, `bunx`, and `bun add` exclusively. Never `npm install`, `npm run`, or `npx`. npm creates a conflicting lockfile and install tree.
+- **Mocking in tests.** Never mock APIs, databases, the DOM, or external services. No `jest.mock`, `sinon.stub`, or `vi.mock` on external dependencies. Test against the real thing.
+- **Fabricating test fixtures.** Never invent or estimate fixture data. Golden fixtures must be recorded from real production requests. If you do not have one, write the recording tool first.
+- **Skipping or disabling failing tests.** Never add `.skip()`, `.todo()`, `xit()`, or comments that disable a test. Failing tests must be fixed or rewritten — never silenced.
+- **Installing a package for something buildable.** Do not `bun add` a library for functionality achievable in under ~50 lines of TypeScript. Build it.
 - **Using Docker.** Do not containerise anything. Deploy natively. Use systemd to keep processes alive.
-- **Using an ORM.** Do not add Prisma, TypeORM, Drizzle, or any query builder. Write SQL directly using `bun:sqlite` or the database driver.
-- **Using external auth providers.** Do not integrate Auth0, Clerk, Supabase Auth, or any third-party auth SaaS. Implement JWT authentication in-house using Bun's native `crypto.subtle`.
+- **Using an ORM.** Do not add Prisma, TypeORM, Drizzle, or any query builder. Write SQL directly.
+- **Using external auth providers.** No Auth0, Clerk, or Supabase Auth. Implement JWT in-house using Bun's native `crypto.subtle`.
 - **Using GraphQL or WebSockets** unless the PRD explicitly requires them. Default to REST.
-- **Testing in a headed browser or on localhost.** All browser tests use headless Chromium via Playwright. No `page.goto('http://localhost:...')` in CI — use the running dev server on port 31415.
-- **Working on Mac or Windows.** All continuous development, testing, and deployment must run on a bare-metal Linux host. Local machines are permitted only for initial scaffold.
-- **Committing without updating planning docs.** The pre-commit hook enforces this, but do not attempt to bypass it. Both `implementation-plan.md` and `next-prompt.md` must be staged with every commit.
-- **Adding heavy state management.** Do not add Redux, Zustand, Jotai, or MobX. Use React hooks and minimal context.
-- **Writing a retroactive prompt that describes the diff.** The `retroactive_prompt` field in `GIT_BRAIN_METADATA` must describe *how to reproduce the change*, not summarise what changed. "Added auth middleware" is wrong. A specific, actionable instruction is correct.
-- **Batching too much into one commit.** Each commit must represent one logical change. If you are staging more than ~10 files (excluding planning docs), you are doing too much at once — split the work and commit incrementally. Commit early, commit often.
-- **Accumulating a large PR.** A pull request that changes more than ~30 files is too large to review meaningfully. Push small, focused PRs frequently. If a feature requires many changes, break it into sequential PRs — each building on the last — rather than one large batch.
+- **Testing in a headed browser.** All browser tests run in headless Chromium via Playwright. Use the dev server on port 31415 — not localhost with an arbitrary port.
+- **Working on Mac or Windows.** All development, testing, and deployment runs on bare-metal Linux. Local machines are for initial scaffold only.
+- **Committing without updating planning docs.** The pre-commit hook will block you. Both `implementation-plan.md` and `next-prompt.md` must be staged with every commit.
+- **Adding heavy state management.** No Redux, Zustand, Jotai, or MobX. Use React hooks and minimal context.
+- **Jumping straight to implementation.** For anything non-trivial: plan first, stub structure, then implement with TDD. Never write logic before the skeleton exists.
+- **Writing a retroactive prompt that describes the diff.** `retroactive_prompt` must be an actionable instruction to reproduce the change — not a summary of what was done.
+- **Batching too much into one commit.** One logical change per commit. More than ~10 files staged (excluding planning docs) is a signal to split.
+- **Accumulating a large PR.** More than ~30 files changed vs. main will block the push. Break large features into sequential, merged PRs.
 ```
 
 ## Deploy Script: `scripts/install-agent-config.sh`
