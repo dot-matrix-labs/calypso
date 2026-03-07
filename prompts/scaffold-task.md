@@ -30,7 +30,7 @@ Before executing the checklist below, **detect the host environment you are curr
 - [ ] You have a `docs/standards/` folder in the project root containing copies of all standards from the Calypso template (documentation-standard.md, development-standards.md, git-standards.md, etc.)
 - [ ] At the **start of every session**, you (the agent) read all files in `docs/standards/` to understand current project conventions, regardless of which AI vendor/model is being used.
 
-### 1. Architecture & Stack Integrity
+### 1. Architecture
 - [ ] The repository strictly uses TypeScript, Bun, React, and Tailwind CSS.
 - [ ] A monorepo structure is established (e.g., `/apps/web`, `/apps/server`, `/packages/*`).
 - [ ] The package.json of each module has clear compiling targets for code (`/apps/web`) and server code (`/apps/server`).
@@ -39,27 +39,27 @@ Before executing the checklist below, **detect the host environment you are curr
 - [ ] All package.json scripts are run with `bunx`, not calling a globally intalled binary, (e.g. `bunx vitest` is correct, not `vitest`)
 - [ ] Linting and formatting rules have been created
 
-### 2. Requirements & Documentation
+### 2. Documentation
 - [ ] The Product Owner interview has been conducted natively via your prompt interactions.
 - [ ] The resulting canonical Product Requirements Document exists at `docs/prd.md`
 - [ ] Any external API test credentials requested during the interview have been securely provided and logged in an `.env` or `.env.test` file (not committed to source control).
+- [ ] There is a `docs/` directory at the root of the project. And there a no docs outside of this directory except README.md files in each directory.
+- [ ] There are extensive code comments on each of the source code files, including intruduction struct definitions and function definitions.
+- [ ] The project includes `.git/hooks/pre-push` with the documentation standard hook.
+
 
 ### 3. Testing Foundation
 - [ ] Vitest and Playwright are configured.
 - [ ] The foundation for the "golden fixture" external API testing tool is scaffolded (or explicitly planned in `docs/prd.md`).
 - [ ] The project is completely clear of any mocking libraries (e.g., `jest.mock`, `msw`).
-- [ ] There are stub tests (no-ops) for all categories of tests; server (unit, module, integration) and browser (unit, component, e2e). 
+- [ ] You have stubbed thee testfiles with no-ops for all categories of tests; server (unit, module, integration) and browser (unit, component, e2e). 
 - [ ] You can run a full test suite (all categories) and see all tests pass.
 - [ ] There are no lint or format warnings.
+- [ ] Finally the e2e test is starting the app's production `bun` server which is serving a stub placeholder HTML page, and you are able to drive it with the e2e playwright tests.
 
 ### 4. Deployment Posture
 - [ ] The project includes `.env` file templates.
 - [ ] There is a foundational plan or structure for bare-metal Linux deployment using `systemd` (No Dockerfiles present).
-
-### 5. Documentation Standards
-- [ ] There is a `docs/` directory at the root of the project. And there a no docs outside of this directory except README.md files in each directory.
-- [ ] There are extensive code comments on each of the source code files, including intruduction struct definitions and function definitions.
-- [ ] The project includes `.git/hooks/pre-push` with the documentation standard hook.
 
 
 ---
