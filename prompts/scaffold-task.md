@@ -60,6 +60,12 @@ Before executing the checklist below, **detect the host environment you are curr
 ### 4. Deployment Posture
 - [ ] The project includes `.env` file templates.
 - [ ] There is a foundational plan or structure for bare-metal Linux deployment using `systemd` (No Dockerfiles present).
+### 5. Check your work
+- [ ] **No JS Configs:** Scaffolding tools (Vite/ESLint) generate `.js` or `.mjs` configs. Delete them immediately and write them in pure `.ts`.
+- [ ] **CSS:** You don't need fancy PostCSS or other frameworks for humans, stick to CSS.
+- [ ] **No Emit:** Never let `tsc` dump JavaScript files into the repo. Ensure `"noEmit": true` is set in the `tsconfig.json` for all internal `/packages/*`.
+- [ ] **SPA Routing:** Your Bun server must check if static assets exist (`Bun.file.exists()`) before blindly falling back to returning `index.html`.
+- [ ] **Headless Testing:** Disable Playwright's auto-opening HTML reporter (`reporter: [['html', { open: 'never' }]]`) so it does not freeze your terminal session if a test fails.
 
 
 ---
