@@ -122,75 +122,91 @@ GIT_BRAIN_METADATA:
 
 # Pre-flight
 
+## What blocks vs. what warns
+
+| Stage | Check | Behaviour |
+|---|---|---|
+| pre-commit | Planning docs not staged | **BLOCKS** — the only commit block |
+| pre-commit | Lint / format failures | **Warns** — commit proceeds; agent must include fixes in next-prompt |
+| commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
+| pre-push | Lint / format / type failures | **BLOCKS** — clean code is required to push |
+| pre-push | Test suite failures | **Allows push** — but appends failing tests to next-prompt.md |
+
+---
+
 ### Pre-commit Stage
 
-Pre-commit nags run before a commit is finalized. They are designed to:
+The pre-commit hook has one hard block and one advisory check.
 
-- **Auto-fix issues** where possible (formatting, simple linting)
-- **Not block** the commit on non-critical issues
-- **Run quickly** to not interrupt developer flow
+**BLOCKS — Planning documents not staged:**
 
-**Default pre-commit nags by project type:**
-
-| Project Type | Tool Nags                            |
-| ------------ | ------------------------------------ |
-| Node.js/Bun  | `prettier --write`, `eslint --fix`   |
-
-### Planning Documents Gate (blocking)
-
-Every commit must stage updates to both planning documents. This is a hard block.
+Every commit must stage both planning files. This is the only reason a commit is rejected.
 
 | File | What to update |
 |---|---|
-| `docs/plans/implementation-plan.md` | Check off completed tasks; add or reorder tasks discovered during the work |
-| `docs/plans/next-prompt.md` | Overwrite with the single, self-contained prompt for the next commit to execute |
+| `docs/plans/implementation-plan.md` | Check off completed tasks; add or reorder discovered tasks |
+| `docs/plans/next-prompt.md` | Overwrite with the self-contained prompt for the next commit |
 
-`next-prompt.md` is the state machine cursor. A commit is the unit of work in Calypso. Each commit ends by writing the prompt for the next commit. An agent session spans many commits and can execute them continuously by reading and acting on this file after each commit, without waiting for a human prompt.
+**WARNS — Lint and format:**
 
-Add the following to `.git/hooks/pre-commit`:
+After the planning gate passes, the hook runs lint and format checks and prints any failures as warnings. The commit is **not blocked**. The agent is reminded to include the outstanding fixes in `next-prompt.md` so they are resolved in the next commit.
+
+**`scripts/hooks/pre-commit`:**
 
 ```bash
 #!/usr/bin/env bash
-# Planning documents gate — every commit must update both planning files.
+# pre-commit: Planning documents gate (blocking) + lint/format advisory (non-blocking).
 
 STAGED=$(git diff --cached --name-only)
-ERRORS=()
+PLAN_ERRORS=()
 
 if ! echo "$STAGED" | grep -q "^docs/plans/implementation-plan\.md$"; then
-  ERRORS+=("docs/plans/implementation-plan.md")
+  PLAN_ERRORS+=("docs/plans/implementation-plan.md")
 fi
 
 if ! echo "$STAGED" | grep -q "^docs/plans/next-prompt\.md$"; then
-  ERRORS+=("docs/plans/next-prompt.md")
+  PLAN_ERRORS+=("docs/plans/next-prompt.md")
 fi
 
-if [ ${#ERRORS[@]} -gt 0 ]; then
+if [ ${#PLAN_ERRORS[@]} -gt 0 ]; then
   echo "" >&2
-  echo "COMMIT BLOCKED: The following planning files were not updated:" >&2
-  for f in "${ERRORS[@]}"; do
+  echo "COMMIT BLOCKED: The following planning files were not staged:" >&2
+  for f in "${PLAN_ERRORS[@]}"; do
     echo "  - $f" >&2
   done
   echo "" >&2
   echo "At every commit:" >&2
   echo "  implementation-plan.md — check off completed tasks; add or reorder discovered tasks." >&2
-  echo "  next-prompt.md         — write the complete, self-contained prompt for the next" >&2
-  echo "                           commit to execute. It must be specific enough to act on" >&2
-  echo "                           without human input. A commit is the unit of work;" >&2
-  echo "                           this is how the agent advances from one commit to the next." >&2
+  echo "  next-prompt.md         — overwrite with the complete prompt for the next commit." >&2
+  echo "                           A commit is the unit of work. This is how the agent" >&2
+  echo "                           advances from one task to the next." >&2
   echo "" >&2
   exit 1
 fi
+
+# Lint and format advisory — non-blocking
+LINT_WARNINGS=""
+
+if ! bun run eslint . --max-warnings=0 2>&1; then
+  LINT_WARNINGS="$LINT_WARNINGS\n  - ESLint: failures detected"
+fi
+
+if ! bun run prettier --check . 2>&1; then
+  LINT_WARNINGS="$LINT_WARNINGS\n  - Prettier: formatting issues detected"
+fi
+
+if [ -n "$LINT_WARNINGS" ]; then
+  echo "" >&2
+  echo "LINT/FORMAT WARNINGS (commit allowed — these do not block):" >&2
+  echo -e "$LINT_WARNINGS" >&2
+  echo "" >&2
+  echo "These failures WILL block your next push. Add fixing them to next-prompt.md" >&2
+  echo "so they are resolved in the next commit." >&2
+  echo "" >&2
+fi
+
+exit 0
 ```
-
-**Bootstrapping the hook:** The scaffold step must install this hook automatically so it is active from the first commit:
-
-```bash
-mkdir -p .git/hooks
-cp scripts/hooks/pre-commit .git/hooks/pre-commit
-chmod +x .git/hooks/pre-commit
-```
-
-Store the canonical hook source in `scripts/hooks/pre-commit` so it is version-controlled and re-installable by any agent or developer who clones the repository.
 
 ### Metadata Enforcement Hook (blocking, `commit-msg`)
 
@@ -287,26 +303,91 @@ if (rp.length < 50) {
 }
 ```
 
-**Bootstrapping both hooks** — the scaffold step installs all hooks at once:
+**Bootstrapping all hooks** — the scaffold step installs all hooks at once:
 
 ```bash
 mkdir -p .git/hooks
-for hook in pre-commit commit-msg; do
+for hook in pre-commit commit-msg pre-push; do
   cp scripts/hooks/$hook .git/hooks/$hook
   chmod +x .git/hooks/$hook
 done
 ```
 
+---
+
 ### Pre-push Stage
 
-Pre-push nags run before code is pushed to remote. They are designed to:
+The pre-push hook runs two checks with different consequences.
 
-- **Strictly validate** all code quality standards
-- **Block push** if any check fails
-- **Include slow checks** that aren't appropriate for pre-commit
+**BLOCKS — Lint, format, and type errors:**
 
-**Default pre-push nags by project type:**
+Code with lint, formatting, or TypeScript type errors must not be pushed. These were warned about at commit time; they must be resolved before the push is allowed.
 
-| Project Type | Tool Nags                                          |
-| ------------ | -------------------------------------------------- |
-| Node.js/Bun  | `tsc --noEmit`, `eslint`, `prettier --check`       |
+**ALLOWS but annotates — Test suite failures:**
+
+The full test suite always runs on push. If tests fail, the push is **not blocked** — the code reaches the remote. However, the hook appends the failing test names to `docs/plans/next-prompt.md` in the working tree with a mandatory instruction to address them. The next commit will be required to stage `next-prompt.md` (pre-commit gate), which forces the agent to acknowledge the failures.
+
+Failing tests must be **checked, fixed, or rewritten. They must never be ignored or skipped.**
+
+**`scripts/hooks/pre-push`:**
+
+```bash
+#!/usr/bin/env bash
+# pre-push: Blocks on lint/format/type failures. Runs full test suite;
+#           annotates next-prompt.md on failures but does not block push.
+
+set -euo pipefail
+
+echo "pre-push: checking lint, format, and types..." >&2
+
+QUALITY_FAILED=0
+QUALITY_OUTPUT=""
+
+ESLINT_OUT=$(bun run eslint . --max-warnings=0 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$ESLINT_OUT\n"; }
+PRETTIER_OUT=$(bun run prettier --check . 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$PRETTIER_OUT\n"; }
+TSC_OUT=$(bun run tsc --noEmit 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$TSC_OUT\n"; }
+
+if [ $QUALITY_FAILED -ne 0 ]; then
+  echo "" >&2
+  echo "PUSH BLOCKED: Lint, format, or type errors must be resolved before pushing." >&2
+  echo -e "$QUALITY_OUTPUT" >&2
+  echo "These were warned about at commit time. Fix them, update next-prompt.md, and commit." >&2
+  echo "" >&2
+  exit 1
+fi
+
+echo "pre-push: running full test suite..." >&2
+
+TEST_OUTPUT=$(bun test 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+
+if [ $TEST_EXIT -ne 0 ]; then
+  FAILING=$(echo "$TEST_OUTPUT" | grep -E "^\s*(FAIL|✗|×|●|not ok)" | head -30 || true)
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+\`\`\`
+${FAILING}
+\`\`\`
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+EOF
+
+  echo "" >&2
+  echo "WARNING: ${TEST_EXIT} test failure(s) detected. Push is proceeding, but" >&2
+  echo "docs/plans/next-prompt.md has been updated with the failing tests." >&2
+  echo "They must be resolved — not ignored — in the next commit." >&2
+  echo "" >&2
+fi
+
+exit 0
+```
