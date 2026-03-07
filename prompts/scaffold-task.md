@@ -60,7 +60,9 @@ Before executing the checklist below, **detect the host environment you are curr
 ### 4. Deployment Posture
 - [ ] The project includes `.env` file templates.
 - [ ] There is a foundational plan or structure for bare-metal Linux deployment using `systemd` (No Dockerfiles present).
+- [ ] 
 ### 5. Check your work
+- [ ] **Blueprint Compliance** did you follow all the instructions, and not go off the rails?
 - [ ] **No JS Configs:** Scaffolding tools (Vite/ESLint) generate `.js` or `.mjs` configs. Delete them immediately and write them in pure `.ts`.
 - [ ] **CSS:** You don't need fancy PostCSS or other frameworks for humans, stick to CSS.
 - [ ] **No Emit:** Never let `tsc` dump JavaScript files into the repo. Ensure `"noEmit": true` is set in the `tsconfig.json` for all internal `/packages/*`.
