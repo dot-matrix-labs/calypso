@@ -45,7 +45,7 @@ The agent bootstraps the standards into `docs/standards/`, reads them, runs an o
 
 ---
 
-## The Stack
+## Reference Implementation
 
 | Layer | Choice |
 |---|---|
@@ -58,7 +58,7 @@ The agent bootstraps the standards into `docs/standards/`, reads them, runs an o
 | Auth | Self-hosted JWT (HTTP-only cookies) |
 | Deploy | Bare metal Linux, systemd |
 
-No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
+This is the reference implementation of the Calypso Blueprint. No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
 
 ---
 
