@@ -1,6 +1,6 @@
 # Calypso
 
-A method, git-native tools, and a TypeScript reference implementation for building **supergreen** software:
+Supergreen software is here. We provide a method, tools, and a reference implementation for:
 
 - **Fused AI** — one AI over coherent, owned data
 - **Tree-shaken** — distill the 5% of features you actually use across your SaaS vendors into one seamless app
