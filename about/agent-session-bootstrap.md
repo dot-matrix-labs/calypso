@@ -257,98 +257,44 @@ Create `AGENT.md` once per project:
 @docs/standards/development-standards.md
 @docs/prd.md
 
----
+## Method
 
-## Calypso — Method Summary
-
-- **Commit = unit of work.** Each commit completes one task. An agent session spans many commits.
-- **State machine.** `docs/plans/next-prompt.md` holds the prompt for the next commit. Each commit overwrites it. The agent reads it, acts, commits, then reads it again — advancing without human prompting.
-- **Implementation plan.** `docs/plans/implementation-plan.md` is the full task checklist. Check off completed tasks and add newly discovered ones at every commit.
-- **Plan → Stub → Implement.** For any non-trivial feature: plan first (identify risks, write checklist), stub structure before logic, then implement via TDD. Never jump straight to implementation.
-- **TDD, no exceptions.** Write the failing test first. Red → Green → Refactor. Never open a browser — use headless Playwright only.
-- **No mocks, ever.** Test against real services. Record golden fixtures from real production responses. Never fabricate fixture data.
-- **Stack is fixed.** TypeScript + Bun + React + Tailwind. No other languages. No npm — use `bun` for everything.
-- **Hyper-minimal dependencies.** Default to DIY. Only add a package if the functionality is genuinely infeasible to build internally in reasonable effort.
-- **Bare metal Linux.** No Docker. Apps run natively under systemd. Dev port is 31415.
-- **Every commit carries a retroactive prompt** in `GIT_BRAIN_METADATA`. Write the instruction you *would have given* to produce this diff cleanly — not a summary of what changed.
-- **Small commits, small PRs.** Commit one logical change at a time. A PR over ~30 files is a review burden — split it.
-
----
+- **Commit = one task.** Session spans many commits (~10 files max). Push small PRs (~30 files max vs main).
+- **State machine:** read `next-prompt.md` → act → commit → overwrite it → repeat without human input.
+- **Every commit:** stage `implementation-plan.md` (check off done, add discovered) + `next-prompt.md` (next task). Hook enforces this.
+- **Workflow:** Plan → Stub → TDD. Write the failing test first. Never implement before the skeleton exists.
+- **Tests:** headless Playwright, real services, recorded golden fixtures. No mocks. No `.skip()`.
+- **Stack:** TypeScript + Bun + React + Tailwind only. No other languages. Use `bun`/`bunx` — never npm/npx.
+- **Dependencies:** DIY first. Add a package only if genuinely infeasible to build in ~50 lines.
+- **Infra:** bare metal Linux, systemd, port 31415. No Docker. Self-hosted JWT via `crypto.subtle`.
+- **GIT_BRAIN_METADATA:** `retroactive_prompt` = the instruction that reproduces this diff — not a summary of it.
 
 ## Philosophy
 
-**Calypso subscribes to:**
+Follows: TDD · YAGNI · UNIX philosophy · Choose Boring Technology · Worse is Better · Locality of Behaviour · Risk-First · 12-Factor
 
-- **TDD** (Beck / XP) — tests define correctness; implementation satisfies them
-- **YAGNI** (XP) — build only what is needed now; the future is unknowable
-- **UNIX Philosophy** — small tools that do one thing well, composed simply
-- **Choose Boring Technology** (McKinley) — proven and dull beats novel and exciting; novelty has a cost budget
-- **Worse is Better** (Gabriel) — simplicity of implementation is the primary virtue
-- **Locality of Behaviour** (Gross) — behaviour should be visible at the call site, not hidden in distant abstractions
-- **Risk-First** — tackle the biggest unknowns earliest; the scariest task goes first on the checklist
-- **12-Factor App** — config in environment, stateless processes, explicit dependencies
-
-**Calypso explicitly does NOT subscribe to:**
-
-- **Microservices by default** — monolith until you have a demonstrated, specific reason to decompose
-- **Resume-Driven Development** — do not add technology because it is impressive or trending
-- **DRY at all costs** — duplication is cheaper than the wrong abstraction; abstract only when you have three concrete cases
-- **GitFlow** — too complex; feature branches off main, small PRs, delete on merge
-- **Big Design Up Front** — plan enough to start, then iterate; do not design systems you have not yet built
-- **Abstraction-first** — write the concrete thing first; extract the abstraction when the pattern is proven
-- **Framework layering** — the stack is prescribed; do not add frameworks on top of frameworks
-
----
+Rejects: microservices by default · resume-driven development · DRY at all costs · GitFlow · Big Design Up Front · abstraction-first · framework layering
 
 ## Task Start
 
-Read before every task:
+IMPORTANT: Read then execute — do not wait for human input.
 
-- @docs/plans/implementation-plan.md
-- @docs/plans/next-prompt.md
+@docs/plans/implementation-plan.md
+@docs/plans/next-prompt.md
 
-IMPORTANT: Execute `docs/plans/next-prompt.md` immediately. Do not wait for human input.
-After each commit, re-read `docs/plans/next-prompt.md` and begin the next task.
+After each commit, re-read `next-prompt.md` and begin the next task.
+Standards missing? `curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash`
 
-If standards files are missing, run:
-  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+## Do Not
 
----
-
-## Standards Reference
-
-| Topic | Document |
-|---|---|
-| Architecture, stack, process, testing | `docs/standards/calypso-blueprint.md` |
-| Git commits, hooks, metadata schema | `docs/standards/git-standards.md` |
-| Documentation structure (fractal README) | `docs/standards/documentation-standard.md` |
-| New feature development (Plan→Stub→TDD) | `docs/standards/development-standards.md` |
-| Product requirements | `docs/prd.md` |
-| Task checklist | `docs/plans/implementation-plan.md` |
-| Next task prompt | `docs/plans/next-prompt.md` |
-
----
-
-## Antipatterns — Calypso Explicitly Forbids These
-
-- **Writing any language other than TypeScript.** No Python, Go, Rust, Ruby, or shell scripts beyond simple git hooks. All logic — server, client, scripts, tooling — is TypeScript running on Bun.
-- **Using npm or npx.** Use `bun`, `bunx`, and `bun add` exclusively. Never `npm install`, `npm run`, or `npx`. npm creates a conflicting lockfile and install tree.
-- **Mocking in tests.** Never mock APIs, databases, the DOM, or external services. No `jest.mock`, `sinon.stub`, or `vi.mock` on external dependencies. Test against the real thing.
-- **Fabricating test fixtures.** Never invent or estimate fixture data. Golden fixtures must be recorded from real production requests. If you do not have one, write the recording tool first.
-- **Skipping or disabling failing tests.** Never add `.skip()`, `.todo()`, `xit()`, or comments that disable a test. Failing tests must be fixed or rewritten — never silenced.
-- **Installing a package for something buildable.** Do not `bun add` a library for functionality achievable in under ~50 lines of TypeScript. Build it.
-- **Using Docker.** Do not containerise anything. Deploy natively. Use systemd to keep processes alive.
-- **Using an ORM.** Do not add Prisma, TypeORM, Drizzle, or any query builder. Write SQL directly.
-- **Using external auth providers.** No Auth0, Clerk, or Supabase Auth. Implement JWT in-house using Bun's native `crypto.subtle`.
-- **Using GraphQL or WebSockets** unless the PRD explicitly requires them. Default to REST.
-- **Testing in a headed browser.** All browser tests run in headless Chromium via Playwright. Use the dev server on port 31415 — not localhost with an arbitrary port.
-- **Working on Mac or Windows.** All development, testing, and deployment runs on bare-metal Linux. Local machines are for initial scaffold only.
-- **Committing without updating planning docs.** The pre-commit hook will block you. Both `implementation-plan.md` and `next-prompt.md` must be staged with every commit.
-- **Adding heavy state management.** No Redux, Zustand, Jotai, or MobX. Use React hooks and minimal context.
-- **Jumping straight to implementation.** For anything non-trivial: plan first, stub structure, then implement with TDD. Never write logic before the skeleton exists.
-- **Writing a retroactive prompt that describes the diff.** `retroactive_prompt` must be an actionable instruction to reproduce the change — not a summary of what was done.
-- **Batching too much into one commit.** One logical change per commit. More than ~10 files staged (excluding planning docs) is a signal to split.
-- **Accumulating a large PR.** More than ~30 files changed vs. main will block the push. Break large features into sequential, merged PRs.
+- Use any language other than TypeScript, or npm/npx instead of bun.
+- Mock, stub, or fabricate fixtures. Silence or skip failing tests.
+- Use an ORM, Docker, external auth (Auth0/Clerk), GraphQL/WebSockets (unless PRD requires), or heavy state libs (Redux/Zustand).
+- Add a package for functionality buildable in ~50 lines.
+- Develop or test on Mac/Windows. Run headed browser tests.
+- Commit without staging both planning docs. Batch >~10 files into one commit. Push a PR >~30 files.
+- Write logic before planning and stubbing. Over-abstract before three concrete cases exist.
+- Put anything other than a reproduction instruction in `retroactive_prompt`.
 ```
 
 ## Deploy Script: `scripts/install-agent-config.sh`
