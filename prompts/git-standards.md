@@ -130,6 +130,7 @@ GIT_BRAIN_METADATA:
 | pre-commit | Commit touches > 10 files (excl. planning docs) | **Warns** — appended to next-prompt.md |
 | pre-commit | Lint / format | Auto-fixes applied; unfixable remainder **appended to next-prompt.md** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
+| post-commit | Branch has ≥ 10 files changed vs. main | **Warns** — PR due; appended to next-prompt.md |
 | pre-push | PR changes > 30 files vs. main | **BLOCKS** — split the PR |
 | pre-push | Lint / format / type failures | **BLOCKS** |
 | pre-push | Test suite failures | **Allows push** — appends failing tests to next-prompt.md |
@@ -343,11 +344,62 @@ if (rp.length < 50) {
 }
 ```
 
+### PR Readiness Hook (advisory, `post-commit`)
+
+The `post-commit` hook runs after every successful commit. It counts the total files changed on the current branch vs. `main`. When that count reaches 10, the branch is due for a PR — the hook prints a console warning and appends an instruction to `docs/plans/next-prompt.md` so the agent carries it into the next task.
+
+This is distinct from the per-commit size advisory (which counts staged files) and the pre-push hard block (which fires at 30). The post-commit warning is the early signal: you have accumulated enough change to form a coherent, reviewable PR — open one before the branch grows further.
+
+**`scripts/hooks/post-commit`:**
+
+```bash
+#!/usr/bin/env bash
+# post-commit: Warns when the branch has accumulated >= 10 file changes vs. main.
+
+PR_REMINDER_THRESHOLD=10
+
+MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null \
+  || git merge-base HEAD main 2>/dev/null \
+  || echo "")
+
+[ -z "$MERGE_BASE" ] && exit 0
+
+BRANCH_FILE_COUNT=$(git diff --name-only "$MERGE_BASE" HEAD | wc -l | tr -d ' ')
+
+if [ "$BRANCH_FILE_COUNT" -ge "$PR_REMINDER_THRESHOLD" ]; then
+  echo "" >&2
+  echo "┌─────────────────────────────────────────────────────┐" >&2
+  echo "│  PR DUE: ${BRANCH_FILE_COUNT} files changed on this branch vs. main.   │" >&2
+  echo "│  Open a pull request before this branch grows further.│" >&2
+  echo "└─────────────────────────────────────────────────────┘" >&2
+  echo "" >&2
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## PR Due — Open Before Continuing
+
+This branch has changed ${BRANCH_FILE_COUNT} files since main. A pull request must be opened
+imminently. Do this before starting the next feature task:
+
+1. Ensure all tests pass and lint is clean.
+2. Push the branch: \`git push\`
+3. Open a PR: \`gh pr create\`
+4. After merge, pull main and continue on a fresh or rebased branch.
+
+Do not accumulate further unreviewed changes on this branch.
+EOF
+fi
+
+exit 0
+```
+
 **Bootstrapping all hooks** — the scaffold step installs all hooks at once:
 
 ```bash
 mkdir -p .git/hooks
-for hook in pre-commit commit-msg pre-push; do
+for hook in pre-commit commit-msg post-commit pre-push; do
   cp scripts/hooks/$hook .git/hooks/$hook
   chmod +x .git/hooks/$hook
 done
