@@ -81,7 +81,7 @@ Before making a giant leap, we start with familiar tooling. The supergreen princ
 | Testing | Vitest (unit) + Playwright (headless E2E) |
 | CI/CD | GitHub Actions |
 | Database | SQLite → PostgreSQL |
-| Auth | Self-hosted JWT (HTTP-only cookies) |
+| Auth | Passkey-first, self-hosted JWT (HTTP-only cookies), customer-side encryption before data is committed |
 | Deploy | Bare metal Linux, systemd |
 
 No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
