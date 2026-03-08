@@ -61,7 +61,7 @@ Calypso is opinionated. Several choices are counter-intuitive coming from a huma
 
 **UX** — Beauty is a gate condition, not a preference. An ugly early version sets an anchor that is nearly impossible to reverse. The AI agent is a first-class user of every application it builds: it interacts through typed APIs, not through browser automation or interfaces designed for human perception. Admin is also a first-class user — never through raw database tooling or developer consoles.
 
-**Security** — The threat model is not "prevent breaches." It is "make a breach useless." Greenfield applications have no brownfield trade-offs to honor, so there is no excuse for anything less than banking-grade authorization, HIPAA-grade privacy, and adversarial hardening from day one.
+**Security** — The threat model is not "prevent breaches." It is "make a breach useless." Greenfield applications have no brownfield trade-offs to honor, so there is no excuse for anything less than banking-grade authorization, HIPAA-grade privacy, and adversarial hardening from day one. Novel cryptographic architectures — homomorphic encryption, zero-knowledge proofs, encrypted computation — open an opportunity that legacy systems can never reach: deeply analytical applications that operate over sensitive data without ever exposing it in plaintext. High analytical power and high customer confidence in privacy are not in tension. In a supergreen system, they are the same design.
 
 **Deployment** — Bare metal Linux, systemd, no Docker. Docker solves environment consistency for human teams working across machines. Agents run on a known Linux host; the abstraction layer adds complexity with no benefit.
 
