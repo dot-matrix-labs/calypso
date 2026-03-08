@@ -62,16 +62,6 @@ No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
 
 ---
 
-## Delivery Models
-
-**Community (free, open-source)** — Run it yourself. All blueprints, prompts, and scripts are in this repository.
-
-**Hosted** — We operate the infrastructure and agent compute. Pass-through billing only: you pay actual cloud and model API costs, zero markup.
-
-**Enterprise** — Embedded engagements for organizations replacing mission-critical legacy platforms.
-
----
-
 ## Documentation
 
 - [Calypso Blueprint](prompts/calypso-blueprint.md) — full architecture and process standard
