@@ -69,9 +69,9 @@ Calypso is opinionated. Several choices are counter-intuitive coming from a huma
 
 ## Reference Implementation
 
-Before making a giant leap, we start with familiar tooling. The supergreen principles can be applied today with the stack you already know.
+### Calypso TS
 
-**Calypso TS** — TypeScript reference implementation:
+Calypso TS exists for your current engineering team. Familiar tooling, no hype, best practices applied with discipline. The supergreen principles do not require a new language — they require a new approach.
 
 | Layer | Choice |
 |---|---|
@@ -86,9 +86,13 @@ Before making a giant leap, we start with familiar tooling. The supergreen princ
 
 No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
 
-**Calypso RS** — the next level: a minimalist Rust stack end-to-end, with a fully WASM client for state management and DOM rendering. No React.
+### What Comes Next
 
-**[Alien Stack](https://github.com/dot-matrix-labs/alien-stack)** — our research lab paper on the future of software process. Someday.
+Once you go post-human, the stack goes lower. The constraints that TypeScript and its runtime impose exist for human reasons — readability, ecosystem familiarity, fast iteration by engineers. An agent operating continuously does not need those affordances. The stack can descend toward the metal.
+
+**Calypso RS** — a minimalist Rust stack end-to-end, with a fully WASM client for state management and DOM rendering. No React.
+
+**[Alien Stack](https://github.com/dot-matrix-labs/alien-stack)** — our research lab paper on the future of software process. One day, maybe LLVM.
 
 ---
 
