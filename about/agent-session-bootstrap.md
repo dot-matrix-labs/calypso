@@ -259,7 +259,7 @@ Create `AGENT.md` once per project:
 
 ## Method
 
-- **Commit = one task.** Session spans many commits (~10 files max). Push small PRs (~30 files max vs main).
+- **Commit = one task.** Session spans many commits (~10 files max). Push small PRs (~20 files max vs main).
 - **State machine:** read `next-prompt.md` → act → commit → overwrite it → repeat without human input.
 - **Every commit:** stage `implementation-plan.md` (check off done, add discovered) + `next-prompt.md` (next task). Hook enforces this.
 - **Workflow:** Plan → Stub → TDD. Write the failing test first. Never implement before the skeleton exists.
@@ -292,7 +292,7 @@ Standards missing? `curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/
 - Use an ORM, Docker, external auth (Auth0/Clerk), GraphQL/WebSockets (unless PRD requires), or heavy state libs (Redux/Zustand).
 - Add a package for functionality buildable in ~50 lines.
 - Develop or test on Mac/Windows. Run headed browser tests.
-- Commit without staging both planning docs. Batch >~10 files into one commit. Push a PR >~30 files.
+- Commit without staging both planning docs. Batch >~10 files into one commit. Push a PR >~20 files.
 - Write logic before planning and stubbing. Over-abstract before three concrete cases exist.
 - Put anything other than a reproduction instruction in `retroactive_prompt`.
 ```

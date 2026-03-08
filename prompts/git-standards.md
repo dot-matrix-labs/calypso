@@ -131,7 +131,7 @@ GIT_BRAIN_METADATA:
 | pre-commit | Lint / format | Auto-fixes applied; unfixable remainder **appended to next-prompt.md** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
 | post-commit | Branch has ≥ 10 files changed vs. main | **Warns** — PR due; appended to next-prompt.md |
-| pre-push | PR changes > 30 files vs. main | **BLOCKS** — split the PR |
+| pre-push | PR changes > 20 files vs. main | **BLOCKS** — split the PR |
 | pre-push | Lint / format / type failures | **BLOCKS** |
 | pre-push | Test suite failures | **Allows push** — appends failing tests to next-prompt.md |
 
@@ -348,7 +348,7 @@ if (rp.length < 50) {
 
 The `post-commit` hook runs after every successful commit. It counts the total files changed on the current branch vs. `main`. When that count reaches 10, the branch is due for a PR — the hook prints a console warning and appends an instruction to `docs/plans/next-prompt.md` so the agent carries it into the next task.
 
-This is distinct from the per-commit size advisory (which counts staged files) and the pre-push hard block (which fires at 30). The post-commit warning is the early signal: you have accumulated enough change to form a coherent, reviewable PR — open one before the branch grows further.
+This is distinct from the per-commit size advisory (which counts staged files) and the pre-push hard block (which fires at 20). The post-commit warning is the early signal: you have accumulated enough change to form a coherent, reviewable PR — open one before the branch grows further.
 
 **`scripts/hooks/post-commit`:**
 
@@ -449,7 +449,7 @@ if [ $QUALITY_FAILED -ne 0 ]; then
 fi
 
 # PR size gate — block if too many files changed vs. main
-PR_FILE_LIMIT=30
+PR_FILE_LIMIT=20
 MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || echo "")
 
 if [ -n "$MERGE_BASE" ]; then
