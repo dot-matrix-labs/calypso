@@ -45,6 +45,8 @@ Calypso is three things:
 
 ## Reference Implementation
 
+The quickstart uses **Calypso TS** — the TypeScript reference implementation:
+
 | Layer | Choice |
 |---|---|
 | Language | TypeScript only |
@@ -57,6 +59,8 @@ Calypso is three things:
 | Deploy | Bare metal Linux, systemd |
 
 No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
+
+A second reference implementation, **Calypso RS**, is in development: a minimalist Rust stack end-to-end, with a fully WASM client for both state management and DOM rendering. No React.
 
 ---
 
