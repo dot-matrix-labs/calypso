@@ -126,16 +126,64 @@ GIT_BRAIN_METADATA:
 
 | Stage | Check | Behaviour |
 |---|---|---|
+| prepare-commit-msg | — | Injects conformance checklist into every new commit message |
 | pre-commit | Planning docs not staged | **BLOCKS** |
 | pre-commit | Commit touches > 10 files (excl. planning docs) | **Warns** — appended to next-prompt.md |
 | pre-commit | Lint / format | Auto-fixes applied; unfixable remainder **appended to next-prompt.md** |
+| commit-msg | Conformance checklist has unchecked boxes | **BLOCKS** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
 | post-commit | Branch has ≥ 10 files changed vs. main | **Warns** — PR due; appended to next-prompt.md |
+| post-checkout | Branch switch | Refreshes `docs/standards/` via bootstrap script |
+| pre-push | Blueprint violations (.js files, forbidden packages) | **BLOCKS** |
 | pre-push | PR changes > 20 files vs. main | **BLOCKS** — split the PR |
 | pre-push | Lint / format / type failures | **BLOCKS** |
 | pre-push | Test suite failures | **Allows push** — appends failing tests to next-prompt.md |
 
 ---
+
+### Conformance Checklist Injection (`prepare-commit-msg`)
+
+The `prepare-commit-msg` hook fires before the agent writes the commit message. It appends a conformance checklist as an HTML comment — invisible in `git log` but present in the message buffer the agent edits. The agent must check every applicable box. The `commit-msg` hook then validates that no box is left unchecked, blocking the commit if any remain.
+
+This is a deterministic self-audit: the agent cannot commit without explicitly confirming alignment with Calypso's core rules on every single commit.
+
+**`scripts/hooks/prepare-commit-msg`:**
+
+```bash
+#!/usr/bin/env bash
+# prepare-commit-msg: Injects Calypso conformance checklist into every new commit message.
+
+COMMIT_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Only inject on fresh commits — skip merges, squashes, amends, fixups
+case "$COMMIT_SOURCE" in
+  merge|squash|commit|fixup) exit 0 ;;
+esac
+
+grep -q "CALYPSO_CHECKLIST" "$COMMIT_FILE" && exit 0
+
+cat >> "$COMMIT_FILE" <<'EOF'
+
+<!--
+CALYPSO_CHECKLIST:
+Check every applicable box. The commit-msg hook blocks if any box remains unchecked.
+
+- [ ] TypeScript only — no .js or .mjs logic files added or modified
+- [ ] Bun only — no npm, npx, or yarn calls introduced anywhere
+- [ ] No mocks — no jest.mock, sinon, vi.mock, or msw on external dependencies
+- [ ] No forbidden libs — no ORM, Docker config, external auth provider, Redux/Zustand added
+- [ ] No skipped tests — no .skip(), .todo(), xit(), or commented-out test cases
+- [ ] implementation-plan.md — completed tasks checked off; new discoveries added
+- [ ] next-prompt.md — overwritten with the complete, self-contained prompt for the next commit
+- [ ] retroactive_prompt — written as a specific reproduction instruction, not a diff summary
+-->
+EOF
+```
+
+**Hard vs. soft split:** The `pre-commit` hook scans the staged diff deterministically for all automatable violations (JS files, npm/npx usage, mocks, skipped tests, forbidden packages). These fire before the message is written and require no agent input. The checklist injected by `prepare-commit-msg` covers only the three things the agent must self-verify: planning doc quality and metadata intent. This keeps the checklist minimal and meaningful — every item on it genuinely requires human or agent judgement.
+
+The checklist lives inside an HTML comment so it does not appear in `git log --oneline` or PR diffs, but is fully visible to the agent writing the message.
 
 ### Pre-commit Stage
 
@@ -249,9 +297,9 @@ fi
 exit 0
 ```
 
-### Metadata Enforcement Hook (blocking, `commit-msg`)
+### Metadata and Checklist Enforcement Hook (blocking, `commit-msg`)
 
-The `commit-msg` hook fires after the commit message is written and validates that `GIT_BRAIN_METADATA` is present and schema-valid. The commit is rejected if the block is missing, the JSON is malformed, or any required field is absent or empty.
+The `commit-msg` hook fires after the commit message is written and runs two validations in sequence: first the conformance checklist (any unchecked box blocks), then the `GIT_BRAIN_METADATA` schema (missing block, malformed JSON, or empty required fields block).
 
 This hook runs at a different stage than `pre-commit` — it receives the commit message file as its first argument and inspects its content.
 
@@ -399,7 +447,7 @@ exit 0
 
 ```bash
 mkdir -p .git/hooks
-for hook in pre-commit commit-msg post-commit pre-push; do
+for hook in prepare-commit-msg pre-commit commit-msg post-commit post-checkout pre-push; do
   cp scripts/hooks/$hook .git/hooks/$hook
   chmod +x .git/hooks/$hook
 done
@@ -407,9 +455,39 @@ done
 
 ---
 
+### Standards Refresh Hook (`post-checkout`)
+
+The `post-checkout` hook fires after every branch switch. It runs `bootstrap-standards.sh` to ensure `docs/standards/` is current with the latest Calypso templates. This prevents an agent resuming work on a stale branch from operating with outdated conventions.
+
+**`scripts/hooks/post-checkout`:**
+
+```bash
+#!/usr/bin/env bash
+# post-checkout: Refreshes Calypso standards after switching branches.
+
+PREV_HEAD="$1"; NEW_HEAD="$2"; BRANCH_CHECKOUT="$3"
+
+[ "$BRANCH_CHECKOUT" != "1" ] && exit 0
+[ "$PREV_HEAD" = "$NEW_HEAD" ] && exit 0
+
+echo "post-checkout: refreshing Calypso standards..." >&2
+
+if [ -f "./scripts/bootstrap-standards.sh" ]; then
+  bash ./scripts/bootstrap-standards.sh
+else
+  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+fi
+```
+
+---
+
 ### Pre-push Stage
 
-The pre-push hook runs two checks with different consequences.
+The pre-push hook runs four checks in order.
+
+**BLOCKS — Blueprint violations (architecture audit):**
+
+Before any quality checks, the hook scans the repository for hard architectural violations: JavaScript files in `apps/` or `packages/`, forbidden packages in `package.json`, and a missing `docs/standards/` directory. These are the antipatterns from `AGENT.md` enforced deterministically at push time — catching anything that slipped past the `pre-commit` staged-diff scan across the full working tree.
 
 **BLOCKS — Lint, format, and type errors:**
 

@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+# commit-msg: Validates CALYPSO_CHECKLIST completion and GIT_BRAIN_METADATA schema.
+
+COMMIT_FILE="$1"
+MSG=$(cat "$COMMIT_FILE")
+
+# ── 1. Conformance Checklist ────────────────────────────────────────────────
+
+if echo "$MSG" | grep -q "CALYPSO_CHECKLIST:"; then
+  UNCHECKED=$(echo "$MSG" | grep -E "^\- \[ \]" || true)
+  if [ -n "$UNCHECKED" ]; then
+    echo "" >&2
+    echo "COMMIT BLOCKED: Conformance checklist has unchecked items:" >&2
+    echo "$UNCHECKED" >&2
+    echo "" >&2
+    echo "Check every applicable box in the CALYPSO_CHECKLIST before committing." >&2
+    echo "" >&2
+    exit 1
+  fi
+fi
+
+# ── 2. GIT_BRAIN_METADATA presence ─────────────────────────────────────────
+
+if ! echo "$MSG" | grep -q "GIT_BRAIN_METADATA:"; then
+  cat >&2 <<'BLOCK'
+
+COMMIT BLOCKED: GIT_BRAIN_METADATA block is missing from the commit message.
+
+Every agent commit must end with a metadata block. The key field is
+retroactive_prompt — not the instruction you were given, but the instruction
+you would write now, with full knowledge of what this change required, so that
+another agent could reproduce it without asking questions.
+
+Required format (append to the end of your commit message):
+
+<!--
+GIT_BRAIN_METADATA:
+{
+  "retroactive_prompt": "Specific, self-contained instruction to reproduce this change.",
+  "outcome": "Observable, verifiable result of this commit.",
+  "context": "Architectural or domain context not visible from the diff.",
+  "agent": "model-name",
+  "session": "session-id",
+  "hints": ["ordered", "implementation", "notes"]
+}
+-->
+
+BLOCK
+  exit 1
+fi
+
+# ── 3. GIT_BRAIN_METADATA schema ────────────────────────────────────────────
+
+JSON=$(echo "$MSG" | awk '/GIT_BRAIN_METADATA:/{found=1; next} found && /-->/{exit} found{print}')
+
+echo "$JSON" | bun run scripts/hooks/validate-commit-metadata.mjs >&2
+if [ $? -ne 0 ]; then
+  exit 1
+fi

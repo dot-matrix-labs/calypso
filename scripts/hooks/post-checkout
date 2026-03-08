@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# post-checkout: Refreshes Calypso standards whenever the agent switches branches.
+# Ensures docs/standards/ is always current with the latest templates.
+
+PREV_HEAD="$1"
+NEW_HEAD="$2"
+BRANCH_CHECKOUT="$3"
+
+# Only run on branch switches, not individual file checkouts
+[ "$BRANCH_CHECKOUT" != "1" ] && exit 0
+
+# Skip if HEAD didn't actually change (e.g. checkout of current branch)
+[ "$PREV_HEAD" = "$NEW_HEAD" ] && exit 0
+
+echo "post-checkout: refreshing Calypso standards..." >&2
+
+if [ -f "./scripts/bootstrap-standards.sh" ]; then
+  bash ./scripts/bootstrap-standards.sh
+else
+  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+fi

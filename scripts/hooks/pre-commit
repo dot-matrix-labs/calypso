@@ -1,0 +1,126 @@
+#!/usr/bin/env bash
+# pre-commit: Hard violation scans (blocks) + planning gate (blocks) +
+#             commit size advisory + lint/format auto-fix.
+
+STAGED=$(git diff --cached --name-only)
+STAGED_DIFF=$(git diff --cached)
+
+# ── 1. Hard violation scans ─────────────────────────────────────────────────
+# These are deterministic checks on the staged diff — no agent assertion needed.
+
+VIOLATIONS=()
+
+# TypeScript only — no .js/.mjs logic files staged
+JS_STAGED=$(echo "$STAGED" | grep -E '\.(js|mjs)$' | grep -v '\.config\.' || true)
+[ -n "$JS_STAGED" ] && VIOLATIONS+=("JavaScript files staged (TypeScript only):\n${JS_STAGED}")
+
+# Bun only — no npm/npx/yarn introduced in staged changes
+NPM_USAGE=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" \
+  | grep -E "(npm (install|run|exec|ci)|npx |yarn (add|run|install|exec))" || true)
+[ -n "$NPM_USAGE" ] && VIOLATIONS+=("npm/npx/yarn usage detected (use bun/bunx):\n${NPM_USAGE}")
+
+# No mocks — no mocking libraries introduced in staged changes
+MOCK_USAGE=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" \
+  | grep -E "(jest\.mock\(|sinon\.|vi\.mock\(|msw)" || true)
+[ -n "$MOCK_USAGE" ] && VIOLATIONS+=("Mock usage detected (no mocking allowed):\n${MOCK_USAGE}")
+
+# No skipped tests — no .skip/.todo/xit introduced
+SKIPPED=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" \
+  | grep -E "\.(skip|todo)\(|^xit\(|^xdescribe\(" || true)
+[ -n "$SKIPPED" ] && VIOLATIONS+=("Skipped/disabled tests detected:\n${SKIPPED}")
+
+# No forbidden packages added to package.json
+FORBIDDEN="\"redux\"|\"zustand\"|\"mobx\"|\"prisma\"|\"typeorm\"|\"drizzle-orm\"|\"@auth0/\"|\"@clerk/\"|\"mongoose\""
+PKG_ADDITIONS=$(echo "$STAGED_DIFF" | grep "^+" | grep -v "^+++" \
+  | grep -E "$FORBIDDEN" || true)
+[ -n "$PKG_ADDITIONS" ] && VIOLATIONS+=("Forbidden package added to package.json:\n${PKG_ADDITIONS}")
+
+if [ ${#VIOLATIONS[@]} -gt 0 ]; then
+  echo "" >&2
+  echo "COMMIT BLOCKED: Hard violations detected in staged changes:" >&2
+  for v in "${VIOLATIONS[@]}"; do
+    echo -e "\n  ✗ $v" >&2
+  done
+  echo "" >&2
+  exit 1
+fi
+
+# ── 2. Planning documents gate ──────────────────────────────────────────────
+
+PLAN_ERRORS=()
+
+if ! echo "$STAGED" | grep -q "^docs/plans/implementation-plan\.md$"; then
+  PLAN_ERRORS+=("docs/plans/implementation-plan.md")
+fi
+
+if ! echo "$STAGED" | grep -q "^docs/plans/next-prompt\.md$"; then
+  PLAN_ERRORS+=("docs/plans/next-prompt.md")
+fi
+
+if [ ${#PLAN_ERRORS[@]} -gt 0 ]; then
+  echo "" >&2
+  echo "COMMIT BLOCKED: The following planning files were not staged:" >&2
+  for f in "${PLAN_ERRORS[@]}"; do
+    echo "  - $f" >&2
+  done
+  echo "" >&2
+  echo "At every commit:" >&2
+  echo "  implementation-plan.md — check off completed tasks; add or reorder discovered tasks." >&2
+  echo "  next-prompt.md         — overwrite with the complete prompt for the next commit." >&2
+  echo "" >&2
+  exit 1
+fi
+
+# ── 3. Commit size advisory ─────────────────────────────────────────────────
+
+PLANNING_DOCS="docs/plans/implementation-plan.md
+docs/plans/next-prompt.md"
+STAGED_COUNT=$(echo "$STAGED" | grep -v "^$" | grep -vF "$PLANNING_DOCS" | wc -l | tr -d ' ')
+COMMIT_FILE_LIMIT=10
+
+if [ "$STAGED_COUNT" -gt "$COMMIT_FILE_LIMIT" ]; then
+  echo "" >&2
+  echo "COMMIT SIZE WARNING: This commit touches ${STAGED_COUNT} files (limit: ${COMMIT_FILE_LIMIT})." >&2
+  echo "Consider splitting this into smaller, more focused commits." >&2
+  echo "" >&2
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## Commit Size Warning
+
+The previous commit touched ${STAGED_COUNT} files (limit: ${COMMIT_FILE_LIMIT}).
+Commits should be small and focused. If the next task touches many files, split it.
+EOF
+fi
+
+# ── 4. Lint/format auto-fix + flag unfixable ────────────────────────────────
+
+bun run eslint . --fix 2>&1 || true
+bun run prettier --write . 2>&1 || true
+
+UNFIXED_ESLINT=$(bun run eslint . --max-warnings=0 2>&1) && ESLINT_CLEAN=1 || ESLINT_CLEAN=0
+UNFIXED_PRETTIER=$(bun run prettier --check . 2>&1) && PRETTIER_CLEAN=1 || PRETTIER_CLEAN=0
+
+if [ $ESLINT_CLEAN -eq 0 ] || [ $PRETTIER_CLEAN -eq 0 ]; then
+  echo "" >&2
+  echo "LINT/FORMAT: auto-fix applied. The following could not be fixed automatically:" >&2
+  [ $ESLINT_CLEAN -eq 0 ] && echo "$UNFIXED_ESLINT" >&2
+  [ $PRETTIER_CLEAN -eq 0 ] && echo "$UNFIXED_PRETTIER" >&2
+  echo "" >&2
+  echo "Commit allowed. These issues WILL block your next push." >&2
+  echo "They have been appended to next-prompt.md." >&2
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## Unfixed Lint/Format Issues — Must resolve before next push
+
+$([ $ESLINT_CLEAN -eq 0 ] && echo "### ESLint\n\`\`\`\n${UNFIXED_ESLINT}\n\`\`\`")
+$([ $PRETTIER_CLEAN -eq 0 ] && echo "### Prettier\n\`\`\`\n${UNFIXED_PRETTIER}\n\`\`\`")
+EOF
+fi
+
+exit 0

@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# pre-push: Blueprint audit (blocks) + lint/format/type (blocks) + test suite (annotates).
+
+set -euo pipefail
+
+# ── 1. Blueprint audit — architectural violations ───────────────────────────
+
+echo "pre-push: running blueprint audit..." >&2
+
+VIOLATIONS=()
+
+# TypeScript only — no .js/.mjs logic files in apps/ or packages/
+JS_FILES=$(find apps packages -type f \( -name "*.js" -o -name "*.mjs" \) \
+  ! -path "*/node_modules/*" ! -path "*/dist/*" ! -name "*.config.*" 2>/dev/null || true)
+[ -n "$JS_FILES" ] && VIOLATIONS+=("JavaScript files found (TypeScript only):\n${JS_FILES}")
+
+# Forbidden packages
+FORBIDDEN="redux|zustand|mobx|prisma|typeorm|drizzle-orm|@auth0/|@clerk/|mongoose|docker"
+PKG_HITS=$(find . -name "package.json" ! -path "*/node_modules/*" \
+  -exec grep -lE "$FORBIDDEN" {} \; 2>/dev/null || true)
+[ -n "$PKG_HITS" ] && VIOLATIONS+=("Forbidden packages detected in:\n${PKG_HITS}")
+
+# docs/standards/ must exist
+[ ! -d "docs/standards" ] && VIOLATIONS+=("docs/standards/ is missing — run bootstrap-standards.sh")
+
+if [ ${#VIOLATIONS[@]} -gt 0 ]; then
+  echo "" >&2
+  echo "PUSH BLOCKED: Blueprint violations detected:" >&2
+  for v in "${VIOLATIONS[@]}"; do
+    echo -e "\n  ✗ $v" >&2
+  done
+  echo "" >&2
+  exit 1
+fi
+
+# ── 2. PR size gate ─────────────────────────────────────────────────────────
+
+PR_FILE_LIMIT=20
+MERGE_BASE=$(git merge-base HEAD origin/main 2>/dev/null \
+  || git merge-base HEAD main 2>/dev/null || echo "")
+
+if [ -n "$MERGE_BASE" ]; then
+  PR_FILE_COUNT=$(git diff --name-only "$MERGE_BASE"...HEAD | wc -l | tr -d ' ')
+  if [ "$PR_FILE_COUNT" -gt "$PR_FILE_LIMIT" ]; then
+    echo "" >&2
+    echo "PUSH BLOCKED: This PR changes ${PR_FILE_COUNT} files (limit: ${PR_FILE_LIMIT})." >&2
+    echo "" >&2
+    echo "Pull requests must be small and reviewable. Split this branch into smaller PRs:" >&2
+    echo "  1. Identify a logical subset of changes that can stand alone." >&2
+    echo "  2. Create a new branch from main with only those changes." >&2
+    echo "  3. Open a PR for that subset, get it merged." >&2
+    echo "  4. Repeat for the remaining changes." >&2
+    echo "" >&2
+    exit 1
+  fi
+fi
+
+# ── 3. Lint, format, and types ───────────────────────────────────────────────
+
+echo "pre-push: checking lint, format, and types..." >&2
+
+QUALITY_FAILED=0
+QUALITY_OUTPUT=""
+
+ESLINT_OUT=$(bun run eslint . --max-warnings=0 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$ESLINT_OUT\n"; }
+PRETTIER_OUT=$(bun run prettier --check . 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$PRETTIER_OUT\n"; }
+TSC_OUT=$(bun run tsc --noEmit 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$TSC_OUT\n"; }
+
+if [ $QUALITY_FAILED -ne 0 ]; then
+  echo "" >&2
+  echo "PUSH BLOCKED: Lint, format, or type errors must be resolved before pushing." >&2
+  echo -e "$QUALITY_OUTPUT" >&2
+  echo "These were warned about at commit time. Fix them, update next-prompt.md, and commit." >&2
+  echo "" >&2
+  exit 1
+fi
+
+# ── 4. Full test suite ───────────────────────────────────────────────────────
+
+echo "pre-push: running full test suite..." >&2
+
+TEST_OUTPUT=$(bun test 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+
+if [ $TEST_EXIT -ne 0 ]; then
+  FAILING=$(echo "$TEST_OUTPUT" | grep -E "^\s*(FAIL|✗|×|●|not ok)" | head -30 || true)
+
+  cat >> docs/plans/next-prompt.md <<EOF
+
+---
+
+## FAILING TESTS — Must be addressed before next push
+
+The following tests were failing at the time of the last push.
+They must be **checked, fixed, or rewritten. Never ignore or skip them.**
+
+\`\`\`
+${FAILING}
+\`\`\`
+
+For each failure: determine whether the test is wrong (fix the test to match
+correct behaviour) or the implementation is wrong (fix the code). Do not
+disable, comment out, or add skip/todo markers to avoid addressing failures.
+
+EOF
+
+  echo "" >&2
+  echo "WARNING: Test failures detected. Push is proceeding, but" >&2
+  echo "docs/plans/next-prompt.md has been updated with the failing tests." >&2
+  echo "They must be resolved — not ignored — in the next commit." >&2
+  echo "" >&2
+fi
+
+exit 0

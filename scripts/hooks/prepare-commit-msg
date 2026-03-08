@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# prepare-commit-msg: Injects soft conformance assertions into every new commit message.
+# Hard violations (JS files, mocks, forbidden packages, skipped tests) are caught
+# deterministically by the pre-commit hook. This checklist covers the things only
+# the agent can verify: planning doc quality and metadata intent.
+
+COMMIT_FILE="$1"
+COMMIT_SOURCE="$2"
+
+# Only inject on fresh commits — skip merges, squashes, amends, fixups
+case "$COMMIT_SOURCE" in
+  merge|squash|commit|fixup) exit 0 ;;
+esac
+
+# Skip if checklist already present (prevent duplicates)
+grep -q "CALYPSO_CHECKLIST" "$COMMIT_FILE" && exit 0
+
+cat >> "$COMMIT_FILE" <<'EOF'
+
+<!--
+CALYPSO_CHECKLIST:
+Hard violations (JS files, mocks, forbidden packages, skipped tests) were already
+checked automatically by the pre-commit hook. Confirm the following — things only
+you can verify. The commit-msg hook blocks if any box remains unchecked.
+
+- [ ] implementation-plan.md — completed tasks are checked off; newly discovered tasks are added
+- [ ] next-prompt.md — overwritten with a complete, self-contained prompt for the next commit
+- [ ] retroactive_prompt — written as a specific instruction to reproduce this change, not a summary of what changed
+-->
+EOF
