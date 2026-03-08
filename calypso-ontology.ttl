@@ -1,0 +1,106 @@
+@prefix cal:  <https://calypso.dev/ontology#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# ── Agent States ──────────────────────────────────────────────────────────────
+
+cal:Bootstrapping  a cal:AgentState ; rdfs:label "First run on a new project" .
+cal:Developing      a cal:AgentState ; rdfs:label "Feature work from implementation plan" .
+cal:Hardening       a cal:AgentState ; rdfs:label "No feature tasks — continuous improvement" .
+cal:Reviewing       a cal:AgentState ; rdfs:label "Reviewing another agent's PR" .
+cal:Triaging        a cal:AgentState ; rdfs:label "Querying telemetry for production issues" .
+cal:Deploying       a cal:AgentState ; rdfs:label "Preparing release or deployment" .
+
+# ── Documents ─────────────────────────────────────────────────────────────────
+
+cal:Stack             a cal:Standard ; cal:path "standards/stack.md" ;
+    rdfs:comment "Tech stack, environment, dependencies, repo structure" ;
+    cal:tokens 900 .
+
+cal:Process           a cal:Standard ; cal:path "standards/process.md" ;
+    rdfs:comment "Phases, planning docs, plan-stub-TDD workflow" ;
+    cal:tokens 1100 .
+
+cal:Testing           a cal:Standard ; cal:path "standards/testing.md" ;
+    rdfs:comment "Testing philosophy, test categories, CI/CD" ;
+    cal:tokens 800 .
+
+cal:Deployment        a cal:Standard ; cal:path "standards/deployment.md" ;
+    rdfs:comment "Bare metal, systemd, database engine, schema evolution" ;
+    cal:tokens 700 .
+
+cal:GitDiscipline     a cal:Standard ; cal:path "standards/git-discipline.md" ;
+    rdfs:comment "Git-Brain metadata schema and all git hooks" ;
+    cal:tokens 2400 .
+
+cal:Security          a cal:Standard ; cal:path "standards/security.md" ;
+    rdfs:comment "Secrets, auth, headers, rate limiting, input validation, audit" ;
+    cal:tokens 1000 .
+
+cal:Telemetry         a cal:Standard ; cal:path "standards/telemetry.md" ;
+    rdfs:comment "Telemetry DB schema, ingestion, agent queries, feedback loop" ;
+    cal:tokens 1400 .
+
+cal:Hardening_doc     a cal:Standard ; cal:path "standards/hardening.md" ;
+    rdfs:comment "Five hardening disciplines, CI pattern, cost control" ;
+    cal:tokens 1200 .
+
+cal:MultiAgent        a cal:Standard ; cal:path "standards/multi-agent.md" ;
+    rdfs:comment "Branch-per-agent, plan as queue, agent roles, scaling" ;
+    cal:tokens 1000 ;
+    cal:condition "agent_count > 1" .
+
+cal:Documentation     a cal:Standard ; cal:path "standards/documentation.md" ;
+    rdfs:comment "Fractal doc structure, README per directory, kebab-case" ;
+    cal:tokens 400 .
+
+# ── Reference (one-shot or human-facing) ──────────────────────────────────────
+
+cal:ScaffoldTask      a cal:Reference ; cal:path "reference/scaffold-task.md" ;
+    rdfs:comment "One-time project initialization checklist" .
+
+cal:POInterview       a cal:Reference ; cal:path "reference/product-owner-interview.md" ;
+    rdfs:comment "Requirements extraction questionnaire template" .
+
+cal:FAQ               a cal:Reference ; cal:path "reference/faq.md" ;
+    rdfs:comment "Design decision rationale for humans" .
+
+cal:PRD               a cal:Reference ; cal:path "reference/prd.md" ;
+    rdfs:comment "Calypso product requirements (framework-level)" .
+
+cal:Onboarding        a cal:Reference ; cal:path "reference/onboarding.md" ;
+    rdfs:comment "Customer engagement strategy" .
+
+cal:AgentBootstrap    a cal:Reference ; cal:path "reference/agent-session-bootstrap.md" ;
+    rdfs:comment "Vendor-specific agent configuration guide" .
+
+# ── Decision Graph: state → required reading ──────────────────────────────────
+#
+# Edge semantics:  cal:requires  = MUST read
+#                  cal:recommends = read if relevant
+
+# All states share a core set
+cal:Bootstrapping   cal:requires cal:Stack, cal:Process, cal:GitDiscipline,
+                                 cal:Security, cal:Documentation, cal:ScaffoldTask .
+cal:Bootstrapping   cal:recommends cal:POInterview .
+
+cal:Developing      cal:requires cal:Stack, cal:Process, cal:Testing,
+                                 cal:GitDiscipline, cal:Security .
+cal:Developing      cal:recommends cal:Deployment, cal:Telemetry, cal:Documentation .
+
+cal:Hardening       cal:requires cal:Hardening_doc, cal:Testing, cal:Security,
+                                 cal:Telemetry, cal:GitDiscipline .
+
+cal:Reviewing       cal:requires cal:Stack, cal:Testing, cal:Security,
+                                 cal:GitDiscipline .
+cal:Reviewing       cal:recommends cal:Documentation .
+
+cal:Triaging        cal:requires cal:Telemetry, cal:GitDiscipline .
+cal:Triaging        cal:recommends cal:Security .
+
+cal:Deploying       cal:requires cal:Deployment, cal:Security, cal:Telemetry,
+                                 cal:GitDiscipline .
+
+# Multi-agent is conditional on team size
+cal:Developing      cal:recommends cal:MultiAgent .
+cal:Reviewing       cal:recommends cal:MultiAgent .

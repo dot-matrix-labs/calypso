@@ -6,8 +6,9 @@ This document explains how to configure each major AI coding agent so that it re
 
 At the start of every session, in this order:
 
-1. `docs/standards/calypso-blueprint.md` — architecture, stack, process, and testing standards
-2. `docs/prd.md` — the canonical product requirements for this project
+1. `docs/calypso-ontology.ttl` — decision tree: determines which standards to load based on agent state
+2. Standards from `docs/standards/` — as indicated by the ontology for the current state
+3. `docs/prd.md` — the canonical product requirements for this project
 3. `docs/plans/implementation-plan.md` — full task checklist; understand what is done and what remains
 4. `docs/plans/next-prompt.md` — the prompt for the next commit, written at the previous commit; **execute this**
 
@@ -34,8 +35,9 @@ curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts
 
 At the start of every session, before taking any action, you MUST read:
 
-1. `docs/standards/calypso-blueprint.md`
-2. `docs/prd.md`
+1. `docs/calypso-ontology.ttl`
+2. Standards from `docs/standards/` as indicated by the ontology
+3. `docs/prd.md`
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -60,8 +62,9 @@ Do not proceed with any development, documentation, or planning tasks until both
 
 At the start of every task, before taking any action, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -84,8 +87,9 @@ Do not proceed until both files are confirmed read and understood.
 
 At the start of every session, before any action, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -109,8 +113,9 @@ alwaysApply: true
 
 At the start of every session or task, before any action, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -131,8 +136,9 @@ Do not proceed with development, documentation, or planning until both files are
 ```
 At the start of every session, before any action, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -155,8 +161,9 @@ Do not proceed with any development or planning tasks until both files are read.
 
 At the start of every session or task, before taking any action, read:
 
-1. `docs/standards/calypso-blueprint.md`
-2. `docs/prd.md`
+1. `docs/calypso-ontology.ttl`
+2. Standards from `docs/standards/` as indicated by the ontology
+3. `docs/prd.md`
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -176,21 +183,21 @@ Do not proceed with development, documentation, or planning until both files are
 
 ```yaml
 read:
-  - docs/standards/calypso-blueprint.md
+  - docs/standards/stack.md
   - docs/prd.md
 ```
 
 **CLI equivalent** (for one-off sessions or CI):
 
 ```bash
-aider --read docs/standards/calypso-blueprint.md --read docs/prd.md
+aider --read docs/standards/stack.md --read docs/prd.md
 ```
 
 **Note:** Aider also auto-reads a `CONVENTIONS.md` file if present. You can use this as a lightweight pointer:
 
 ```markdown
 # CONVENTIONS.md
-See docs/standards/calypso-blueprint.md and docs/prd.md for all project conventions.
+See docs/standards/stack.md and docs/prd.md for all project conventions.
 Read both files before taking any action.
 ```
 
@@ -205,8 +212,9 @@ Read both files before taking any action.
 ```
 At the start of every task, before any action, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -229,8 +237,9 @@ Do not proceed with any development or planning until both files are confirmed r
 
 Before taking any action in this repository, read:
 
-1. docs/standards/calypso-blueprint.md
-2. docs/prd.md
+1. docs/calypso-ontology.ttl
+2. Standards from docs/standards/ as indicated by the ontology
+3. docs/prd.md
 
 If either file is missing, run:
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
@@ -251,10 +260,17 @@ Create `AGENT.md` once per project:
 ```markdown
 # Calypso Project
 
-@docs/standards/calypso-blueprint.md
-@docs/standards/git-standards.md
-@docs/standards/documentation-standard.md
-@docs/standards/development-standards.md
+@docs/calypso-ontology.ttl
+@docs/standards/stack.md
+@docs/standards/process.md
+@docs/standards/testing.md
+@docs/standards/deployment.md
+@docs/standards/git-discipline.md
+@docs/standards/security.md
+@docs/standards/telemetry.md
+@docs/standards/hardening.md
+@docs/standards/multi-agent.md
+@docs/standards/documentation.md
 @docs/prd.md
 
 ## Method
@@ -263,6 +279,7 @@ Create `AGENT.md` once per project:
 - **State machine:** read `next-prompt.md` → act → commit → overwrite it → repeat without human input.
 - **Every commit:** stage `implementation-plan.md` (check off done, add discovered) + `next-prompt.md` (next task). Hook enforces this.
 - **Workflow:** Plan → Stub → TDD. Write the failing test first. Never implement before the skeleton exists.
+- **Two modes:** Feature development (task-driven, has a finish line) and Hardening (continuous, no finish line). When the implementation plan has no unclaimed tasks, enter hardening mode. See `standards/hardening.md`.
 - **Tests:** headless Playwright, real services, recorded golden fixtures. No mocks. No `.skip()`.
 - **Stack:** TypeScript + Bun + React + Tailwind only. No other languages. Use `bun`/`bunx` — never npm/npx.
 - **Dependencies:** DIY first. Add a package only if genuinely infeasible to build in ~50 lines.
@@ -288,13 +305,14 @@ Standards missing? `curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/
 ## Do Not
 
 - Use any language other than TypeScript, or npm/npx instead of bun.
-- Mock, stub, or fabricate fixtures. Silence or skip failing tests.
-- Use an ORM, Docker, external auth (Auth0/Clerk), GraphQL/WebSockets (unless PRD requires), or heavy state libs (Redux/Zustand).
+- Fabricate test data. Use recorded golden fixtures from real services, not invented responses. Silence or skip failing tests.
+- Use an ORM, Docker for the application (Postgres container at V1 is fine), external auth (Auth0/Clerk), GraphQL/WebSockets (unless PRD requires), or heavy state libs (Redux/Zustand).
 - Add a package for functionality buildable in ~50 lines.
 - Develop or test on Mac/Windows. Run headed browser tests.
 - Commit without staging both planning docs. Batch >~10 files into one commit. Push a PR >~20 files.
 - Write logic before planning and stubbing. Over-abstract before three concrete cases exist.
 - Put anything other than a reproduction instruction in `retroactive_prompt`.
+- Store secrets in code, commit messages, or Git-Brain metadata. Use environment variables.
 ```
 
 ## Deploy Script: `scripts/install-agent-config.sh`
@@ -391,7 +409,7 @@ EOF
     DEST=".aider.conf.yml"
     cat > "$DEST" <<EOF
 read:
-  - docs/standards/calypso-blueprint.md
+  - docs/standards/stack.md
   - docs/prd.md
 EOF
     echo "Installed -> $DEST"

@@ -1,46 +1,57 @@
 # Calypso
 
-**Dancing with the SaaS-pocalype**
+**Dancing with the SaaS-pocalypse**
 
-Calypso is a framework and methodology for running a **synthetic software house** — a team of forward-deployed AI agents operating as an internal software development organization. Calypso is purpose-built to help organizations replace expensive SaaS vendors with bespoke, in-house software, one product at a time.
+Calypso is a framework and methodology for running a **synthetic software house** — a team of forward-deployed AI agents operating as an internal software development organization. Purpose-built to help organizations replace expensive SaaS vendors with bespoke, in-house software, one product at a time.
 
-Software rarely fails due to code quality; it fails because of unclear requirements, chaotic architecture, and hype-driven choices. Calypso provides the blueprints, architecture-first design constraints, staged product maturity protocols, and stack consistency necessary to ensure that AI-generated software is maintainable, predictable, and scalable from prototype to production.
+Software rarely fails due to code quality; it fails because of unclear requirements, chaotic architecture, and hype-driven choices. Calypso provides blueprints, architecture-first constraints, staged maturity protocols, and stack consistency to ensure AI-generated software is maintainable, predictable, and scalable from prototype to production.
 
 ## Quickstart
 
-To bootstrap a new Calypso project instantly, copy and paste this heavily structured prompt to your preferred AI agent:
-
 ```text
-Agent, I want to build a project tracking app with Calypso. 
+Agent, I want to build a project tracking app with Calypso.
 
-CRITICAL: Before beginning, you MUST bootstrap the Calypso standards by running:
+CRITICAL: Before beginning, bootstrap the Calypso standards:
 
   curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
 
-Please start by reading the local docs/standards/calypso-blueprint.md
+Then read docs/calypso-ontology.ttl to determine which standards to load.
 
-Context: I work in software development, and I have a team of 3 developers. I am replacing GitHub Projects because it's ugly and confusing. 
+Context: I work in software development with a team of 3 developers. I'm replacing GitHub Projects.
 ```
 
 ## A Calypso for Every Developer
 
-Whether you are a solo hacker, a growing startup, or a large enterprise, there is a delivery model tailored for your needs:
-
 ### 1. Community Edition (DIY)
-For organizations and independent developers with existing engineering capabilities who want to run the synthetic software house themselves. The Community Edition is completely free and open-source. It provides all the necessary prompts, the Calypso Blueprint, reference architectures, documentation, etc. needed to bootstrap your own AI-native development studio.
+Free and open-source. All prompts, standards, and reference architectures to bootstrap your own AI-native development studio.
 
 ### 2. Hosted (Not-SaaS)
-For organizations that want the outcome without assembling or managing the underlying machinery. We provide the full operational stack, infrastructure, and agent compute environments.
-**The Promise:** This is *not* a SaaS subscription markup trap. It is strictly **pass-through billing**. You pay the actual costs of the cloud infrastructure and the underlying language model API tokens, with absolutely zero artificial markup.
+Full operational stack without assembly. **Pass-through billing** — actual costs of infrastructure and API tokens, zero markup.
 
 ### 3. Enterprise Engagements
-For large-scale organizations undertaking complex digital transformations or replacing mission-critical legacy SaaS platforms. Our Enterprise tier offers hands-on, white-glove engagements. We embed with your team to customize the Calypso Blueprint, design bespoke domain data models, and directly oversee your synthetic software house to ensure seamless integration, security compliance, and strategic success.
+White-glove engagements for complex digital transformations. Embedded with your team to customize the framework and oversee your synthetic software house.
 
-## Getting Started
+## Documentation Structure
 
-To dive into the Calypso methodology and start scaffolding your AI-built applications, review our foundational documentation:
+### Decision Tree
+- [`calypso-ontology.ttl`](calypso-ontology.ttl) — RDF graph that tells agents what to read based on their current state
 
-- [The Calypso Blueprint](prompts/calypso-blueprint.md)
-- [Product Owner Interview](prompts/product-owner-interview.md) 
-- [Scaffold Task Entrypoint](prompts/scaffold-task.md)
-- [FAQ](FAQ.md)
+### Standards (operational — loaded per the ontology)
+- [`standards/stack.md`](standards/stack.md) — tech stack, environment, dependencies
+- [`standards/process.md`](standards/process.md) — phases, planning docs, plan-stub-TDD workflow
+- [`standards/testing.md`](standards/testing.md) — testing philosophy, CI/CD
+- [`standards/deployment.md`](standards/deployment.md) — bare metal, systemd, database
+- [`standards/git-discipline.md`](standards/git-discipline.md) — Git-Brain metadata and all git hooks
+- [`standards/security.md`](standards/security.md) — secrets, auth, headers, audit logging
+- [`standards/telemetry.md`](standards/telemetry.md) — production observability and self-healing
+- [`standards/hardening.md`](standards/hardening.md) — continuous background improvement
+- [`standards/multi-agent.md`](standards/multi-agent.md) — parallel agent coordination
+- [`standards/documentation.md`](standards/documentation.md) — fractal documentation structure
+
+### Reference (one-shot or human-facing)
+- [`reference/scaffold-task.md`](reference/scaffold-task.md) — project initialization checklist
+- [`reference/product-owner-interview.md`](reference/product-owner-interview.md) — requirements extraction
+- [`reference/agent-session-bootstrap.md`](reference/agent-session-bootstrap.md) — vendor-specific agent configuration
+- [`reference/faq.md`](reference/faq.md) — design decision rationale
+- [`reference/prd.md`](reference/prd.md) — Calypso framework PRD
+- [`reference/onboarding.md`](reference/onboarding.md) — customer engagement strategy

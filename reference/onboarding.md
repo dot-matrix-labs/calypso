@@ -1,4 +1,4 @@
-# Offramp - Onboarding Experience
+# Calypso - Onboarding Experience
 
 ## Discovery — How They Find Us
 
@@ -6,11 +6,11 @@ CIOs don't browse Product Hunt. They learn from three channels:
 
 ### Pain-Driven Search
 
-A SaaS renewal is up 20% year-over-year. A vendor just got acquired and the roadmap is dead. A compliance audit reveals data sovereignty gaps. The CIO is googling something like "alternative to [vendor]" or "build vs buy AI." Offramp should be in that search path.
+A SaaS renewal is up 20% year-over-year. A vendor just got acquired and the roadmap is dead. A compliance audit reveals data sovereignty gaps. The CIO is googling something like "alternative to [vendor]" or "build vs buy AI." Calypso should be in that search path.
 
 ### Peer Signal
 
-Another CIO at a dinner or Slack group says "we replaced [tool] with something our agents built and it costs us 90% less." This is the strongest channel. Every successful Offramp deployment is a referral engine.
+Another CIO at a dinner or Slack group says "we replaced [tool] with something our agents built and it costs us 90% less." This is the strongest channel. Every successful Calypso deployment is a referral engine.
 
 ### Provocation Content
 
@@ -24,7 +24,7 @@ The content should be auditable. Show the before/after bills. Show the repo comm
 
 ### Step 1: The SaaS Audit (Free)
 
-The CIO provides their SaaS spend — a CSV from their procurement tool, a screenshot of their vendor list, or just a typed list. Offramp agents analyze it and return a report:
+The CIO provides their SaaS spend — a CSV from their procurement tool, a screenshot of their vendor list, or just a typed list. Calypso agents analyze it and return a report:
 
 - Which tools are replacement candidates and why
 - Estimated infrastructure cost of a replacement for each
@@ -38,14 +38,14 @@ This is free. It costs us a few dollars in agent compute. It delivers value even
 
 ### Step 2: The 48-Hour Prototype (Paid, Fixed Fee)
 
-The audit identifies a target. Offramp builds a working prototype replacement in 48 hours:
+The audit identifies a target. Calypso builds a working prototype replacement in 48 hours:
 
 - A running application, not a mockup
 - Deployed to infrastructure the customer owns
 - Their branding, their data model, their workflows
 - Source code in a repo they control
 
-The customer keeps the prototype regardless of whether they continue with Offramp. There is no clawback.
+The customer keeps the prototype regardless of whether they continue with Calypso. There is no clawback.
 
 **This is the proof point.** The CIO can show their team: "This exists now. Agents built it over a weekend. It's running on our servers. We own the code."
 
@@ -53,8 +53,8 @@ The customer keeps the prototype regardless of whether they continue with Offram
 
 If the prototype validates the thesis, the customer chooses their delivery model:
 
-- **DIY**: Take the Offramp prompt management system and methodology. Run the synthetic software house internally.
-- **Not-SaaS**: Offramp provisions the full stack — agents, servers, repos, storage — with pass-through billing. No markup. Full ownership.
+- **DIY**: Take the Calypso prompt management system and methodology. Run the synthetic software house internally.
+- **Not-SaaS**: Calypso provisions the full stack — agents, servers, repos, storage — with pass-through billing. No markup. Full ownership.
 
 Either way, the transition from prototype to production is incremental. The prototype isn't thrown away — it's the starting commit.
 

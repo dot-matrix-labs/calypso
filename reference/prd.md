@@ -1,10 +1,10 @@
-# Offramp - Product Requirements Document
+# Calypso - Product Requirements Document
 
 ## Vision
 
-Offramp enables organizations to answer a critical strategic question: **Can we replace our SaaS vendors with in-house software now that AI agents are approaching AGI-level capability?**
+Calypso enables organizations to answer a critical strategic question: **Can we replace our SaaS vendors with in-house software now that AI agents are approaching AGI-level capability?**
 
-The answer is sometimes yes. Offramp provides the methodology, architecture, and deployment process to make it happen.
+The answer is sometimes yes. Calypso provides the methodology, architecture, and deployment process to make it happen.
 
 ## Problem
 
@@ -14,9 +14,9 @@ Meanwhile, AI agents have reached a capability threshold where they can architec
 
 ## Solution
 
-Offramp is a framework for running a **synthetic software house** — a team of forward-deployed AI agents that operate as an internal (or external) software development organization, purpose-built to replace SaaS vendors one product at a time.
+Calypso is a framework for running a **synthetic software house** — a team of forward-deployed AI agents that operate as an internal (or external) software development organization, purpose-built to replace SaaS vendors one product at a time.
 
-Offramp provides three core pillars:
+Calypso provides three core pillars:
 
 ### 1. Prompt Management Methodology
 
@@ -48,30 +48,30 @@ An end-to-end pipeline for agents to ship software continuously:
 
 ## Delivery Models
 
-Offramp serves two distinct modes of engagement, depending on an organization's appetite for hands-on involvement:
+Calypso serves two distinct modes of engagement, depending on an organization's appetite for hands-on involvement:
 
 ### 1. DIY — Prompt Management System
 
-For organizations with existing engineering teams who want to run the synthetic software house themselves. Offramp provides:
+For organizations with existing engineering teams who want to run the synthetic software house themselves. Calypso provides:
 
 - The prompt management system — templates, versioning, evaluation frameworks
 - Reference architectures and deployment patterns
 - Documentation and playbooks for agent-driven development
 
-The customer brings their own agents, infrastructure, and engineering oversight. They own the entire stack and process. Offramp is the methodology.
+The customer brings their own agents, infrastructure, and engineering oversight. They own the entire stack and process. Calypso is the methodology.
 
 **Ideal for**: Companies with technical leadership that want full control and already have infrastructure opinions.
 
 ### 2. Not-SaaS — Managed Infrastructure, No Markup
 
-For organizations that want the outcome without assembling the machinery. Offramp provides the full operational stack:
+For organizations that want the outcome without assembling the machinery. Calypso provides the full operational stack:
 
 - **Agents**: Provisioned and configured forward-deployed agents
 - **Servers**: Compute infrastructure for running the produced software
 - **Repositories**: Source control and CI/CD pipelines
 - **Storage**: Databases, object storage, backups
 
-All billing is **pass-through** — the customer pays the actual cost of agent compute and infrastructure with no Offramp markup on those line items. There is no recurring SaaS fee from Offramp. The customer owns the code, the data, and the infrastructure accounts.
+All billing is **pass-through** — the customer pays the actual cost of agent compute and infrastructure with no Calypso markup on those line items. There is no recurring SaaS fee from Calypso. The customer owns the code, the data, and the infrastructure accounts.
 
 This is the anti-SaaS: you get a managed service experience, but you own everything it produces. If you leave, you take it all with you.
 
@@ -94,7 +94,7 @@ This is the anti-SaaS: you get a managed service experience, but you own everyth
 
 ## Success Criteria
 
-- An organization can evaluate a SaaS product for replacement candidacy using Offramp's assessment framework
+- An organization can evaluate a SaaS product for replacement candidacy using Calypso's assessment framework
 - Agents can take a replacement spec from requirements through production deployment
 - Total cost of ownership (agent compute + infrastructure + human oversight) is demonstrably lower than the SaaS subscription it replaces
 - Replacement software meets or exceeds the functionality actually used by the organization (not the full SaaS feature set)
@@ -103,7 +103,7 @@ This is the anti-SaaS: you get a managed service experience, but you own everyth
 ## Non-Goals
 
 - Replacing all SaaS for every organization — some tools are best rented
-- Building a general-purpose AI development platform — Offramp is opinionated about its use case
+- Building a general-purpose AI development platform — Calypso is opinionated about its use case
 - Eliminating human involvement — humans set strategy, make judgment calls, and provide oversight
 
 ## Open Questions

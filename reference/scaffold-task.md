@@ -6,8 +6,8 @@
 Calypso is an architecture-first framework for building web applications continuously using AI agents. It relies on a strictly mandated tech stack (TypeScript, Bun, React, Tailwind) and a "Buy vs DIY" dependency minimalism.
 
 Before proceeding with your tasks, you must read and adhere to the following core documents:
-1. [The Calypso Blueprint](https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/calypso-blueprint.md) (Strict architectural constraints)
-2. [Product Owner Interview](https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/product-owner-interview.md) (Requirements gathering protocol)
+1. `docs/standards/stack.md` (Tech stack and architectural constraints)
+2. `docs/reference/product-owner-interview.md` (Requirements gathering protocol)
 
 ## Environment Detection Rule
 Before executing the checklist below, **detect the host environment you are currently operating in**.
@@ -51,16 +51,32 @@ Before executing the checklist below, **detect the host environment you are curr
 ### 3. Testing Foundation
 - [ ] Vitest and Playwright are configured.
 - [ ] The foundation for the "golden fixture" external API testing tool is scaffolded (or explicitly planned in `docs/prd.md`).
-- [ ] The project is completely clear of any mocking libraries (e.g., `jest.mock`, `msw`).
+- [ ] The project is completely clear of any fabrication/mocking libraries (e.g., `jest.mock`, `msw`). Recorded golden fixtures from real services are the only acceptable test doubles.
 - [ ] You have stubbed thee testfiles with no-ops for all categories of tests; server (unit, module, integration) and browser (unit, component, e2e). 
 - [ ] You can run a full test suite (all categories) and see all tests pass.
 - [ ] There are no lint or format warnings.
 - [ ] Finally the e2e test is starting the app's production `bun` server which is serving a stub placeholder HTML page, and you are able to drive it with the e2e playwright tests.
 
 ### 4. Deployment Posture
-- [ ] The project includes `.env` file templates.
-- [ ] There is a foundational plan or structure for bare-metal Linux deployment using `systemd` (No Dockerfiles present).
-- [ ] 
+- [ ] The project includes `.env.example` with placeholder values for all required environment variables.
+- [ ] `.gitignore` includes `.env`, `.env.local`, `.env.production`.
+- [ ] There is a foundational plan or structure for bare-metal Linux deployment using `systemd`.
+- [ ] No Dockerfiles for the application (Postgres container at V1 is acceptable).
+
+### 4a. Security Baseline
+- [ ] Security headers middleware is implemented (CSP, HSTS, X-Content-Type-Options, X-Frame-Options).
+- [ ] Rate limiting middleware is scaffolded for auth endpoints.
+- [ ] SQL queries use parameterized statements — no string interpolation of user input.
+- [ ] The pre-commit hook scans for potential secret leakage patterns.
+- [ ] Authentication uses self-hosted JWT via `crypto.subtle` (no external auth providers unless PRD mandates).
+
+### 4b. Telemetry Foundation
+- [ ] The telemetry database schema (`telemetry.db`) is created on server startup.
+- [ ] Error fingerprinting and deduplication is implemented.
+- [ ] Distributed tracing via `X-Trace-Id` header is wired into server middleware.
+- [ ] Browser errors POST to `/api/telemetry` endpoint.
+- [ ] A retention job (systemd timer or startup cleanup) removes traces/metrics older than 14 days.
+
 ### 5. Check your work
 - [ ] **Blueprint Compliance** did you follow all the instructions, and not go off the rails?
 - [ ] **No JS Configs:** Scaffolding tools (Vite/ESLint) generate `.js` or `.mjs` configs. Delete them immediately and write them in pure `.ts`.
