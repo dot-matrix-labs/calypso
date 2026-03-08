@@ -1,46 +1,105 @@
 # Calypso
 
-**Dancing with the SaaS-pocalype**
+Supergreen software is here. We provide a method, tools, and a reference implementation for:
 
-Calypso is a framework and methodology for running a **synthetic software house** — a team of forward-deployed AI agents operating as an internal software development organization. Calypso is purpose-built to help organizations replace expensive SaaS vendors with bespoke, in-house software, one product at a time.
+- **Fused AI** — one AI over coherent, owned data
+- **Tree-shaken** — distill the 5% of features you actually use across your SaaS vendors into one seamless app
+- **Correct by construction** — every line verified, maximal control over the bytes, DIY over buy
+- **Self-improving** — the agent has access to live logs and telemetry, is never idle, and enters hardening mode when there is nothing left to build
 
-Software rarely fails due to code quality; it fails because of unclear requirements, chaotic architecture, and hype-driven choices. Calypso provides the blueprints, architecture-first design constraints, staged product maturity protocols, and stack consistency necessary to ensure that AI-generated software is maintainable, predictable, and scalable from prototype to production.
+---
 
 ## Quickstart
 
-To bootstrap a new Calypso project instantly, copy and paste this heavily structured prompt to your preferred AI agent:
+Paste into your AI agent (Claude Code, Gemini CLI, Codex, etc.):
 
-```text
-Agent, I want to build a project tracking app with Calypso. 
+```
+Agent, bootstrap a new Calypso project.
 
-CRITICAL: Before beginning, you MUST bootstrap the Calypso standards by running:
+First, run:
+curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
 
-  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
+Then read docs/standards/calypso-blueprint.md before doing anything else.
 
-Please start by reading the local docs/standards/calypso-blueprint.md
-
-Context: I work in software development, and I have a team of 3 developers. I am replacing GitHub Projects because it's ugly and confusing. 
+Context: I am replacing GitHub Projects for a software team of 3.
 ```
 
-## A Calypso for Every Developer
+---
 
-Whether you are a solo hacker, a growing startup, or a large enterprise, there is a delivery model tailored for your needs:
+## The Vision
 
-### 1. Community Edition (DIY)
-For organizations and independent developers with existing engineering capabilities who want to run the synthetic software house themselves. The Community Edition is completely free and open-source. It provides all the necessary prompts, the Calypso Blueprint, reference architectures, documentation, etc. needed to bootstrap your own AI-native development studio.
+Since 2025, a solo operator can produce applications that would have taken a 20-person engineering team two years to ship. That is not an exaggeration — it is the current state of the art. AI lets every fruit stand build NASA-quality software, if you let it.
 
-### 2. Hosted (Not-SaaS)
-For organizations that want the outcome without assembling or managing the underlying machinery. We provide the full operational stack, infrastructure, and agent compute environments.
-**The Promise:** This is *not* a SaaS subscription markup trap. It is strictly **pass-through billing**. You pay the actual costs of the cloud infrastructure and the underlying language model API tokens, with absolutely zero artificial markup.
+From 2026, we can go further. Super apps that leave behind human constraints entirely — deeply fused systems, highly complex security policies, deeply verified, continuously improved, never idle.
 
-### 3. Enterprise Engagements
-For large-scale organizations undertaking complex digital transformations or replacing mission-critical legacy SaaS platforms. Our Enterprise tier offers hands-on, white-glove engagements. We embed with your team to customize the Calypso Blueprint, design bespoke domain data models, and directly oversee your synthetic software house to ensure seamless integration, security compliance, and strategic success.
+**To get there, you need to go supergreen.** Orchestrating your existing SaaS stack with AI wrappers is a local maximum. You are routing around the constraints of software that was never designed for this environment.
 
-## Getting Started
+There is a deeper problem with the fragmented SaaS model: *N* smart AIs across *N* vendor data silos will always produce worse outcomes than a single AI — even a less capable one — over fused, coherent data. You cannot reason well across data you do not hold. Fragmentation is a fundamental cap on every AI-assisted decision your organization can make.
 
-To dive into the Calypso methodology and start scaffolding your AI-built applications, review our foundational documentation:
+This vision has always required superhuman implementation capacity. We have arrived at the moment that exists.
 
-- [The Calypso Blueprint](prompts/calypso-blueprint.md)
-- [Product Owner Interview](prompts/product-owner-interview.md) 
-- [Scaffold Task Entrypoint](prompts/scaffold-task.md)
-- [FAQ](FAQ.md)
+**Supergreen:**
+
+- **Fused AI** — one AI over coherent, owned data
+- **Tree-shaken** — distill the 5% of features you actually use across your SaaS vendors into one seamless app
+- **Correct by construction** — every line verified, maximal control over the bytes, DIY over buy
+- **Self-improving** — the agent has access to live logs and telemetry, is never idle, and enters hardening mode when there is nothing left to build
+
+---
+
+## The Blueprint
+
+Calypso is opinionated. Several choices are counter-intuitive coming from a human development culture — they make full sense once humans are out of the development loop.
+
+**Process** — The agent operates as a self-advancing state machine. Each commit updates the implementation plan and writes the next prompt. The agent is never waiting for human input between tasks. When there is nothing left to build, it enters hardening mode.
+
+**Testing** — Never mock. Not APIs, not the database, not the DOM. Humans mock because writing the real thing takes time they do not have. Agents do not have that constraint. Mocks hide bugs; real fixtures catch them. All browser tests run in headless Chromium — agents have no display server, and neither should the test suite.
+
+**Dependencies** — DIY over buy. Humans import libraries to avoid writing code. Agents write the code directly, perfectly tree-shaken to the exact behavior needed, with no transitive dependency surface to audit or upgrade. Buy only when the domain is genuinely specialized (cryptography, payment SDKs, compliance-critical integrations).
+
+**Data** — No ORMs. Agents write SQL directly with no cognitive overhead. ORMs exist to make databases approachable for humans; they abstract away performance and generate massive footprint. The agent does not need the abstraction. Start with SQLite, graduate to PostgreSQL.
+
+**UX** — Beauty is a gate condition, not a preference. An ugly early version sets an anchor that is nearly impossible to reverse. The AI agent is a first-class user of every application it builds: it interacts through typed APIs, not through browser automation or interfaces designed for human perception. Admin is also a first-class user — never through raw database tooling or developer consoles.
+
+**Security** — The threat model is not "prevent breaches." It is "make a breach useless." Greenfield applications have no brownfield trade-offs to honor, so there is no excuse for anything less than banking-grade authorization, HIPAA-grade privacy, and adversarial hardening from day one. Novel cryptographic architectures — homomorphic encryption, zero-knowledge proofs, encrypted computation — open an opportunity that legacy systems can never reach: deeply analytical applications that operate over sensitive data without ever exposing it in plaintext. High analytical power and high customer confidence in privacy are not in tension. In a supergreen system, they are the same design.
+
+**Deployment** — Bare metal Linux, systemd, no Docker. Docker solves environment consistency for human teams working across machines. Agents run on a known Linux host; the abstraction layer adds complexity with no benefit.
+
+---
+
+## Reference Implementation
+
+### Calypso TS
+
+Calypso TS exists for your current engineering team. Familiar tooling, no hype, best practices applied with discipline. The supergreen principles do not require a new language — they require a new approach.
+
+| Layer | Choice |
+|---|---|
+| Language | TypeScript only |
+| Runtime | Bun |
+| UI | React + Tailwind CSS |
+| Testing | Vitest (unit) + Playwright (headless E2E) |
+| CI/CD | GitHub Actions |
+| Database | SQLite → PostgreSQL |
+| Auth | Passkey-first, self-hosted JWT (HTTP-only cookies), customer-side encryption before data is committed |
+| Deploy | Bare metal Linux, systemd |
+
+No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
+
+### What Comes Next
+
+Once you go post-human, the stack goes lower. The constraints that TypeScript and its runtime impose exist for human reasons — readability, ecosystem familiarity, fast iteration by engineers. An agent operating continuously does not need those affordances. The stack can descend toward the metal.
+
+**Calypso RS** — a minimalist Rust stack end-to-end, with a fully WASM client for state management and DOM rendering. No React.
+
+**[Alien Stack](https://github.com/dot-matrix-labs/alien-stack)** — our research lab paper on the future of software process. One day, maybe LLVM.
+
+---
+
+## Documentation
+
+- [Calypso Blueprint](prompts/calypso-blueprint.md) — full architecture and process standard
+- [UX Blueprint](prompts/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
+- [Data Security Blueprint](prompts/data-security-blueprint.md) — agent auth, scopes, and security posture
+- [Scaffold Task Entrypoint](prompts/scaffold-task.md) — the agent's first action on a new project
+- [Blueprint Authoring Standard](prompts/blueprint-standard.md) — how blueprints are written and structured
