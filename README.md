@@ -49,7 +49,9 @@ This vision has always required superhuman implementation capacity. We have arri
 
 ## Reference Implementation
 
-The quickstart uses **Calypso TS** — the TypeScript reference implementation:
+Before making a giant leap, we start with familiar tooling. The supergreen principles can be applied today with the stack you already know.
+
+**Calypso TS** — TypeScript reference implementation:
 
 | Layer | Choice |
 |---|---|
@@ -64,7 +66,9 @@ The quickstart uses **Calypso TS** — the TypeScript reference implementation:
 
 No Docker. No ORMs. No SaaS auth vendors. No mocks in tests.
 
-A second reference implementation, **Calypso RS**, is in development: a minimalist Rust stack end-to-end, with a fully WASM client for both state management and DOM rendering. No React.
+**Calypso RS** — the next level: a minimalist Rust stack end-to-end, with a fully WASM client for state management and DOM rendering. No React.
+
+**Alien Stack** — our research lab paper on the future of software process. Someday.
 
 ---
 
