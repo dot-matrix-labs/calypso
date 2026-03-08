@@ -4,7 +4,7 @@ AI lets every fruit stand build NASA-quality software, if you let it. A solo ope
 
 But there is a catch.
 
-**To unlock AI's full capability, you need to build new.** Orchestrating your existing SaaS stack with AI wrappers is a local maximum — you are routing around the constraints of software that was never designed for this environment. Truly AI-native software is greenfield, coherent, and purpose-built. That is what Calypso is for.
+**To unlock AI's full capability, you need to go supergreen.** Orchestrating your existing SaaS stack with AI wrappers is a local maximum — you are routing around the constraints of software that was never designed for this environment. Supergreen software is fused AI-native from the start: tree-shaken to carry only what it needs, correct by construction through architecture that enforces its own constraints, and self-improving — each agent commit advances the plan and writes the next prompt. That is what Calypso is for.
 
 There is a second, deeper problem with the fragmented SaaS model: *N* smart AIs deployed across *N* vendor data silos will always produce worse outcomes than a single AI — even a less capable one — operating over fused, coherent data. Fragmentation is not just an operational cost. It is a fundamental cap on the quality of every AI-assisted decision your organization can make. You cannot reason well across data you do not hold.
 
