@@ -143,7 +143,7 @@ These standards are the **source of truth** for this project. Users may customiz
 0. **Quickstart / Scaffold:** 
    * **Version Control:** Initialize git (`git init`), authenticate GitHub CLI using HTTPS (`gh auth login -p https -w`), and create the remote repository (`gh repo create`).
    * **CI Setup:** Immediately create the CI jobs (e.g., GitHub Actions in `.github/workflows/`) so they run from day one.
-   * **TDD Environment:** You should not develop by opening a browser on localhost. You should always use a headless instance, execute headless browser tests (e.g., Playwright), and strictly do Test-Driven Development (TDD). You should stub all the testsuites before building any features: server unit, integration, browser unit, browser component, browser e2e.
+   * **TDD Environment:** Calypso runs on hosted Linux and has no GUI or display server. Agents are headless by nature and must never attempt to open a browser window or launch a GUI application. All browser interaction happens through a headless Chromium instance driven by Playwright. Visual output is evaluated by capturing screenshots and inspecting them programmatically or via a vision-capable model. You should always use a headless instance, execute headless browser tests (e.g., Playwright), and strictly do Test-Driven Development (TDD). You should stub all the testsuites before building any features: server unit, integration, browser unit, browser component, browser e2e.
 
 1. **Collect Specifications:** The AI agent must generate an `.md` document containing comprehensive onboarding interview questions for the Product Owner to extract requirements. An explicit template prompt is provided to instruct the agent on generating these questions. The agent then writes a canonical Product Requirements Doc to `docs/prd.md` based on the answers. The Product Owner/Manager will own and update this document moving forward.
 
@@ -184,7 +184,7 @@ These standards are the **source of truth** for this project. Users may customiz
 
 * **Never mock** anything: no APIs, databases, DOM, or external services.
 * **Always test on the environment the code will run in:** Linux for server and browser testing; no Mac/Windows shortcuts.
-* Browser code tested only in headless Chromium (Vitest + Playwright).
+* Browser code tested only in headless Chromium (Vitest + Playwright). No GUI, no display server, no live browser window — ever.
 * API tests must use **recorded "golden" fixtures of real production requests/responses**. To enable this without a human, the AI must explicitly develop a test tool which generates these "golden" fixtures by executing real network requests against external services. It must not mock, estimate, or hallucinate these fixtures.
 * CI/CD enforces passing tests in production-like environments.
 

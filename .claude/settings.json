@@ -1,3 +1,7 @@
 {
-  "includeCoAuthoredBy": false
+  "includeCoAuthoredBy": false,
+  "attribution": {
+    "pr": "none",
+    "commit": "none"
+  }
 }
