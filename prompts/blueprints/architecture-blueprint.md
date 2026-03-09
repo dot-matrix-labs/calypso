@@ -48,7 +48,8 @@ Every external package is a commitment to track its releases, audit its security
 
 ### Types are shared, logic is not
 
-Data shapes that cross boundaries (API request/response types, database row types, shared enums) live in a single canonical location imported by both sides. Business logic, rendering logic, and data access logic are never shared across the client-server boundary — even if they look similar. Sharing logic creates coupling; sharing types creates contracts.
+Data shapes that cross boundaries (API request/response types, domain types, shared enums) live in a single canonical location imported by both sides. Business logic, rendering logic, and data access logic are never shared across the client-server boundary — even if they look similar. Sharing logic creates coupling; sharing types creates contracts.
+
 
 ### Simplicity scales; cleverness does not
 

@@ -22,6 +22,6 @@
 | [process-blueprint.md](./process-blueprint.md) | Scaffold → V1 lifecycle, PRD, implementation plan, next-prompt loop |
 | [testing-blueprint.md](./testing-blueprint.md) | Testing philosophy, test categories, CI/CD workflows |
 | [deployment-blueprint.md](./deployment-blueprint.md) | Bare-metal deployment, systemd, logging, telemetry |
-| [data-auth-blueprint.md](./data-auth-blueprint.md) | Database standards, self-hosted JWT authentication |
-| [data-security-blueprint.md](./data-security-blueprint.md) | Security posture, agent auth, encryption |
+| [auth-blueprint.md](./auth-blueprint.md) | Authentication, authorization, session management, agent auth |
+| [data-blueprint.md](./data-blueprint.md) | Data persistence, encryption, privacy, analytics tier |
 | [ux-blueprint.md](./ux-blueprint.md) | UX posture, agent UX, admin as user, beauty gate |
