@@ -2,10 +2,12 @@
 #
 # Key rules:
 #   - Postgres is only reachable from frontend and worker pods
-#   - Dev container has no route to postgres (defence in depth: postgres ingress
-#     policy already blocks it, but explicit dev egress deny adds a second layer)
 #   - Worker egress is restricted to the API service and declared vendor API ranges
 #   - All other inter-pod traffic follows Kubernetes default-allow unless overridden
+#
+# The agent/developer runs directly on the cloud host OS (not in a K8s pod).
+# Host-level access to the cluster database is prevented by not issuing
+# cluster DB credentials to the host environment.
 
 # ── Postgres: ingress only from frontend and worker ──────────────────────────
 apiVersion: networking.k8s.io/v1
@@ -31,55 +33,10 @@ spec:
         - protocol: TCP
           port: 5432
 ---
-# ── Dev container: deny egress to postgres by pod selector ───────────────────
-# Using pod selector (not CIDR) so this survives pod rescheduling and IP changes.
-# The dev container still needs full internet egress for GitHub, cloud APIs, etc.
-# K8s API server access within the cluster is preserved via the allow-all-ingress
-# default (dev → kube-apiserver is not pod-to-pod traffic caught by egress policy).
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: dev-deny-postgres
-  namespace: calypso
-spec:
-  podSelector:
-    matchLabels:
-      app: dev
-  policyTypes:
-    - Egress
-  egress:
-    # Allow all egress EXCEPT to postgres. K8s NetworkPolicy egress rules are
-    # additive allows; to deny postgres we omit it from the allow list and
-    # combine with the postgres-ingress policy above for defence in depth.
-    # Allow DNS (required for all name resolution)
-    - ports:
-        - protocol: UDP
-          port: 53
-        - protocol: TCP
-          port: 53
-    # Allow egress to everything that is NOT a postgres pod.
-    # This is expressed by allowing egress to the entire namespace except
-    # pods labelled app=postgres, achieved by combining the two selectors:
-    - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: calypso
-          podSelector:
-            matchExpressions:
-              - key: app
-                operator: NotIn
-                values: [postgres]
-    # Allow egress to the internet (GitHub, cloud APIs, vendor APIs, etc.)
-    - to:
-        - ipBlock:
-            cidr: 0.0.0.0/0
-            except:
-              - 169.254.0.0/16   # link-local only; no production ranges blocked
----
 # ── Worker: restrict egress to API service and vendor APIs ───────────────────
 # Workers must reach: the frontend/API service (for task claim/submit),
 # DNS, and declared vendor API endpoints.
-# Workers must NOT reach: postgres directly, the dev container, arbitrary internet.
+# Workers must NOT reach: postgres directly, arbitrary internet.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

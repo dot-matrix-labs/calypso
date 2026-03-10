@@ -17,7 +17,6 @@ update rather than error.
 | `worker-credentials` | worker (service token) | `worker-credentials.sh` |
 | `worker-db-credentials` | worker (read-only DB role) | `worker-db-credentials.sh` |
 | `vendor-api-keys` | worker (Claude, Gemini API keys) | `vendor-api-keys.sh` |
-| `dev-ssh-keys` | dev container (SSH authorized keys) | `dev-ssh-keys.sh` |
 
 ## Bootstrap order
 
@@ -26,7 +25,6 @@ update rather than error.
 3. `worker-db-credentials.sh` — must exist before worker Deployment starts
 4. `worker-credentials.sh` — must exist before worker Deployment starts
 5. `vendor-api-keys.sh` — must exist before worker Deployment starts
-6. `dev-ssh-keys.sh` — must exist before dev Deployment starts
 
 The provisioning script (`scripts/provision-cluster.sh`) calls each of these
 in order. Do not apply secrets manually unless debugging a specific secret.

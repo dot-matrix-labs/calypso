@@ -16,12 +16,12 @@ Paste into your AI agent (Claude Code, Gemini CLI, Codex, etc.):
 ```
 Agent, bootstrap a new Calypso project. You will handle all setup steps autonomously.
 
-Follow prompts/process/scaffold-task.md from Step 1.
+Follow agent-context/init/scaffold-task.md from Step 1.
 
 Context: I am replacing GitHub Projects for a software team of 3.
 ```
 
-Replace the context line with your own project description. The scaffold task will guide the agent through provisioning a Linux host, creating the GitHub repo, deploying the environment, and handing you SSH access.
+Replace the context line with your own project description. Run this from a cloud host you've SSH'd into (or connected to via VS Code Remote SSH). The scaffold task will guide the agent through setting up the app cluster, creating the GitHub repo, and getting the project running — all on the host you're already on.
 
 ---
 
@@ -62,7 +62,7 @@ Calypso is opinionated. Several choices are counter-intuitive coming from a huma
 
 **Security** — The threat model is not "prevent breaches." It is "make a breach useless." Greenfield applications have no brownfield trade-offs to honor, so there is no excuse for anything less than banking-grade authorization, HIPAA-grade privacy, and adversarial hardening from day one. Novel cryptographic architectures — homomorphic encryption, zero-knowledge proofs, encrypted computation — open an opportunity that legacy systems can never reach: deeply analytical applications that operate over sensitive data without ever exposing it in plaintext. High analytical power and high customer confidence in privacy are not in tension. In a supergreen system, they are the same design.
 
-**Deployment** — Exclusively containerized, Kubernetes. Agents run entirely reproducibly in isolated containers natively across any environment. The human convenience of hot-reloading native servers translates poorly for agents; background local container deployment provides exact reproducibility from day one.
+**Deployment** — Exclusively containerized, Kubernetes. The app (frontend, worker, database) runs in a three-container K8s cluster on the cloud host. The agent and developer work directly on the host OS — SSH in or use VS Code Remote SSH. No dev containers, no local laptops, no environment drift.
 
 ---
 
@@ -97,9 +97,9 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 
 ## Documentation
 
-- [Calypso Blueprint](prompts/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
-- [UX Blueprint](prompts/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
-- [Auth Blueprint](prompts/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
-- [Data Blueprint](prompts/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
-- [Scaffold Task Entrypoint](prompts/process/scaffold-task.md) — the agent's first action on a new project
-- [Blueprint Authoring Standard](blueprint-standard.md) — how blueprints are written and structured
+- [Calypso Blueprint](agent-context/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
+- [UX Blueprint](agent-context/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
+- [Auth Blueprint](agent-context/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
+- [Data Blueprint](agent-context/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
+- [Scaffold Task Entrypoint](agent-context/init/scaffold-task.md) — the agent's first action on a new project
+- [Agent Communication](agent-communication.md) — how to write documents in agent-context/ that agents interpret reliably
