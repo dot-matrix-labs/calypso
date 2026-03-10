@@ -137,6 +137,20 @@ Copy in the connection info:
 [[ -f "/tmp/.calypso-connect" ]] && cp /tmp/.calypso-connect .calypso-connect
 ```
 
+Rename `AGENT.md` for the agent platform in use:
+```bash
+# Claude Code:
+cp AGENT.md CLAUDE.md
+
+# Gemini:
+# mkdir -p .gemini && cp AGENT.md .gemini/style.md
+
+# Codex:
+# cp AGENT.md codex.md
+```
+
+Keep `AGENT.md` as the canonical copy. The platform-specific file is a copy that may diverge if the platform requires special syntax.
+
 ---
 
 ### Step 7: Initial Commit and Push
@@ -165,16 +179,9 @@ kubectl config view --raw \
 
 ---
 
-### Step 9: Read All Prompts
+### Step 9: Load Context
 
-Read every file in the `agent-context/` directory before proceeding. These define architecture, process, security, UX, and implementation conventions for the entire project.
-
-```
-agent-context/blueprints/
-agent-context/development/
-agent-context/implementation-ts/
-agent-context/development/
-```
+Read `AGENT.md` and `agent-context/index.md`. These define the curriculum and document graph. Do NOT read all blueprints upfront — follow the context escalation loop in `AGENT.md` to load documents as needed during subsequent steps.
 
 ---
 

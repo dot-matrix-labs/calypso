@@ -102,4 +102,4 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 - [Auth Blueprint](agent-context/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
 - [Data Blueprint](agent-context/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
 - [Scaffold Task Entrypoint](agent-context/init/scaffold-task.md) — the agent's first action on a new project
-- [Blueprint Authoring Standard](blueprint-standard.md) — how blueprints are written and structured
+- [Agent Communication](agent-communication.md) — how to write documents in agent-context/ that agents interpret reliably
