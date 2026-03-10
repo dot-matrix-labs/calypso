@@ -16,8 +16,10 @@
 Install a single-node Kubernetes cluster on the host and deploy the Calypso dev environment using the published base images.
 
 - [ ] k3s installed and `kubectl` configured.
-- [ ] Calypso `k8s/` manifests applied using the published upstream images (`ghcr.io/dot-matrix-labs/calypso/*`). These are the base images — they provide a running dev environment immediately, before the project's own CI pipeline exists.
+- [ ] **Collect the user's SSH public key** before deploying — ask the user to paste their public key (e.g. `~/.ssh/id_ed25519.pub`). Create the Kubernetes secret the dev pod depends on: `kubectl create secret generic dev-ssh-keys --from-literal=authorized_keys="<public-key>" -n calypso`
+- [ ] Apply all Calypso `k8s/` manifests. These reference the published upstream images (`ghcr.io/dot-matrix-labs/calypso/*`) and provide a running dev environment immediately, before the project's own CI pipeline exists.
 - [ ] All four containers running and healthy: `dev`, `frontend`, `worker`, `db`.
+- [ ] Verify the frontend serves HTTP 200 at `http://<host-ip>:<frontend-nodeport>/health`.
 
 ---
 
@@ -36,7 +38,14 @@ Working inside the dev container on the remote host:
 - [ ] Shallow-clone the Calypso repo: `git clone --depth 1 https://github.com/dot-matrix-labs/calypso.git <project-name>`
 - [ ] Create a new private repo on the user's GitHub account using `gh repo create` (the dev container is assumed to be configured with the user's `gh` credentials).
 - [ ] Set the new repo as origin and push: `git remote set-url origin <new-repo-url> && git push -u origin main`
-- [ ] Extract the kubeconfig from the cluster and set it as a GitHub Actions secret on the new repo: `gh secret set KUBE_CONFIG --body "$(kubectl config view --raw | base64)"`
+- [ ] Extract the kubeconfig, replacing the loopback address with the host's public IP so GitHub Actions can reach the cluster, and set it as a repo secret:
+  ```bash
+  PUBLIC_IP=$(curl -s ifconfig.me)
+  kubectl config view --raw \
+    | sed "s|https://127.0.0.1:6443|https://${PUBLIC_IP}:6443|g" \
+    | base64 -w0 \
+    | gh secret set KUBE_CONFIG -R <new-repo> --body -
+  ```
 
 ---
 

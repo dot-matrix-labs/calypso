@@ -70,6 +70,9 @@ jobs:
           cache-to: type=inline
           platforms: linux/amd64,linux/arm64
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
       - name: Deploy to cluster
         env:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}

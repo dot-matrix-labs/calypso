@@ -14,6 +14,9 @@ ENV RELEASE_TAG=${RELEASE_TAG}
 WORKDIR /app
 
 COPY server.ts ./server.ts
+# Placeholder bundle — serves "calypso provisioning..." until CI layers the real app.
+# CI overwrites dist/ via Dockerfile.release on every app release.
+COPY dist/ ./dist/
 
 RUN addgroup -S frontend && adduser -S -G frontend frontend
 RUN chown -R frontend:frontend /app
