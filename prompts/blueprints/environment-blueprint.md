@@ -2,17 +2,19 @@
 # Environment Blueprint
 
 > [!IMPORTANT]
-> This blueprint defines the development environment for AI-agent-driven software projects: where agents run, what they depend on, and how sessions bootstrap into a consistent, reproducible state.
+> This blueprint defines the environment model for AI-agent-driven software projects: what containers run, what they are allowed to do, how the cluster is provisioned, and why the development environment and the production environment are the same thing.
 
 ---
 
 ## Vision
 
-Software built by AI agents inherits the environment it was built in. When an agent develops on a developer's laptop — with its GUI assumptions, its macOS filesystem semantics, its transient shell sessions — the resulting software silently encodes those assumptions. The code works on the laptop. It fails in production. The gap between "works for me" and "works in prod" is the environment delta, and AI agents are worse at detecting it than humans because they cannot see the physical machine they are running on.
+The promise of AI-led development is that the agent does not just write code — it designs and operates the full system from the first commit. This promise breaks immediately if the environment the agent develops in differs from the environment the software runs in. A developer container on a laptop, a staging server with hand-installed packages, a production cluster configured differently by a human operator: each gap is a place where the software will silently stop working. Agents are worse at detecting these gaps than experienced human engineers, because agents cannot see the physical machine, cannot smell that something is wrong, and will confidently produce work that passes every test in the wrong environment.
 
-A correct development environment for agent-driven work eliminates the delta entirely. The development host *is* the deployment target. The agent's session persists across disconnections. The toolchain is minimal, explicit, and bootstrapped from a single command. Every session begins by reading the project's conventions before writing a single line of code, because an agent that starts working without reading the rules will confidently produce work that violates them.
+Calypso eliminates the gap by collapsing development and production into the same container topology from the first day. The developer container, the web server container, and the database container that run during a prototype session are the same containers — same base images, same constraints, same network rules — that run in production. There is no "works on my machine" because the machine is always the same machine: a container orchestrated by the same runtime that production uses. When the agent vibe-codes a UI for a business process, it is not creating a throwaway demo. It is designing the full production system for free. The prototype and the production artifact are the same build, tagged and released through the same pipeline.
 
-The cost of ignoring this blueprint is subtle and compounding. Code that passes tests locally but fails on Linux. Agents that reinvent project conventions because they were never told the real ones. Sessions that die when an SSH connection drops, losing hours of in-flight work. Environment drift between developers — human or AI — that makes "it works on my machine" the default state. These are not edge cases; they are the inevitable outcome of an unmanaged development environment.
+This model also eliminates an entire category of developer-experience engineering. Local development tooling, hot-reload servers, environment-specific feature flags, "devmode" database connections, ngrok tunnels, and staging environments are all symptoms of a broken environment model. They exist because development and production were allowed to diverge. Calypso does not invest in making divergence comfortable. It invests in making divergence impossible. Best practices are enforced from the first commit not because best practices feel good, but because allowing exceptions at prototype stage means rewriting the system when those exceptions compound. Agents do not benefit from environment-specific affordances the way human developers do — they benefit from a simple, consistent, fully-specified world. Simplicity is the agent's native environment.
+
+The cost of ignoring this blueprint is the compounding cost of complexity. Teams that allow development environments to diverge from production spend progressively more time managing that divergence instead of building features. Agents operating in inconsistent environments will produce inconsistent software. A system that "worked in the demo" but requires a week of ops work before it can go live is a system where the demo's value was never real.
 
 ---
 
@@ -20,214 +22,346 @@ The cost of ignoring this blueprint is subtle and compounding. Code that passes 
 
 | Scenario | What must be protected |
 |---|---|
-| Agent develops on macOS/Windows; code assumes non-Linux filesystem, process model, or networking | Production parity — code must behave identically in dev and prod |
-| SSH connection drops mid-session | Session continuity — in-flight agent work and context must survive disconnection |
-| Agent begins work without reading project conventions | Architectural consistency — agent must not fabricate or guess conventions |
-| Standards in the upstream repository are updated after project bootstrap | Convention freshness — local standards must track upstream changes |
-| Two agents (or an agent and a human) work on the same host with conflicting tool versions | Toolchain isolation — runtime versions and dependencies must be deterministic |
-| Agent installs unnecessary system packages or modifies global state | Host stability — the development host is also the demo/preview server |
-| Agent attempts to open a GUI, browser window, or display server | Headless integrity — agents are headless; visual output is screenshot-only |
-| Development host is unreachable (network, provider outage) | Work recoverability — all state is in version control, not on the host |
-| Agent uses an outdated or incompatible version of its own CLI | Agent capability parity — the CLI version determines what the agent can do |
+| Agent develops with tools or runtimes not present in production | Production parity — a capability that exists only in the dev container must not reach production-bound code |
+| Web server container is used to build or compile code at runtime | Release integrity — every artifact served in production must have been vetted, tested, and released before the server sees it |
+| Database container is modified or queried by an agent directly | Data integrity and audit trail — agents must not have direct access to the database process or its host |
+| Agent installs packages or modifies global state on the web server or database container | Container immutability — non-developer containers must be immutable; unexpected mutations indicate a compromised or misconfigured system |
+| Cluster is provisioned with environment-specific configuration differences between demo and production | Topology parity — a cluster that behaves differently in demo mode versus production mode is two different systems pretending to be one |
+| Developer runs agent tooling locally instead of in the developer container | Headless integrity and environment parity — local environments reintroduce all the divergence that containerization eliminates |
+| IDE or editor runs locally and connects to local files instead of the remote container | Convention contamination — local file edits bypass the container's toolchain and may introduce platform-specific artifacts |
+| Cluster is destroyed and must be reprovisioned | State durability — all non-ephemeral state must live in version control or the database volume, never on the container filesystem |
+| A release is deployed to the web server without passing CI and the release pipeline | Release gate integrity — the web server must not be configurable to pull untagged, untested, or unreleased artifacts |
+| Agent session drops mid-task due to SSH timeout or network interruption | Session continuity — in-flight agent context and partially applied changes must survive disconnection |
+| Integration or end-to-end test connects to the live database instead of an ephemeral test instance | Data integrity — test runs must never read from or write to the production or demo database |
+| Developer container is granted network access to the cluster database service | Database isolation — the dev container's network policy must make the cluster database unreachable, even accidentally |
+| Ephemeral test container is left running after a test suite completes | Host resource integrity — leaked containers exhaust disk, memory, and port space on the developer node |
 
 ---
 
 ## Core Principles
 
-### Production is the only environment that matters
+### The prototype is the production system
 
-Development environments exist to produce production-correct software. Every divergence between development and production is a latent defect. The development host runs the same operating system, the same runtime, and the same process supervisor as production. There is no staging environment that is "close enough."
+The container topology that runs during the first demo session is the same topology that runs in production. There are no placeholder components, no "we'll do it properly later" shortcuts, and no environment-specific configurations. Every decision made in a prototype session is a production decision. This is not a constraint — it is the core value proposition. When the prototype is done, the production system is done.
 
-### Sessions are durable, not ephemeral
+### Containers are role-specialized and capability-constrained
 
-An AI agent's session is its working memory. Losing a session means losing context, partially applied changes, and the reasoning behind in-flight decisions. Sessions must survive network interruptions, terminal closures, and host reboots. The mechanism is a terminal multiplexer, not a hope that the connection stays up.
+Each container type exists for exactly one role and has only the capabilities required for that role. The developer container can run agents, build artifacts, and push to version control. The web server container can serve pre-built release bundles. The database container can store and retrieve data. No container has capabilities that belong to another role. A container that can do more than its role requires is a container that can fail in more ways than its role implies.
 
-### Convention is bootstrapped, not discovered
+### Building from source is a developer-only capability
 
-An agent that begins work by reading the codebase will infer conventions from whatever code it encounters first — which may be legacy, wrong, or incomplete. Conventions are explicitly written, explicitly distributed, and explicitly read at the start of every session. The bootstrap is a single command with no ambiguity.
+Compilation, bundling, transpilation, dependency installation, and any other transformation of source code into a deployable artifact happens exclusively in the developer container. The web server container receives only tagged, tested, released artifacts. It cannot build from source because it does not have the tools, and it must not have the tools. Building in production is an antipattern regardless of whether "production" means a customer deployment or a demo to a single stakeholder.
 
-### The toolchain is minimal and declarative
+### Agents run in the developer container only
 
-Every tool on the development host exists because a blueprint requires it. No tool is installed speculatively. The dependency list is short, auditable, and version-pinned where possible. A minimal toolchain is easier to reproduce, easier to secure, and harder to break.
+AI agents — whether LLM CLI tools, autonomous coding agents, or orchestration frameworks — run inside the developer container. They do not run on the web server container. They do not run on the database container. They do not run on the developer's local device. The developer container is the agent's workspace. Everything outside it is infrastructure the agent manages through APIs, not infrastructure the agent inhabits.
 
-### Headless is the only mode
+### Test databases are ephemeral and isolated from all persistent data
 
-Agents have no display server, no GUI toolkit, no interactive browser. All visual evaluation happens through headless browser automation and screenshot capture. Code that requires a GUI to develop or test is code that cannot be developed or tested by an agent.
+Every integration test and end-to-end test that requires a database runs against a fresh, disposable database container spun up by the test runner and torn down when the suite completes. This container is not the cluster database. It has no connection to the cluster database. It has no access to the cluster database's network. It is created with no data, seeded by the test, exercised by the test, and destroyed. The cluster database — whether it holds demo data, early user data, or production data — is never a valid target for a test run, under any circumstances, including convenience, speed, or "the data is not sensitive yet."
+
+### The environment is provisioned by the agent, not the developer
+
+The developer does not manually configure servers, install software, or wire together containers. The agent, given a cloud API key, provisions the cluster, configures the container orchestrator, and produces a running system. The provisioning process is a first-class artifact — versioned, testable, and re-runnable. A system that cannot be reprovisioned from scratch in one command is a system with undocumented state.
 
 ---
 
 ## Design Patterns
 
-### Pattern 1: Single-Command Bootstrap
+### Pattern 1: Immutable Release Artifact
 
-**Problem:** An agent starting a new session must configure its environment correctly before doing any work, but the configuration steps are numerous and easy to skip or reorder.
+**Problem:** Software deployed to the web server must be known-good before it arrives. A web server that can pull arbitrary code — from the main branch, from a development server, from a local machine — is a web server that can serve untested code.
 
-**Solution:** A single idempotent command that downloads the current project conventions, installs them locally, and exits with a non-zero code if anything fails. The agent runs this command first and reads the resulting files before proceeding. The command is a URL-based script fetch so it requires no local state to initiate.
+**Solution:** The developer container produces a release artifact (a built bundle), pushes it through the standard CI pipeline, passes all automated tests, and tags a version on the version control host. The web server container is notified of the new release tag via a webhook or polling mechanism and downloads the artifact from the release registry. The web server has no credentials to the version control system and no build tooling. Its only capability is fetching a named version and serving it.
 
-**Trade-offs:** Depends on network access to the convention repository at session start. If the upstream is unreachable, the agent must fall back to whatever local copy exists — which may be stale. This is acceptable because staleness is better than fabrication.
+**Trade-offs:** Adds a mandatory release step between "code compiles" and "code is visible in the browser." For rapid iteration this feels slow, but the pipeline is fast by design (pre-built artifact, not build-on-deploy). The overhead is the correct feedback mechanism: if the release pipeline is too slow to support iteration, the pipeline needs to be optimized, not bypassed.
 
-### Pattern 2: Multiplexed Persistent Session
+### Pattern 2: Three-Container Separation of Concerns
 
-**Problem:** Agent sessions are long-running and stateful. Network interruptions, SSH timeouts, and terminal closures destroy the session and its accumulated context.
+**Problem:** Combining development capabilities, serving capabilities, and data storage in a single runtime or a small number of undifferentiated containers makes it impossible to enforce capability constraints and impossible to scale or replace components independently.
 
-**Solution:** Run the agent process inside a terminal multiplexer session. The multiplexer maintains the session independently of the connecting terminal. Reconnection reattaches to the existing session with full history and state preserved.
+**Solution:** Three purpose-built container types, each with a minimal image, minimal capability set, and a single responsibility:
 
-**Trade-offs:** Adds one layer of indirection to the terminal stack. Operators must remember to reattach rather than start new sessions, or risk orphaned processes. Multiplexer configuration (scrollback, key bindings) can interfere with the agent CLI's own terminal handling.
+- **Developer Container:** full operating system, agent CLIs, language runtimes, build tools, version control client, cloud CLI, and a Docker daemon (Docker-in-Docker). Can write code, run tests, spin up ephemeral test containers, build artifacts, push releases. Cannot serve production traffic. Cannot reach the cluster database over the network.
+- **Web Server Container:** minimal base image (not a full OS), a single runtime, a single entry point. Serves pre-built release bundles on a designated port. Cannot install packages, cannot execute build steps, cannot write to persistent volumes.
+- **Database Container:** distroless base image, database binary and dependencies only. Volume-mounted for persistence. No shell, no package manager, no agent access. Backed up on a schedule to durable object storage.
 
-### Pattern 3: Host-as-Preview
+**Trade-offs:** Three containers require a container orchestrator. This is not a cost — it is an explicit design choice that brings network policy enforcement, restart behavior, health checking, and scaling as standard features. The alternative (fewer, larger containers) trades these features for a simpler mental model that breaks as soon as the system grows.
 
-**Problem:** Developers need to see the running application during development. Traditional approaches involve local servers, ngrok tunnels, or separate staging deployments — all of which add environment delta.
+### Pattern 3: Ephemeral Test Containers
 
-**Solution:** The development host exposes a designated port for the running application. The development server *is* the preview, running as a container (Docker/Podman) to assure parity with production. There is no separate preview environment, no tunnel, no proxy unless explicitly chosen. The URL is the host's IP or domain at the designated port.
+**Problem:** Integration tests and end-to-end tests require real infrastructure — a running database, a seeded schema, realistic data volumes — but must not touch the cluster database, which holds real or demo data.
 
-**Trade-offs:** The development host must have a stable, routable IP address and appropriate firewall rules. Running untested code on a network-exposed host carries risk — acceptable for development and demo purposes, not for production.
+**Solution:** The developer container runs a Docker daemon (Docker-in-Docker). The test runner starts a fresh database container before the suite, exposes it on a randomized local port, runs all tests against it, and stops and removes the container when the suite exits — whether it passes or fails. The cluster database is unreachable from the developer container at the network level: no hostname, no credentials, no route. This is enforced by Kubernetes network policy, not by convention.
 
-### Pattern 4: Convention-First Session Start
+The ephemeral test container uses the same image as the cluster database container. Schema migrations are applied from scratch at test startup. This means the test suite also validates that migrations run cleanly against a virgin database — a property that is otherwise easy to lose as a schema evolves.
 
-**Problem:** An agent that starts coding immediately will produce work based on its training data and whatever it reads first in the codebase, not based on the project's actual conventions.
+**Trade-offs:** Docker-in-Docker requires elevated container privileges and careful configuration to avoid container escape. The developer container must be explicitly granted the capability to run nested containers, and this capability must be audited and limited. It adds complexity to the developer container image. This cost is accepted because the alternative — tests that touch the cluster database — is categorically unacceptable.
 
-**Solution:** The session protocol requires the agent to read all files in the conventions directory before executing any other action. This is enforced by instruction (in the bootstrap prompt), not by tooling — because the agent is the actor, not a CI system.
+### Pattern 4: Agent-Provisioned Cluster
 
-**Trade-offs:** Relies on the agent following the instruction. There is no hard gate that prevents an agent from skipping the read step. However, the instruction is embedded in the bootstrap script output, the project's root configuration, and the blueprint itself — making accidental omission unlikely.
+**Problem:** Manual infrastructure provisioning is undocumented, non-reproducible, and not auditable. Every manually provisioned server is a unique artifact with undocumented state.
+
+**Solution:** The agent, starting from a cloud API key, runs a provisioning script that: creates a compute instance, bootstraps a container orchestrator (Kubernetes or equivalent), deploys all three container types from their template images, configures networking and ingress, and outputs the cluster endpoint. The provisioning script is checked into version control. Running it again produces an identical cluster. The developer's only manual action is providing the API key.
+
+**Trade-offs:** The agent must have write access to the cloud account during provisioning. This is a privileged operation and should be time-bounded: the API key used for provisioning should be revocable after the cluster is running. Ongoing cluster operations use narrower-scoped credentials.
+
+### Pattern 5: Remote-First IDE Attachment
+
+**Problem:** Running a code editor or IDE locally against remote files introduces platform-specific behavior (line endings, symlinks, file watcher semantics) and bypasses the container's toolchain entirely.
+
+**Solution:** The developer's local IDE connects to the developer container over SSH and mounts the container's filesystem as its workspace. The IDE runs its language server, linter, and formatter inside the container, not on the local device. Agent CLIs (LLM tools) run inside the container, not in a local terminal. The local device is a viewport — keyboard, mouse, and display — not a development environment.
+
+**Trade-offs:** Requires the IDE to support remote development over SSH (most modern editors do). Requires the developer container to have a stable, reachable SSH endpoint. Network latency affects editor responsiveness; this is an argument for locating the container in the nearest cloud region, not an argument for local development.
+
+### Pattern 6: Webhook-Driven Release Delivery
+
+**Problem:** The web server must know when a new release is available and retrieve it without polling continuously or requiring manual intervention.
+
+**Solution:** The release pipeline (CI, on the developer container's push) publishes a tagged release to the version control host. The version control host sends a webhook to the web server container's update endpoint. The web server fetches the new artifact, verifies its checksum, hot-swaps the served bundle, and responds to the webhook with success or failure. No human touches the web server between "agent pushes code" and "new version is live."
+
+**Trade-offs:** Requires the web server to expose an update endpoint, which must be authenticated and hardened. Webhook delivery is not guaranteed; the web server should also support manual triggering and should log the version it is currently serving so discrepancies can be detected.
 
 ---
 
 ## Plausible Architectures
 
-### Architecture A: Single Bare-Metal Host (solo agent, early-stage project)
+### Architecture A: Single-Node Kubernetes Cluster (solo project, early stage)
 
 ```
-┌─────────────────────────────────────────────┐
-│  Bare-Metal Linux Host (cloud VPS)          │
-│                                             │
-│  ┌───────────────────────────────────────┐  │
-│  │  Container Engine (Docker/Podman)     │  │
-│  │  ┌───────────────┐                    │  │
-│  │  │  App Container│                    │  │
-│  │  │  (port N)     │                    │  │
-│  │  └───────────────┘                    │  │
-│  └───────────────────────────────────────┘  │
-│                                             │
-│  ┌───────────────────────────────────────┐  │
-│  │  Terminal Multiplexer Session         │  │
-│  │  ┌─────────────┐                      │  │
-│  │  │  Agent CLI   │                      │  │
-│  │  │  (coding)    │                      │  │
-│  │  └─────────────┘                      │  │
-│  └───────────────────────────────────────┘  │
-│                                             │
-│  docs/standards/  ← bootstrapped from repo  │
-│  .env             ← host-local secrets      │
-│  git repo         ← all persistent state    │
-└─────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  Cloud Compute Instance (provisioned by agent via cloud API)    │
+│                                                                 │
+│  ┌─────────────────────────────────────────────────────────┐    │
+│  │  Container Orchestrator (single-node)                   │    │
+│  │                                                         │    │
+│  │  ┌───────────────────────┐                              │    │
+│  │  │  Developer Container  │  ← Agent CLIs, build tools  │    │
+│  │  │  (full OS)            │    git, gh, bun, node, npm   │    │
+│  │  │                       │    SSH endpoint for IDE       │    │
+│  │  └───────────────────────┘                              │    │
+│  │                                                         │    │
+│  │  ┌───────────────────────┐                              │    │
+│  │  │  Web Server Container │  ← Serves tagged releases   │    │
+│  │  │  (minimal image)      │    Webhook update endpoint   │    │
+│  │  │  Port: 443 / 80       │    No build tooling          │    │
+│  │  └───────────────────────┘                              │    │
+│  │                                                         │    │
+│  │  ┌───────────────────────┐                              │    │
+│  │  │  Database Container   │  ← Distroless, no shell     │    │
+│  │  │  (distroless image)   │    Volume-mounted data       │    │
+│  │  │  Internal network only│    Scheduled volume backup   │    │
+│  │  └───────────────────────┘                              │    │
+│  │                                                         │    │
+│  │  Internal network: containers communicate by service    │    │
+│  │  External exposure: web server port only                │    │
+│  └─────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────┘
+
+  Local Device (developer)
+  ┌────────────────────┐
+  │  IDE (SSH remote)  │──── SSH ──→  Developer Container
+  │  Browser           │──── HTTPS ─→ Web Server Container
+  └────────────────────┘
 ```
 
-**When appropriate:** Single developer or single agent. Early-stage projects (Scaffold through Demoware). Cost-sensitive. The host is disposable — all durable state is in version control.
+**When appropriate:** Single developer or single agent working on a new project. All three containers on one node is sufficient for early stages, demo, and demoware. Cost-minimal — one instance. The topology is identical to multi-node production; only the physical distribution differs.
 
-**Trade-offs vs. other architectures:** No redundancy. No isolation between dev server and agent process. Acceptable because the blast radius is one developer's work on one project.
-
-### Architecture B: Multi-Agent Host (multiple agents, shared infrastructure)
-
-```
-┌──────────────────────────────────────────────────────┐
-│  Bare-Metal Linux Host                               │
-│                                                      │
-│  ┌────────────────────────────────────────────────┐  │
-│  │  Container Engine (Docker/Podman)              │  │
-│  │  ┌─────────────┐      ┌─────────────┐          │  │
-│  │  │ Container A │      │ Container B │          │  │
-│  │  │ Port 31415  │      │ Port 31416  │          │  │
-│  │  └─────────────┘      └─────────────┘          │  │
-│  └────────────────────────────────────────────────┘  │
-│                                                      │
-│  ┌──────────────────┐  ┌──────────────────────────┐  │
-│  │  Multiplexer: A  │  │  Multiplexer: B          │  │
-│  │  Agent CLI (web)  │  │  Agent CLI (server)      │  │
-│  └──────────────────┘  └──────────────────────────┘  │
-│                                                      │
-│  Shared:                                             │
-│    docs/standards/  ← single bootstrap, shared read  │
-│    git repo         ← branch-per-agent workflow      │
-│    Runtime (pinned) ← single version, no conflicts   │
-└──────────────────────────────────────────────────────┘
-```
-
-**When appropriate:** Multiple agents working on the same project simultaneously (e.g., one on frontend, one on backend). Same host to avoid environment drift. Each agent gets its own multiplexer session and preview port.
-
-**Trade-offs vs. Architecture A:** Port management becomes explicit. Agents can interfere with each other's processes if not disciplined about working directories and branches. Git conflicts are possible if agents commit to the same branch.
-
-### Architecture C: Ephemeral Cloud Instances (CI-like, on-demand)
-
-```
-┌────────────────────────────────────────┐
-│  Orchestrator (API or human trigger)   │
-│                                        │
-│  Provisions:                           │
-│  ┌──────────────────────────────────┐  │
-│  │  Fresh Linux Instance            │  │
-│  │  1. Install host dependencies    │  │
-│  │  2. Clone repo                   │  │
-│  │  3. Bootstrap standards          │  │
-│  │  4. Run agent with task prompt   │  │
-│  │  5. Push results, destroy host   │  │
-│  └──────────────────────────────────┘  │
-└────────────────────────────────────────┘
-```
-
-**When appropriate:** Tasks that are self-contained and don't need persistent preview (batch refactors, test suite runs, documentation generation). Regulatory or security contexts where a fresh environment per task is required.
-
-**Trade-offs vs. Architecture A/B:** No session persistence — the agent starts cold every time. Higher latency (provisioning overhead). Higher cost if instances are large. But perfect isolation and zero drift between runs.
+**Trade-offs vs. other architectures:** No redundancy — if the node fails, everything fails. Acceptable at early stage because all durable state is in version control and the database volume backup. Not appropriate once the application serves real end users.
 
 ---
 
+### Architecture B: Multi-Node Cluster (team, Beta / V1 stage)
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Container Orchestrator (multi-node)                             │
+│                                                                  │
+│  ┌──────────────────┐   ┌──────────────────┐                     │
+│  │  Dev Node A      │   │  Dev Node B      │                     │
+│  │  Developer       │   │  Developer       │  ← Multiple agents  │
+│  │  Container       │   │  Container       │    one per node     │
+│  └──────────────────┘   └──────────────────┘                     │
+│                                                                  │
+│  ┌─────────────────────────────────────────┐                     │
+│  │  Web Tier (replicated)                  │                     │
+│  │  ┌─────────────┐   ┌─────────────┐      │                     │
+│  │  │ Web Server  │   │ Web Server  │      │  ← Load-balanced   │
+│  │  │ Container   │   │ Container   │      │    release serving  │
+│  │  └─────────────┘   └─────────────┘      │                     │
+│  └─────────────────────────────────────────┘                     │
+│                                                                  │
+│  ┌─────────────────────────────────────────┐                     │
+│  │  Database Node                          │                     │
+│  │  ┌─────────────────────────┐            │                     │
+│  │  │  Database Container     │            │  ← Primary + replica│
+│  │  │  Primary + Replica      │            │    Volume to tape   │
+│  │  └─────────────────────────┘            │                     │
+│  └─────────────────────────────────────────┘                     │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**When appropriate:** Multiple agents working on the same project in parallel. Web tier must handle real traffic. Database requires a replica for read scaling or failover. Each developer container gets its own node to eliminate toolchain interference.
+
+**Trade-offs vs. Architecture A:** Higher cost. Requires networking between nodes. Database replication and consensus must be configured correctly. But these are production requirements, not engineering overhead — this architecture is what production looks like, so moving from Architecture A to Architecture B is a scaling exercise, not a redesign.
+
 ---
 
-> For the Calypso TypeScript implementation of these patterns, see [environment-implementation.md](../implementation-ts/environment-implementation.md).
+## Reference Implementation — Calypso TypeScript
+
+> The following is the Calypso TypeScript reference implementation. The principles and patterns above apply equally to other stacks; this section illustrates one concrete realization using TypeScript, Bun, React, and PostgreSQL on DigitalOcean Kubernetes (DOKS).
+
+### Container Images
+
+Calypso provides three base images, published to the project's container registry. Projects derive from these images without modifying them unless a blueprint-documented reason exists.
+
+| Image | Base | Installed | Not Installed |
+|---|---|---|---|
+| `calypso/dev` | Ubuntu LTS | `claude`, `gemini`, `codex`, `bun`, `node`, `npm`, `git`, `gh`, `bash`, `apt`, `tmux`, `openssh-server`, `playwright-deps` | Web server runtime, database |
+| `calypso/webserver` | Alpine minimal | `bun` (runtime only) | `apt`, `npm`, `git`, `gh`, build tools, shells |
+| `calypso/postgres` | Distroless | PostgreSQL binary and libs | Everything else |
+
+### Bootstrap Workflow
+
+The agent executes the following steps from inside the developer container after the cluster is provisioned:
+
+```
+1. Agent receives cloud provider API key via environment variable
+2. Agent runs: scripts/provision-cluster.sh
+   - Creates compute instance (DigitalOcean Droplet)
+   - Bootstraps DOKS (DigitalOcean Kubernetes Service)
+   - Applies manifests from k8s/ directory
+   - Outputs cluster endpoint and kubeconfig
+3. Agent runs bootstrap-standards.sh to load current conventions
+4. Agent reads all files in docs/standards/ before proceeding
+```
+
+### Kubernetes Manifest Structure
+
+```
+k8s/
+  namespace.yaml          ← project namespace
+  dev/
+    deployment.yaml       ← developer container deployment
+    service.yaml          ← SSH service (ClusterIP + NodePort)
+  web/
+    deployment.yaml       ← web server deployment (replicated)
+    service.yaml          ← HTTPS ingress
+    configmap.yaml        ← current release tag (updated by webhook)
+  db/
+    statefulset.yaml      ← postgres statefulset
+    pvc.yaml              ← persistent volume claim
+    service.yaml          ← internal ClusterIP only
+  ingress.yaml            ← external traffic routing
+```
+
+### Web Server Release Update
+
+The web server container runs a minimal Bun HTTP server that:
+1. Serves the current release bundle from an in-memory or local-filesystem cache
+2. Exposes `POST /update` — authenticated with a shared secret — to receive a new release tag
+3. On receiving a valid update request, downloads the named release artifact from GitHub Releases, verifies its checksum, and hot-swaps the served bundle
+
+```typescript
+// Minimal interface — full implementation in packages/webserver
+interface ReleaseManifest {
+  tag: string;
+  artifactUrl: string;
+  sha256: string;
+}
+
+interface UpdateRequest {
+  release: ReleaseManifest;
+  signature: string; // HMAC-SHA256 of release JSON, shared secret
+}
+```
+
+### Provisioning Script Interface
+
+```typescript
+// scripts/provision-cluster.ts
+interface ProvisionConfig {
+  provider: "digitalocean" | "hetzner" | "vultr";
+  region: string;
+  nodeSize: string;
+  projectName: string;
+  registryCredentials: string; // base64 encoded
+}
+```
+
+### Dependency Justification
+
+| Package / Tool | Reason to Buy | Justified |
+|---|---|---|
+| `kubectl` / `helm` | Kubernetes is complex; the CLI is the canonical control plane interface | Yes — Buy |
+| `doctl` (DigitalOcean CLI) | Cloud provider API surface is large; official CLI is the supported interface | Yes — Buy |
+| Bun (web server runtime) | Consistent with project standard; fast cold starts for minimal containers | Yes — Buy |
+| GitHub Actions (CI) | Release pipeline must run outside the developer container; hosted CI is the standard | Yes — Buy |
+| PostgreSQL (distroless image) | Standard relational database; distroless image eliminates shell-based attack surface | Yes — Buy |
+
+---
 
 ## Implementation Checklist
 
 ### Alpha Gate
 
-- [ ] Bare-metal Linux host provisioned with stable IP and SSH access
-- [ ] `git`, `gh`, `tmux`, `bun`, and agent CLI installed and version-verified
-- [ ] `gh auth login -p https -w` completed; `gh auth status` returns authenticated
-- [ ] Playwright OS dependencies installed; `bunx playwright install-deps` exits cleanly
-- [ ] Port `31415` open and reachable from external network
-- [ ] `tmux` session created; agent CLI launched inside it
-- [ ] Bootstrap script executed; `docs/standards/` populated with current conventions
+- [ ] Cloud provider API key received and stored as environment variable in developer container; not committed to version control
+- [ ] `scripts/provision-cluster.sh` executed; cluster endpoint output and reachable via `kubectl`
+- [ ] All three container types running and healthy per `kubectl get pods`
+- [ ] Developer container SSH endpoint reachable; local IDE connected via SSH remote
+- [ ] Agent CLI (`claude`, `gemini`, or equivalent) running inside developer container, not on local device
+- [ ] Web server container serving a release bundle at the designated external port
+- [ ] Database container running and accepting connections from web server and developer containers only; not exposed externally
+- [ ] `tmux` session active inside developer container; SSH disconnect and reattach tested
+- [ ] Bootstrap standards script executed; `docs/standards/` populated inside developer container
 - [ ] Agent has read all files in `docs/standards/` before writing any code
-- [ ] Dev server container starts and is accessible at `http://<host>:31415`
-- [ ] SSH disconnect and reattach tested; `tmux` session survives
 
 ### Beta Gate
 
-- [ ] Bootstrap script is idempotent; running it twice does not corrupt local customizations
-- [ ] Host dependency versions are pinned in a project-level manifest or script
-- [ ] Firewall rules documented; only required ports are exposed
-- [ ] Agent session startup time measured and acceptable (under 60 seconds from SSH to coding)
-- [ ] Second agent session tested on same host with separate multiplexer and port
+- [ ] Release pipeline configured: push to main triggers CI, CI builds artifact, CI publishes GitHub Release, webhook triggers web server update
+- [ ] Web server update endpoint authenticated; HMAC signature validated on every update request
+- [ ] Database volume backup scheduled and tested; restore procedure documented and executed at least once
+- [ ] Firewall rules verified: only web server port and developer container SSH port reachable externally
+- [ ] Web server container image verified to contain no build tooling (`git`, `npm`, `bun install`, `tsc` absent)
+- [ ] Database container verified to have no shell access (`kubectl exec` into db container fails as expected)
+- [ ] Integration test suite spins up an ephemeral database container, runs to completion, and tears it down — confirmed via `docker ps` showing no residual containers after the suite exits
+- [ ] Network policy verified: `kubectl exec` into developer container cannot reach the cluster database service by hostname or IP
+- [ ] Test suite connection string verified to point at the ephemeral container port, not any cluster service
+- [ ] Provisioning script idempotent: running it twice produces a clean cluster without manual cleanup
+- [ ] Cluster reprovisioned from scratch on a fresh API key; new cluster reaches ready state without manual steps
 
 ### V1 Gate
 
-- [ ] Host provisioning is scripted end-to-end (from bare OS to ready-to-code in one command)
-- [ ] Monitoring on the dev host detects disk exhaustion, OOM, and zombie processes
-- [ ] Bootstrap script validates upstream version and warns if local standards are stale
-- [ ] Recovery procedure documented: host lost, new host provisioned, agent resumes from git state
+- [ ] Multi-node cluster deployed with web server replicated across at least two nodes
+- [ ] Database replica configured; failover tested
+- [ ] Cluster monitoring active: container restarts, disk pressure, memory pressure all generate alerts
+- [ ] Release rollback procedure implemented and tested: bad release detected, previous release re-served without manual intervention
+- [ ] Recovery drill completed: cluster destroyed, reprovisioned, database volume restored; end-to-end time measured and within SLA
 
 ---
 
 ## Antipatterns
 
-- **Laptop-as-production.** Developing on macOS or Windows and assuming the code will work on Linux. Filesystem case sensitivity, process signals, path separators, and network behavior all differ. The agent cannot detect these differences from inside the code.
+- **Agent running on the developer's local device.** When the agent runs locally, it inherits the local operating system, local filesystem, and local toolchain. Every output it produces may silently encode local assumptions. The agent belongs in the developer container, full stop.
 
-- **Naked SSH sessions.** Running the agent CLI directly in an SSH session without a terminal multiplexer. A single network hiccup destroys the session and all accumulated context. The agent must restart from scratch, re-reading files it already understood.
+- **IDE running against local files.** Using an IDE in local mode against a local checkout of the repository bypasses the container's toolchain. Files edited locally may have different line endings, symlink behavior, or import resolution than files edited inside the container. The IDE must connect to the developer container via SSH remote.
 
-- **Convention by inference.** Allowing the agent to infer project conventions by reading existing code rather than reading the explicit standards documents. Existing code may contain legacy patterns, one-off exceptions, or simply bugs that the agent will dutifully replicate.
+- **Web server container with build tools installed.** Adding `npm`, `bun install`, `tsc`, or any build capability to the web server container turns it into a shadow developer container with no CI gate. Code built inside the web server has not been tested. A web server that can build from source can serve untested code.
 
-- **Snowflake host.** Installing tools, tweaking configurations, and adding scripts to the development host without recording those changes anywhere reproducible. When the host dies, the environment dies with it. The next host will be subtly different.
+- **Agents accessing the database container directly.** An agent that connects to the database process directly — whether through a shell, through an admin client, or through a root-level credential — can make schema changes, data mutations, and configuration changes with no audit trail and no review gate. Agents interact with the database through the application's data layer only.
 
-- **GUI development.** Installing a desktop environment, VS Code, or any GUI tool on the development host for the agent to use. Agents are headless. Visual evaluation is screenshot-based. A GUI is wasted resources and a false signal that visual development is supported.
+- **Environment-specific configuration branches.** Creating configuration files, environment variables, or code paths that behave differently in "development mode" versus "production mode" reintroduces the environment delta. There is one mode. Code that needs a flag to determine its environment is code that does not know where it is running.
 
-- **Port roulette.** Letting the dev server pick a random available port instead of binding to the designated port. Other tools, scripts, and documentation all assume the designated port. A random port breaks every downstream reference.
+- **Manual cluster provisioning.** Clicking through a cloud provider's web console, running ad-hoc CLI commands, or following a written runbook to provision the cluster creates undocumented state. The next time the cluster must be provisioned — whether due to failure, scaling, or migration — the process will produce a different result. Provisioning is code.
 
-- **Bootstrap skip.** Starting a coding session without running the bootstrap command because "nothing has changed upstream." The agent has no way to verify this claim. The cost of running bootstrap is seconds; the cost of working against stale conventions is hours of rework.
+- **Serving from the main branch.** Configuring the web server to pull and serve the latest commit from the main branch eliminates the release gate entirely. Every commit to main — including commits with failing tests, incomplete features, or broken builds — would be immediately served. The web server serves tagged releases only.
+
+- **Skipping the release pipeline for "just a demo."** A demo is a production event. An investor, a customer, or a stakeholder who sees the demo is seeing the product. Code served at a demo that has not passed CI, has not been tested, and has not been released is code that might fail during the demo. The pipeline is not a formality for demos; it is the mechanism that makes demos reliable.
+
+- **Tests running against the cluster database.** Pointing integration or end-to-end tests at the cluster database — even "just this once" or "it's only demo data" — eliminates the guarantee that test runs are non-destructive. A test that seeds, mutates, or deletes rows in a shared database is a test that can corrupt a demo, a stakeholder session, or eventually real user data. Ephemeral test containers exist precisely so this choice never has to be made.
+
+- **Cluster database reachable from the developer container.** If the developer container can reach the cluster database over the network, it will eventually do so — by mistake, by a misconfigured connection string, or by a well-intentioned agent that "just needed to check something." Network policy must make the cluster database unreachable from the developer container. Reachability is not a matter of trust; it is a matter of topology.
+
+- **Ephemeral test containers not torn down on failure.** A test runner that spins up a database container but only tears it down on success will accumulate zombie containers on the developer node every time a test fails. Over a long development session this exhausts ports, disk, and memory. Teardown must happen in a finally block — unconditionally — regardless of test outcome.
+
+- **Local port-forwarding as a substitute for the web server container.** Forwarding a local development server port to a browser — via SSH tunnel, ngrok, or a similar tool — is not a preview environment. It is a local server with production traffic pointed at it. It has no release gate, no deployment artifact, and no parity with the actual web server container. It is invisible to the release pipeline and to every other agent on the project.
