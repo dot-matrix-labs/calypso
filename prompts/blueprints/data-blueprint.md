@@ -15,6 +15,8 @@ Data minimization is not a policy aspiration; it is a technical control. Every f
 
 Agents — automated processes that act on behalf of the system — are constrained to aggregated, anonymized views of data. An agent that can read individual customer records is an agent that can exfiltrate individual customer records. The architectural boundary between raw transactional data and the analytics tier is not a convenience; it is the enforcement mechanism for this constraint.
 
+Workers (AI task daemons, as defined in the Worker Blueprint) are a constrained exception to this principle. A worker's database role grants SELECT on task queue views only — rows are filtered to tasks assigned to that worker type. A worker does not have access to arbitrary customer records, analytics tables, or any transactional table other than the task queue. This exception is narrow, enforced at the PostgreSQL role layer, and not self-selected by the worker at runtime.
+
 The persistence layer is PostgreSQL from the first commit. Starting with an embedded database and planning to migrate later is a false economy — the migration cost is paid in full in downtime, schema rewrites, and bugs introduced during data transfer, and the security properties of the early-stage architecture are weaker in ways that matter before any customer data arrives. The three-database structure that the policy requires (transactional, analytics, audit) is available locally via Docker Compose from day one and on any managed PostgreSQL service in production. There is no architecture to migrate away from.
 
 ---

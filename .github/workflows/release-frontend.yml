@@ -1,0 +1,105 @@
+name: Release — frontend
+
+# Triggered on merge to main when app source changes.
+# Builds the TS bundle, layers it onto the existing base image, pushes
+# the new image digest to GHCR, and rolls it out to the cluster.
+# The base image (containers/frontend/**) has its own workflow and is
+# rebuilt only when container-level dependencies change.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/frontend/**"
+      - "packages/**"
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      force_base_rebuild:
+        description: "Force base image rebuild before layering app"
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: ghcr.io
+  BASE_IMAGE: ghcr.io/dot-matrix-labs/calypso/frontend
+  NAMESPACE: calypso
+  DEPLOYMENT: frontend
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Build application bundle
+        working-directory: apps/frontend
+        run: bun install --frozen-lockfile && bun run build
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push release image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          # Layer the compiled bundle onto the existing base image.
+          # This Dockerfile is a thin overlay: FROM calypso/frontend:latest + COPY dist/
+          context: apps/frontend
+          file: apps/frontend/Dockerfile.release
+          push: true
+          build-args: |
+            RELEASE_TAG=${{ github.sha }}
+          tags: |
+            ${{ env.BASE_IMAGE }}:sha-${{ github.sha }}
+            ${{ env.BASE_IMAGE }}:latest
+          cache-from: type=registry,ref=${{ env.BASE_IMAGE }}:latest
+          cache-to: type=inline
+          platforms: linux/amd64,linux/arm64
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v4
+
+      - name: Deploy to cluster
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+
+          # Patch with immutable digest — not a mutable tag.
+          # The digest uniquely identifies this exact build; it cannot be spoofed
+          # or substituted without pushing a new image through this pipeline.
+          kubectl set image deployment/${DEPLOYMENT} \
+            ${DEPLOYMENT}=${BASE_IMAGE}@${{ steps.build.outputs.digest }} \
+            -n ${NAMESPACE}
+
+          # Block until rollout completes or deadline is exceeded.
+          # Non-zero exit triggers the rollback step below.
+          kubectl rollout status deployment/${DEPLOYMENT} \
+            -n ${NAMESPACE} \
+            --timeout=5m
+
+      - name: Rollback on failure
+        if: failure()
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
+        run: |
+          echo "${KUBE_CONFIG}" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+          kubectl rollout undo deployment/${DEPLOYMENT} -n ${NAMESPACE}
+          echo "Rolled back ${DEPLOYMENT} to previous revision."
+          kubectl rollout status deployment/${DEPLOYMENT} -n ${NAMESPACE} --timeout=3m

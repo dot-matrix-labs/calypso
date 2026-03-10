@@ -14,15 +14,14 @@ Supergreen software is here. We provide a method, tools, and a reference impleme
 Paste into your AI agent (Claude Code, Gemini CLI, Codex, etc.):
 
 ```
-Agent, bootstrap a new Calypso project.
+Agent, bootstrap a new Calypso project. You will handle all setup steps autonomously.
 
-First, run:
-curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
-
-Then read ./prompts/process/scaffold-task.md before doing anything else.
+Follow prompts/process/scaffold-task.md from Step 1.
 
 Context: I am replacing GitHub Projects for a software team of 3.
 ```
+
+Replace the context line with your own project description. The scaffold task will guide the agent through provisioning a Linux host, creating the GitHub repo, deploying the environment, and handing you SSH access.
 
 ---
 
@@ -100,7 +99,7 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 
 - [Calypso Blueprint](prompts/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
 - [UX Blueprint](prompts/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
-- [Data Blueprint](prompts/blueprints/data-blueprint.md) — data architecture, storage, and security posture
-- [Auth Blueprint](prompts/blueprints/auth-blueprint.md) — agent auth, scopes, and authentication
+- [Auth Blueprint](prompts/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
+- [Data Blueprint](prompts/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
 - [Scaffold Task Entrypoint](prompts/process/scaffold-task.md) — the agent's first action on a new project
 - [Blueprint Authoring Standard](blueprint-standard.md) — how blueprints are written and structured

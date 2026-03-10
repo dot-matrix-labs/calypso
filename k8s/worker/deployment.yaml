@@ -1,0 +1,87 @@
+# Worker deployment template — coding agent type
+# Each worker type gets its own deployment manifest with its own AGENT_TYPE,
+# DB credentials secret, and vendor API key secret.
+# Copy this file to deployment-<type>.yaml for each additional worker type.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker
+  namespace: calypso
+  labels:
+    app: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  progressDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: worker
+    spec:
+      imagePullPolicy: Always
+      containers:
+        - name: worker
+          # Image patched by CI to immutable digest on every release.
+          image: ghcr.io/dot-matrix-labs/calypso/worker:latest
+          env:
+            - name: AGENT_TYPE
+              value: "coding"
+            - name: API_BASE_URL
+              value: "http://frontend.calypso.svc.cluster.local"
+            - name: AGENT_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: worker-credentials
+                  key: service-token
+            - name: CLAUDE_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: vendor-api-keys
+                  key: claude-api-key
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: worker-db-credentials
+                  key: url
+          readinessProbe:
+            # Worker signals readiness by writing a sentinel file on startup.
+            exec:
+              command: ["test", "-f", "/tmp/ready"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: ["test", "-f", "/tmp/alive"]
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      imagePullSecrets:
+        - name: ghcr-credentials
+      volumes:
+        - name: tmp
+          emptyDir:
+            medium: Memory

@@ -171,31 +171,28 @@ The agent reads the unique log first to understand the error landscape, then con
 │       │                                            │
 │       ▼                                            │
 │  Deploy workflow:                                  │
-│    1. SSH to production host                       │
-│    2. Pull latest code                             │
-│    3. Build (browser + server)                     │
-│    4. Apply manifests to Kubernetes                │
-│    5. Health check (HTTP 200 from /health)         │
-│    6. Report success or rollback                   │
+│    1. Build app bundle (bun build)                 │
+│    2. Layer bundle onto base image                 │
+│    3. Push image → receive immutable digest        │
+│    4. kubectl set image deployment/<name>          │
+│       <name>=<image>@<digest>                      │
+│    5. kubectl rollout status --timeout=5m          │
+│    6. On failure: kubectl rollout undo             │
 │       │                                            │
 │       ▼                                            │
 │  Deployment complete                               │
 └────────────────────────────────────────────────────┘
 ```
 
-**When appropriate:** Production deployments where every deploy must be gated by passing tests. The CI platform handles the deploy, not a human SSH session. Rollback is pulling the previous commit and restarting.
+**When appropriate:** All deployments — this is the only release mechanism Calypso supports. Every container type (frontend, worker, database) follows this pipeline. The CI service account holds narrow kubectl credentials (patch deployments only); no SSH access to nodes is required.
 
-**Trade-offs:** Replaces direct SSH access with Kubernetes API access (kubeconfig). Deploy is declarative. Acceptable for any scale; adding replication implies zero-downtime rolls.
-
----
+**Trade-offs:** Requires a Kubernetes cluster and a narrow-scoped CI service account (`k8s/rbac/ci-deployer.yaml`). The `rollout undo` step is automatic on failure — there is no human rollback procedure. Previous revisions are retained by Kubernetes and are immediately available.
 
 ---
 
 > For the Calypso TypeScript implementation of these patterns, see [deployment-implementation.md](../implementation-ts/deployment-implementation.md).
 
 ## Implementation Checklist
-
-### Alpha Gate
 
 ### Alpha Gate
 
@@ -216,6 +213,8 @@ The agent reads the unique log first to understand the error landscape, then con
 - [ ] Deploy script exists and is idempotent (running twice has no side effects)
 - [ ] CI deploy workflow created; deploys only after all test suites pass
 - [ ] Rollback procedure tested: revert to previous commit, restart, verify health
+- [ ] CI service account kubeconfig (`KUBE_CONFIG`) stored in GitHub Secrets; generated via `scripts/setup-ci-deployer.sh`
+- [ ] Deployment verified to use immutable image digest (not mutable tag) in `kubectl get deployment -o yaml`
 - [ ] Disk usage monitoring; alert when log volume exceeds threshold
 - [ ] All environment variables documented in `docs/` with descriptions (not values)
 

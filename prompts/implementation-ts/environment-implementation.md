@@ -18,27 +18,9 @@ The Calypso development host requires exactly these system-level tools:
 | Agent CLI | Claude Code, Cursor server, Gemini CLI, or equivalent |
 | Playwright OS deps | Headless Chromium libraries (`bunx playwright install-deps`) |
 
-## Bootstrap Command
+## Session Start
 
-```bash
-curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
-```
-
-This script populates `docs/standards/` with the current Calypso conventions. The agent reads all files in this directory before any other action.
-
-## Convention Directory Structure
-
-```
-docs/
-└── standards/
-    ├── calypso-blueprint.md
-    ├── documentation-standard.md
-    ├── development-standards.md
-    ├── git-standards.md
-    └── ...
-```
-
-Users may customize files in `docs/standards/` for project-specific requirements. The bootstrap script overwrites only files that are older than the upstream version.
+At the start of every session, read all files in `prompts/` before proceeding with any development or documentation work.
 
 ## Preview Server
 

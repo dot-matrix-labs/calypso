@@ -1,0 +1,14 @@
+# Release overlay Dockerfile — worker
+#
+# Layers the compiled worker bundle onto the existing base image.
+# The base image (containers/worker/Dockerfile) contains bun, node,
+# and vendor CLI binaries. It is rebuilt only when those change.
+#
+# This file rebuilds on every merge that changes worker source code.
+
+FROM ghcr.io/dot-matrix-labs/calypso/worker:base-latest
+
+ARG RELEASE_TAG=unknown
+ENV RELEASE_TAG=${RELEASE_TAG}
+
+COPY --chown=worker:worker dist/ /app/dist/

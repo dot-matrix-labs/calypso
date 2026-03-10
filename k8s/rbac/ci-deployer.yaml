@@ -1,0 +1,47 @@
+# CI deployer service account
+# This is the only identity that may update container images in this namespace.
+# The kubeconfig for this account is stored in GitHub Actions secrets as KUBE_CONFIG.
+# Permissions are intentionally minimal: patch Deployments and StatefulSets,
+# read rollout status, trigger rollbacks. No create, no delete, no exec.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ci-deployer
+  namespace: calypso
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ci-deployer
+  namespace: calypso
+rules:
+  # Read rollout status and current state
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Patch image tags — this is the deploy signal
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["patch"]
+  # Trigger rollback (kubectl rollout undo writes a new rollout)
+  - apiGroups: ["apps"]
+    resources: ["deployments/rollback", "statefulsets/rollback"]
+    verbs: ["create"]
+  # Read pod status for rollout health monitoring
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ci-deployer
+  namespace: calypso
+subjects:
+  - kind: ServiceAccount
+    name: ci-deployer
+    namespace: calypso
+roleRef:
+  kind: Role
+  name: ci-deployer
+  apiGroup: rbac.authorization.k8s.io

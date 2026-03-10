@@ -133,7 +133,7 @@ GIT_BRAIN_METADATA:
 | commit-msg | Conformance checklist has unchecked boxes | **BLOCKS** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
 | post-commit | Branch has ≥ 10 files changed vs. main | **Warns** — PR due; appended to next-prompt.md |
-| post-checkout | Branch switch | Refreshes `docs/standards/` via bootstrap script |
+| post-checkout | Branch switch | No-op (standards live in `prompts/` in the repo) |
 | pre-push | Blueprint violations (.js files, forbidden packages) | **BLOCKS** |
 | pre-push | PR changes > 20 files vs. main | **BLOCKS** — split the PR |
 | pre-push | Lint / format / type failures | **BLOCKS** |
@@ -455,30 +455,6 @@ done
 
 ---
 
-### Standards Refresh Hook (`post-checkout`)
-
-The `post-checkout` hook fires after every branch switch. It runs `bootstrap-standards.sh` to ensure `docs/standards/` is current with the latest Calypso templates. This prevents an agent resuming work on a stale branch from operating with outdated conventions.
-
-**`scripts/hooks/post-checkout`:**
-
-```bash
-#!/usr/bin/env bash
-# post-checkout: Refreshes Calypso standards after switching branches.
-
-PREV_HEAD="$1"; NEW_HEAD="$2"; BRANCH_CHECKOUT="$3"
-
-[ "$BRANCH_CHECKOUT" != "1" ] && exit 0
-[ "$PREV_HEAD" = "$NEW_HEAD" ] && exit 0
-
-echo "post-checkout: refreshing Calypso standards..." >&2
-
-if [ -f "./scripts/bootstrap-standards.sh" ]; then
-  bash ./scripts/bootstrap-standards.sh
-else
-  curl -sSL https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/scripts/bootstrap-standards.sh | bash
-fi
-```
-
 ---
 
 ### Pre-push Stage
@@ -487,7 +463,7 @@ The pre-push hook runs four checks in order.
 
 **BLOCKS — Blueprint violations (architecture audit):**
 
-Before any quality checks, the hook scans the repository for hard architectural violations: JavaScript files in `apps/` or `packages/`, forbidden packages in `package.json`, and a missing `docs/standards/` directory. These are the antipatterns from `AGENT.md` enforced deterministically at push time — catching anything that slipped past the `pre-commit` staged-diff scan across the full working tree.
+Before any quality checks, the hook scans the repository for hard architectural violations: JavaScript files in `apps/` or `packages/`, and forbidden packages in `package.json`. These are the antipatterns from `AGENT.md` enforced deterministically at push time — catching anything that slipped past the `pre-commit` staged-diff scan across the full working tree.
 
 **BLOCKS — Lint, format, and type errors:**
 

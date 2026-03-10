@@ -20,7 +20,7 @@ Hardening never invents product direction. It only improves what exists. If you 
 
 Before doing anything else, every hardening session must:
 
-1. Read `docs/standards/hardening.md` (this file)
+1. Read `prompts/development/hardening.md` (this file)
 2. Run `bun test --coverage` and save output to `coverage-report.txt`
 3. Run `bun pm audit` and save output to `audit-report.txt`
 4. Read `docs/plans/implementation-plan.md` to confirm no feature tasks are pending

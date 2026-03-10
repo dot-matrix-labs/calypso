@@ -1,0 +1,20 @@
+# Release overlay Dockerfile — frontend
+#
+# This Dockerfile is NOT the base image. It layers the compiled app bundle
+# onto the existing base image (calypso/frontend:base-latest).
+#
+# The base image (containers/frontend/Dockerfile) contains the runtime,
+# server process, and OS dependencies. It is rebuilt rarely.
+#
+# This file is rebuilt on every merge to main that changes app source.
+# The result is a thin image where only the dist/ layer differs between releases.
+# All previous layers are cache hits — the build is fast.
+
+FROM ghcr.io/dot-matrix-labs/calypso/frontend:base-latest
+
+ARG RELEASE_TAG=unknown
+ENV RELEASE_TAG=${RELEASE_TAG}
+
+# Replace the bundle from the previous release with the new build output.
+# CI runs `bun build` before `docker build`; the output is in ./dist/.
+COPY --chown=frontend:frontend dist/ /app/dist/

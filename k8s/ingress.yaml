@@ -1,0 +1,31 @@
+# Ingress — routes external HTTPS traffic to the frontend service.
+# TLS termination is handled at the ingress layer.
+# Requires an ingress controller deployed in the cluster (e.g., nginx ingress controller
+# via: kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml)
+# and a TLS secret created by the provisioning script.
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: calypso
+  namespace: calypso
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - "${APP_DOMAIN}"   # substituted by provisioning script
+      secretName: calypso-tls
+  rules:
+    - host: "${APP_DOMAIN}"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port:
+                  number: 80

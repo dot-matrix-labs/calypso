@@ -1,78 +1,250 @@
 # Calypso Scaffold Task (Agent Entrypoint)
 
-**Role:** You are an autonomous software quality control agent verifying the successful initialization of a new Calypso project. This is your initial touchpoint.
+**Role:** You are an autonomous agent bootstrapping a new Calypso project from scratch. Handle all steps autonomously. Only pause for human input when credentials or decisions are genuinely required.
 
-## Introduction to Calypso
-Calypso is an architecture-first framework for building web applications continuously using AI agents. It relies on a strictly mandated tech stack (TypeScript, Bun, React, Tailwind) and a "Buy vs DIY" dependency minimalism.
+This task is split into two phases:
 
-Before proceeding with your tasks, you must read and adhere to the following core documents:
-1. [The Calypso Blueprint](https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/blueprints/calypso-blueprint.md) (Strict architectural constraints)
-2. [Product Owner Interview](https://raw.githubusercontent.com/dot-matrix-labs/calypso/main/prompts/process/product-owner-interview.md) (Requirements gathering protocol)
+- **Phase 1 (Outer Agent, Steps 1–3):** Run from your local machine. Provision the Linux host, stand up the Kubernetes cluster and dev container, then hand off to a new Claude session running inside the dev container.
+- **Phase 2 (Inner Agent, Steps 4–12):** Run from inside the dev container's tmux session. The outer agent launches this session automatically at the end of Step 3.
 
-## Environment Detection Rule
-Before executing the checklist below, **detect the host environment you are currently operating in**.
-* **Bare-Metal Linux (e.g., Ubuntu/Debian):** Proceed normally.
-* **Local Developer Machine (e.g., Mac OS, Windows):** You are permitted to perform this initial Scaffold phase locally. However, you must *immediately interject and nag the user*, reminding them that for continuous development and accurate execution, they must move their workspace to a remote Linux host (per the Calypso Blueprint).
+The human operator can follow along at any time by SSH-ing into the dev container (details are surfaced in Step 3). No confirmation from the operator is required to proceed.
 
 ---
 
-## The Scaffold Checklist
+## Phase 1 — Outer Agent
 
-**Objective:** Before marking the "Scaffold" phase complete and moving on to prototyping, you must verify that all of the foundational elements of the Calypso Blueprint are present and correct. 
+### Step 1: Provision Linux Host
 
-**Instructions:** 
-1. Review the current state of the repository against the checklist below.
-2. If any item is unchecked or incomplete, **you must iterate and fix it yourself** before proceeding. 
-3. Do not ask for human intervention unless a technical necessity (like missing credentials) blocks you.
-4. Once all items are verified, output the completed checklist to confirm success.
-
-### 0. Agent Setup
-- [ ] You have a `docs/standards/` folder in the project root containing copies of all standards from the Calypso template (documentation-standard.md, development-standards.md, git-standards.md, etc.)
-- [ ] At the **start of every session**, you (the agent) read all files in `docs/standards/` to understand current project conventions, regardless of which AI vendor/model is being used.
-
-### 1. Architecture
-- [ ] The repository strictly uses TypeScript, Bun, React, and Tailwind CSS.
-- [ ] A monorepo structure is established (e.g., `/apps/web`, `/apps/server`, `/packages/*`).
-- [ ] The package.json of each module has clear compiling targets for code (`/apps/web`) and server code (`/apps/server`).
-- [ ] All local dependencies of a module in the monorepo are built ahead of the target model
-- [ ] All modules succeed with `bun run build`
-- [ ] All package.json scripts are run with `bunx`, not calling a globally intalled binary, (e.g. `bunx vitest` is correct, not `vitest`)
-- [ ] Linting and formatting rules have been created
-
-### 2. Documentation
-- [ ] The Product Owner interview has been conducted natively via your prompt interactions.
-- [ ] The resulting canonical Product Requirements Document exists at `docs/prd.md`
-- [ ] Any external API test credentials requested during the interview have been securely provided and logged in an `.env` or `.env.test` file (not committed to source control).
-- [ ] There is a `docs/` directory at the root of the project. And there a no docs outside of this directory except README.md files in each directory.
-- [ ] There are extensive code comments on each of the source code files, including intruduction struct definitions and function definitions.
-- [ ] The project includes `.git/hooks/pre-push` with the documentation standard hook.
-
-
-### 3. Testing Foundation
-- [ ] Vitest and Playwright are configured.
-- [ ] The foundation for the "golden fixture" external API testing tool is scaffolded (or explicitly planned in `docs/prd.md`).
-- [ ] The project is completely clear of any mocking libraries (e.g., `jest.mock`, `msw`).
-- [ ] You have stubbed thee testfiles with no-ops for all categories of tests; server (unit, module, integration) and browser (unit, component, e2e). 
-- [ ] You can run a full test suite (all categories) and see all tests pass.
-- [ ] There are no lint or format warnings.
-- [ ] Finally the e2e test is starting the app's production `bun` server which is serving a stub placeholder HTML page, and you are able to drive it with the e2e playwright tests.
-
-### 4. Deployment Posture
-- [ ] The project includes `.env` file templates.
-- [ ] There is a foundational plan or structure for Kubernetes container deployment (e.g., Dockerfiles and minimal K8s manifests present).
-- [ ] 
-### 5. Check your work
-- [ ] **Blueprint Compliance** did you follow all the instructions, and not go off the rails?
-- [ ] **No JS Configs:** Scaffolding tools (Vite/ESLint) generate `.js` or `.mjs` configs. Delete them immediately and write them in pure `.ts`.
-- [ ] **CSS:** You don't need fancy PostCSS or other frameworks for humans, stick to CSS.
-- [ ] **No Emit:** Never let `tsc` dump JavaScript files into the repo. Ensure `"noEmit": true` is set in the `tsconfig.json` for all internal `/packages/*`.
-- [ ] **SPA Routing:** Your Bun server must check if static assets exist (`Bun.file.exists()`) before blindly falling back to returning `index.html`.
-- [ ] **Headless Testing:** Disable Playwright's auto-opening HTML reporter (`reporter: [['html', { open: 'never' }]]`) so it does not freeze your terminal session if a test fails.
-
+- [ ] **Linux host is available.** If the current machine is Linux, proceed. If not, provision a remote Linux host (Ubuntu 22.04+ recommended) using whatever cloud provider API or credentials you have access to (DigitalOcean, AWS, GCP, Hetzner, etc.).
+- [ ] All subsequent Phase 1 steps execute on that host via SSH.
 
 ---
+
+### Step 2: Set Up Kubernetes Cluster and Dev Container
+
+Run `scripts/provision-cluster.sh` to install k3s, apply all manifests, create secrets, and confirm health in one step.
+
+**Required environment variables:**
+- `PROJECT` — lowercase project name (e.g. `invoice-processor`)
+- `GITHUB_USER` — GitHub username or org
+- `GITHUB_TOKEN` — GitHub PAT with `repo` + `packages:write` scopes
+- One of: `DIGITALOCEAN_TOKEN` (creates a new Droplet) or `HOST_IP` + `SSH_KEY` (existing host)
+
+```bash
+# New DigitalOcean Droplet:
+DIGITALOCEAN_TOKEN=<tok> PROJECT=<name> GITHUB_USER=<user> GITHUB_TOKEN=<pat> \
+  ./scripts/provision-cluster.sh
+
+# Existing Linux host:
+HOST_IP=<ip> SSH_KEY=~/.ssh/id_ed25519 PROJECT=<name> GITHUB_USER=<user> GITHUB_TOKEN=<pat> \
+  ./scripts/provision-cluster.sh
+```
+
+The script handles:
+- [ ] k3s installed and `kubectl` configured
+- [ ] All `k8s/` manifests applied
+- [ ] All secrets created (GHCR credentials, SSH keys, Postgres, worker)
+- [ ] All four containers running and healthy: `dev`, `frontend`, `worker`, `db`
+- [ ] Frontend responds HTTP 200 at `http://<host-ip>:<frontend-nodeport>/health`
+- [ ] `.calypso-connect` written to the current directory with SSH connection details
+
+If the script fails, diagnose from the error output and fix before continuing.
+
+---
+
+### Step 3: Hand Off to Dev Container Agent
+
+The dev container is now running. Start a tmux session inside it and launch a new Claude session to continue from Step 4.
+
+```bash
+# Read SSH connection details
+source .calypso-connect   # sets DEV_SSH alias or connection vars
+
+# Start tmux and launch Claude inside the dev container
+ssh $DEV_SSH "tmux new-session -d -s main 'claude --resume-task scaffold'"
+```
+
+Surface the SSH details to the operator so they can follow along:
+
+> **Dev container is running.**
+>
+> A new Claude session has started inside the dev container's tmux session `main`.
+>
+> To follow along:
+> ```
+> <contents of .calypso-connect>
+> ```
+> Add the SSH config block to your local `~/.ssh/config`, then:
+> ```bash
+> ssh calypso-<project-name>
+> tmux attach -t main
+> ```
+>
+> No action required from you — the agent will continue autonomously.
+
+Phase 1 is complete. The outer agent's job is done.
+
+---
+
+## Phase 2 — Inner Agent
+
+*These steps run inside the dev container, in the tmux session `main`, launched automatically by the outer agent.*
+
+### Step 4: Establish GitHub Credentials
+
+```bash
+echo "${GITHUB_TOKEN}" | gh auth login --with-token
+gh auth status  # expected: Logged in to github.com as <username>
+
+git config --global credential.helper store
+git config --global user.name "$(gh api user --jq .login)"
+git config --global user.email "$(gh api user --jq .email)"
+```
+
+If `GITHUB_TOKEN` is not set in the environment, ask the operator for a PAT with `repo` + `packages:write` scopes.
+
+---
+
+### Step 5: Create Project Repo
+
+If `PROJECT_NAME` and `GITHUB_OWNER` are not already set in the environment, ask the operator. Then:
+
+```bash
+gh repo create "${GITHUB_OWNER}/${PROJECT_NAME}" --private --description "Built with Calypso" --confirm
+gh repo view "${GITHUB_OWNER}/${PROJECT_NAME}"  # verify
+```
+
+---
+
+### Step 6: Clone the Calypso Template
+
+```bash
+cd /workspace
+
+git clone --depth=1 --branch=main --single-branch \
+  https://github.com/dot-matrix-labs/calypso.git "${PROJECT_NAME}"
+
+cd "${PROJECT_NAME}"
+
+# Detach from template history and point at the new private repo
+rm -rf .git
+git init -b main
+git remote add origin "https://${GITHUB_TOKEN}@github.com/${GITHUB_OWNER}/${PROJECT_NAME}.git"
+```
+
+Copy in the connection info:
+```bash
+[[ -f "/tmp/.calypso-connect" ]] && cp /tmp/.calypso-connect .calypso-connect
+```
+
+---
+
+### Step 7: Initial Commit and Push
+
+```bash
+git add -A
+git commit -m "init: bootstrap from calypso template"
+git push -u origin main
+```
+
+---
+
+### Step 8: Set KUBE_CONFIG Secret
+
+Extract the kubeconfig with the cluster's public IP and set it as a GitHub Actions secret so CI can deploy:
+
+```bash
+PUBLIC_IP=$(curl -s ifconfig.me)
+kubectl config view --raw \
+  | sed "s|https://127.0.0.1:6443|https://${PUBLIC_IP}:6443|g" \
+  | base64 -w0 \
+  | gh secret set KUBE_CONFIG -R "${GITHUB_OWNER}/${PROJECT_NAME}" --body -
+```
+
+- [ ] `KUBE_CONFIG` secret confirmed set. `GITHUB_TOKEN` is provided automatically by GitHub Actions.
+
+---
+
+### Step 9: Read All Prompts
+
+Read every file in the `prompts/` directory before proceeding. These define architecture, process, security, UX, and implementation conventions for the entire project.
+
+```
+prompts/blueprints/
+prompts/development/
+prompts/implementation-ts/
+prompts/process/
+```
+
+---
+
+### Step 10: Product Owner Interview
+
+Conduct the product owner interview per `prompts/process/product-owner-interview.md`. Do not skip or abbreviate it.
+
+- [ ] Interview completed.
+- [ ] Canonical PRD written to `docs/prd.md`.
+- [ ] External API test credentials collected and stored in `.env.test` (not committed).
+
+---
+
+### Step 11: Scaffold
+
+Verify all foundational elements are present before moving to prototyping. Fix anything missing yourself before proceeding.
+
+#### Architecture
+- [ ] Monorepo structure established (`/apps/web`, `/apps/server`, `/packages/*`).
+- [ ] All modules use TypeScript, Bun, React, and Tailwind CSS exclusively.
+- [ ] `package.json` scripts use `bunx`, not globally installed binaries.
+- [ ] Local monorepo dependencies are built in correct order before dependent modules.
+- [ ] All modules pass `bun run build`.
+- [ ] Linting and formatting are configured and pass cleanly.
+
+#### Documentation
+- [ ] `docs/` directory exists at repo root. No docs outside it except per-directory `README.md` files.
+- [ ] Code comments on every source file: module purpose, key types, and function definitions.
+- [ ] `.git/hooks/pre-push` installed per `prompts/process/documentation-standard.md`.
+
+#### Testing
+- [ ] Vitest and Playwright configured.
+- [ ] No mocking libraries present (`jest.mock`, `msw`, etc.).
+- [ ] Stub test files exist for all categories: server (unit, module, integration) and browser (unit, component, e2e).
+- [ ] Full test suite passes.
+- [ ] No lint or format warnings.
+- [ ] E2e test starts the production `bun` server, which serves a stub HTML page, and Playwright drives it successfully.
+- [ ] Playwright HTML reporter set to `open: 'never'`.
+
+#### Deployment
+- [ ] `.env` template files present.
+- [ ] `k8s/` manifests updated to reference the project's own registry (`ghcr.io/<your-org>/<your-project>/*`). Once CI runs, it replaces the upstream base images via `kubectl set image`.
+- [ ] GitHub Actions workflows adapted from `.github/workflows/` in the Calypso repo: build images on push to `main`, push to `ghcr.io/<your-org>/<your-project>`, deploy to cluster via `kubectl set image`.
+- [ ] A test CI run completes successfully: image built, pushed to registry, and deployed to the cluster.
+
+#### Final Check
+- [ ] **No JS configs** — delete any `.js`/`.mjs` config files generated by scaffolding tools and rewrite in `.ts`.
+- [ ] **No emit** — `"noEmit": true` in `tsconfig.json` for all `/packages/*`.
+- [ ] **SPA routing** — Bun server checks `Bun.file.exists()` before falling back to `index.html`.
+- [ ] **Blueprint compliance** — review all blueprint documents and confirm nothing was violated or skipped.
+
+---
+
+### Step 12: Confirm Ready
+
+Tell the operator:
+
+> **Bootstrap complete.**
+>
+> Repository: `https://github.com/<owner>/<project-name>`
+> SSH details: see `.calypso-connect` at the project root.
+>
+> I am running in the tmux session named `main`. To watch: `ssh calypso-<project-name>` then `tmux attach -t main`.
+>
+> Next: awaiting your command to begin the Prototype phase.
+
+---
+
 **Action Required:**
-If your inspection reveals that the project meets all of the above criteria, output: 
+If all items above are verified, output:
 `[VERIFIED] Scaffold successful. Awaiting command to begin Prototype phase.`
 
-If your inspection fails any of the above criteria, you must output the missing items, formulate a plan to fix them, and execute that plan immediately.
+If anything fails, output the failing items, plan the fixes, and execute them immediately.

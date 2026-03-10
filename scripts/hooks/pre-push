@@ -20,8 +20,6 @@ PKG_HITS=$(find . -name "package.json" ! -path "*/node_modules/*" \
   -exec grep -lE "$FORBIDDEN" {} \; 2>/dev/null || true)
 [ -n "$PKG_HITS" ] && VIOLATIONS+=("Forbidden packages detected in:\n${PKG_HITS}")
 
-# docs/standards/ must exist
-[ ! -d "docs/standards" ] && VIOLATIONS+=("docs/standards/ is missing — run bootstrap-standards.sh")
 
 if [ ${#VIOLATIONS[@]} -gt 0 ]; then
   echo "" >&2

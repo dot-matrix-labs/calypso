@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: calypso
+spec:
+  selector:
+    app: frontend
+  ports:
+    - port: 80
+      targetPort: 8080
+  # Only pods that have passed their readiness probe are included.
+  # During a rolling update, traffic routes to old pods until new pods are ready.
+  type: ClusterIP

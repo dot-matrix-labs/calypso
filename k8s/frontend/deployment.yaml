@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: calypso
+  labels:
+    app: frontend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: frontend
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      # Never terminate an old pod before a new one is healthy.
+      # At most one extra pod during rollout.
+      maxUnavailable: 0
+      maxSurge: 1
+  # Rollout must complete within this window or it is marked failed.
+  # kubectl rollout status will exit non-zero, triggering CI rollback step.
+  progressDeadlineSeconds: 300
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec:
+      # Image is always pulled — digest-pinned tags are immutable but we
+      # enforce Always to prevent stale cached layers on node reuse.
+      imagePullPolicy: Always
+      containers:
+        - name: frontend
+          # Image tag is patched by CI to the immutable digest:
+          # ghcr.io/dot-matrix-labs/calypso/frontend@sha256:<digest>
+          image: ghcr.io/dot-matrix-labs/calypso/frontend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            # RELEASE_TAG is baked into the image at build time via ARG in Dockerfile.release.
+            # It does not need to be set here — the value is already present in the container env.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 3
+            # Pod is not added to the Service until this passes.
+            # Old pods continue serving until the new pod is ready.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 3
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "200m"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: ["ALL"]
+      imagePullSecrets:
+        - name: ghcr-credentials

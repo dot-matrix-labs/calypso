@@ -1,0 +1,62 @@
+name: Base image — calypso/frontend
+
+# Rebuilds the base image when container-level dependencies change
+# (bun version, Alpine base, Dockerfile).
+# This is rare. Day-to-day releases go through release-frontend.yml which
+# layers compiled app code on top of this base image without rebuilding it.
+# On merge to main, after building the new base, triggers release-frontend
+# so the current app bundle is re-layered onto the new base immediately.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "containers/frontend/**"
+  pull_request:
+    paths:
+      - "containers/frontend/**"
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/dot-matrix-labs/calypso/frontend
+  NAMESPACE: calypso
+  DEPLOYMENT: frontend
+
+jobs:
+  build-base:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push base image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: containers/frontend
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ env.IMAGE }}:base-${{ github.sha }}
+            ${{ env.IMAGE }}:base-latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  # NOTE: once apps/frontend/ contains a built app, add a trigger-app-release job here
+  # that chains to release-frontend.yml (uses: ./.github/workflows/release-frontend.yml)
+  # so that a base image rebuild immediately re-layers the current app bundle.

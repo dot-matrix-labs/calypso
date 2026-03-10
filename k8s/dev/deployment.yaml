@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dev
+  namespace: calypso
+  labels:
+    app: dev
+spec:
+  # The dev container is a single-instance workspace. It is not horizontally scaled.
+  # Updates to the dev image are pulled on cluster reprovision, not auto-rolled.
+  # This deployment is managed by the provisioning script, not by CI on every push.
+  replicas: 1
+  selector:
+    matchLabels:
+      app: dev
+  strategy:
+    # Recreate rather than RollingUpdate: the dev container holds agent session
+    # state that cannot be cleanly handed off to a new pod mid-session.
+    # Updates to the dev image should be applied between working sessions.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: dev
+    spec:
+      imagePullPolicy: Always
+      containers:
+        - name: dev
+          image: ghcr.io/dot-matrix-labs/calypso/dev:latest
+          ports:
+            - containerPort: 22  # SSH for IDE remote attach
+          env:
+            - name: SSH_AUTHORIZED_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: dev-ssh-keys
+                  key: authorized_keys
+          securityContext:
+            # Docker-in-Docker requires elevated privileges.
+            # This is the only container in the cluster with this capability.
+            privileged: true
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "500m"
+            limits:
+              memory: "8Gi"
+              cpu: "4000m"
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: docker-graph
+              mountPath: /var/lib/docker
+      volumes:
+        # workspace is intentionally emptyDir (ephemeral across pod restarts).
+        # All durable state must be committed to git. The tmux session survives
+        # SSH disconnects (pod keeps running), but uncommitted filesystem changes
+        # are lost if the pod is restarted or rescheduled.
+        - name: workspace
+          emptyDir: {}
+        - name: docker-graph
+          emptyDir: {}
+      imagePullSecrets:
+        - name: ghcr-credentials
