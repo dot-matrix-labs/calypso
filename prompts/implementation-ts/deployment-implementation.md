@@ -7,10 +7,11 @@
 
 ## Container Packaging
 
-Applications are packaged as immutable Docker containers and deployed via Kubernetes:
+Applications are packaged as immutable Docker containers using a multi-stage approach, and deployed via Kubernetes. The final production image uses the `oven/bun:1-distroless` image to eliminate the shell, package manager, and minimize the attack surface:
 
 ```dockerfile
 # apps/server/Dockerfile
+# STAGE 1: The Builder
 FROM oven/bun:1 AS base
 WORKDIR /app
 COPY package.json bun.lockb ./
@@ -20,10 +21,13 @@ COPY . .
 # Build the app explicitly for exact reproducibility
 RUN bun build apps/server/index.ts --target bun --outfile dist/server.js
 
-# Production stage
+# STAGE 2: The Production Distroless Runner
 FROM oven/bun:1-distroless
 WORKDIR /app
+
+# Copy the compiled application code
 COPY --from=base /app/dist/server.js ./
+
 CMD ["bun", "run", "server.js"]
 ```
 

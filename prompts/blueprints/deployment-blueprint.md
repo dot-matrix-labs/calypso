@@ -36,7 +36,7 @@ The cost of ignoring this blueprint is a system that works in development and fa
 
 ### Containers are the great unifier
 
-An application process that is started manually and dies when the session ends is not deployed — it is running. Deployment means the application is packaged as an immutable container image, deployed to an orchestrator, and restarted on crash. We exclusively use containerized services. For enterprise deployments, the most credible architecture is Kubernetes. By enforcing containers across all environments, we reduce the amount of code and tools we need to maintain for hybrid environments and create sane reproductions across dev, test, and prod.
+An application process that is started manually and dies when the session ends is not deployed — it is running. Deployment means the application is packaged as an immutable container image, deployed to an orchestrator, and restarted on crash. We exclusively use containerized services. For enterprise deployments, the most credible architecture is Kubernetes. By enforcing containers across all environments, we reduce the amount of code and tools we need to maintain for hybrid environments and create sane reproductions across dev, test, and prod. For production environments, these containers must be "distroless" — stripped of package managers, shells, and all OS-level tools not strictly required to run the application, drastically reducing the attack surface.
 
 ### No incremental hot-reloading dev servers
 
@@ -62,13 +62,13 @@ Environment variables containing secrets (API keys, database passwords, signing 
 
 ## Design Patterns
 
-### Pattern 1: Immutable Container Builds
+### Pattern 1: Immutable Distroless Container Builds
 
-**Problem:** Applications behave differently in development, test, and production environments due to host-level drift, installed dependencies, or missing system libraries.
+**Problem:** Applications behave differently in development, test, and production environments due to host-level drift, installed dependencies, or missing system libraries. Furthermore, standard container images contain shells and package managers that drastically expand the attack surface.
 
-**Solution:** Every deployment—including local development previews—starts by building an immutable container image. The container encapsulates the exact runtime, dependencies, and compiled application assets.
+**Solution:** Every deployment—including local development previews—starts by building an immutable container image. The container encapsulates the exact runtime, dependencies, and compiled application assets. For the final production artifact, we implement a multi-stage build that copies the compiled application into a "distroless" base image. This final image contains only the application and its runtime, omitting the shell and OS utilities entirely.
 
-**Trade-offs:** Building a container image for every local change is slower than a hot-reloading development server. This is a deliberate trade-off: human impatience is discarded in favor of perfect mechanical reproducibility for the agent.
+**Trade-offs:** Building a container image for every local change is slower than a hot-reloading development server, and debugging distroless images requires more structured logging since you cannot `exec` into a shell. This is a deliberate trade-off: human convenience is discarded in favor of perfect mechanical reproducibility and zero-trust security.
 
 ### Pattern 2: Dual-Log Architecture
 

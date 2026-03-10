@@ -30,7 +30,7 @@ Docker Compose starts PostgreSQL and Vault. An `init.sql` script (run once on fi
 
 ```
 # docker-compose.yml (relevant services)
-# postgres: standard postgres image, port 5432
+# postgres: distroless postgres image (e.g., cgr.dev/chainguard/postgres), port 5432
 # vault: hashicorp/vault image in dev mode, port 8200
 ```
 
