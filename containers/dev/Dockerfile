@@ -5,8 +5,6 @@ LABEL org.opencontainers.image.description="Calypso developer container — agen
 LABEL org.opencontainers.image.licenses="MIT"
 
 ENV DEBIAN_FRONTEND=noninteractive
-ENV BUN_INSTALL=/usr/local/bun
-ENV PATH="${BUN_INSTALL}/bin:/usr/local/node/bin:${PATH}"
 
 # ── System packages ───────────────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -76,15 +74,15 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Bun ───────────────────────────────────────────────────────────────────────
-RUN curl -fsSL https://bun.sh/install | bash -s -- --no-profile \
-    && ln -s "${BUN_INSTALL}/bin/bun" /usr/local/bin/bun \
-    && ln -s "${BUN_INSTALL}/bin/bunx" /usr/local/bin/bunx
-
-# ── Node.js (LTS) via NodeSource ──────────────────────────────────────────────
+# ── Node.js (LTS) via NodeSource — installed before Bun since npm installs Bun ─
 RUN curl -fsSL https://deb.nodesource.com/setup_lts.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+# ── Bun — installed via npm to avoid bun.sh/install script argument parsing ───
+RUN npm install -g bun \
+    && ln -sf "$(npm root -g)/bun/bin/bun" /usr/local/bin/bun \
+    && ln -sf "$(npm root -g)/bun/bin/bunx" /usr/local/bin/bunx
 
 # ── Claude CLI ────────────────────────────────────────────────────────────────
 RUN npm install -g @anthropic-ai/claude-code
