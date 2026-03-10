@@ -167,20 +167,20 @@ kubectl config view --raw \
 
 ### Step 9: Read All Prompts
 
-Read every file in the `prompts/` directory before proceeding. These define architecture, process, security, UX, and implementation conventions for the entire project.
+Read every file in the `agent-context/` directory before proceeding. These define architecture, process, security, UX, and implementation conventions for the entire project.
 
 ```
-prompts/blueprints/
-prompts/development/
-prompts/implementation-ts/
-prompts/process/
+agent-context/blueprints/
+agent-context/development/
+agent-context/implementation-ts/
+agent-context/development/
 ```
 
 ---
 
 ### Step 10: Product Owner Interview
 
-Conduct the product owner interview per `prompts/process/product-owner-interview.md`. Do not skip or abbreviate it.
+Conduct the product owner interview per `agent-context/development/product-owner-interview.md`. Do not skip or abbreviate it.
 
 - [ ] Interview completed.
 - [ ] Canonical PRD written to `docs/prd.md`.
@@ -203,7 +203,7 @@ Verify all foundational elements are present before moving to prototyping. Fix a
 #### Documentation
 - [ ] `docs/` directory exists at repo root. No docs outside it except per-directory `README.md` files.
 - [ ] Code comments on every source file: module purpose, key types, and function definitions.
-- [ ] `.git/hooks/pre-push` installed per `prompts/process/documentation-standard.md`.
+- [ ] `.git/hooks/pre-push` installed per `agent-context/development/documentation-standard.md`.
 
 #### Testing
 - [ ] Vitest and Playwright configured.

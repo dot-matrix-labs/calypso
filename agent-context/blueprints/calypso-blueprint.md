@@ -5,7 +5,7 @@
 > **New project?** Follow [scaffold-task.md](../process/scaffold-task.md) before anything else. That document provisions the cluster, creates the GitHub repo, and seeds the scaffold.
 
 > [!IMPORTANT]
-> **Session start (existing project):** At the start of every session, read all files in `prompts/` before proceeding. Do NOT begin any development or documentation work until this is complete.
+> **Session start (existing project):** At the start of every session, read all files in `agent-context/` before proceeding. Do NOT begin any development or documentation work until this is complete.
 
 > [!IMPORTANT]
 > **Development gate:** You are only to proceed with feature development after all steps in [scaffold-task.md](../process/scaffold-task.md) are verified as complete.

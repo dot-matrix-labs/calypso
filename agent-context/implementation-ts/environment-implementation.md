@@ -20,7 +20,7 @@ The Calypso development host requires exactly these system-level tools:
 
 ## Session Start
 
-At the start of every session, read all files in `prompts/` before proceeding with any development or documentation work.
+At the start of every session, read all files in `agent-context/` before proceeding with any development or documentation work.
 
 ## Preview Server
 

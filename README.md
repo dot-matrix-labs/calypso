@@ -16,7 +16,7 @@ Paste into your AI agent (Claude Code, Gemini CLI, Codex, etc.):
 ```
 Agent, bootstrap a new Calypso project. You will handle all setup steps autonomously.
 
-Follow prompts/process/scaffold-task.md from Step 1.
+Follow agent-context/init/scaffold-task.md from Step 1.
 
 Context: I am replacing GitHub Projects for a software team of 3.
 ```
@@ -97,9 +97,9 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 
 ## Documentation
 
-- [Calypso Blueprint](prompts/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
-- [UX Blueprint](prompts/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
-- [Auth Blueprint](prompts/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
-- [Data Blueprint](prompts/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
-- [Scaffold Task Entrypoint](prompts/process/scaffold-task.md) — the agent's first action on a new project
+- [Calypso Blueprint](agent-context/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
+- [UX Blueprint](agent-context/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
+- [Auth Blueprint](agent-context/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
+- [Data Blueprint](agent-context/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
+- [Scaffold Task Entrypoint](agent-context/init/scaffold-task.md) — the agent's first action on a new project
 - [Blueprint Authoring Standard](blueprint-standard.md) — how blueprints are written and structured

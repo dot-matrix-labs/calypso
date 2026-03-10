@@ -133,7 +133,7 @@ GIT_BRAIN_METADATA:
 | commit-msg | Conformance checklist has unchecked boxes | **BLOCKS** |
 | commit-msg | GIT_BRAIN_METADATA missing or invalid | **BLOCKS** |
 | post-commit | Branch has ≥ 10 files changed vs. main | **Warns** — PR due; appended to next-prompt.md |
-| post-checkout | Branch switch | No-op (standards live in `prompts/` in the repo) |
+| post-checkout | Branch switch | No-op (standards live in `agent-context/` in the repo) |
 | pre-push | Blueprint violations (.js files, forbidden packages) | **BLOCKS** |
 | pre-push | PR changes > 20 files vs. main | **BLOCKS** — split the PR |
 | pre-push | Lint / format / type failures | **BLOCKS** |
