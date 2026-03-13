@@ -1,0 +1,3 @@
+[submodule "agent-context"]
+	path = agent-context
+	url = https://github.com/dot-matrix-labs/calypso-blueprint
