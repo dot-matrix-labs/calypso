@@ -1,3 +1,5 @@
+pub mod state;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {
     pub version: &'a str,
