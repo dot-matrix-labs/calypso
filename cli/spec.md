@@ -615,7 +615,13 @@ Each repository must maintain structured state that tracks at least:
 - database state references
 - relevant versioning metadata
 
+Calypso orchestration state should be stored with the repository or project being managed so the workflow can be resumed from local project state.
+
 The specific file layout is intentionally deferred.
+
+The serialization format for orchestration state should be JSON.
+
+YAML is the default format for human-authored methodology templates, while JSON is the default format for machine-written runtime state. Runtime state storage must remain deterministic and crash-safe.
 
 ### 8.15 Feature state tracking
 
@@ -834,17 +840,22 @@ Every transition must be attributable to an actor, validation, or explicit overr
 
 ### 9.4 State-machine templates
 
-Calypso should ship with a default state-machine template representing the standard methodology for feature development, release, and deployment.
+Calypso should ship with a default methodology template representing the standard workflow for feature development, release, and deployment.
 
 Repositories may adopt that template directly or customize it.
 
-The default template should define, at minimum:
+The default methodology should be separable into at least:
+
+- state-machine rules
+- agent and task catalog
+- task-to-prompt mappings
+
+The state-machine rules template should define, at minimum:
 
 - states
 - transitions
 - gate groups
 - gates
-- role ownership
 - evidence requirements
 - approval requirements
 - concurrency constraints where relevant
@@ -860,6 +871,82 @@ Each gate definition should support fields such as:
 - `pass_condition`
 - `block_on_fail`
 - `role_owner`
+
+The default template model should also support sections such as:
+
+- `feature_unit`
+- `doctor_checks`
+- `hook_rules`
+- `workflow_requirements`
+- `artifact_policies`
+
+Additional useful per-gate fields may include:
+
+- `status_source`
+- `recheck_trigger`
+- `applies_to`
+- `blocking_scope`
+- `auto_open_task_on_fail`
+- `pr_checklist_label`
+- `allow_parallel_with`
+- `timeout_policy`
+- `waiver_policy`
+
+The agent and task catalog should define, at minimum:
+
+- agent identifiers
+- task identifiers
+- task ownership
+- task descriptions
+- allowed providers or execution modes
+- whether a task is agent-driven or backed by a built-in deterministic evaluator
+
+The task-to-prompt mapping should define prompt templates by task identifier rather than embedding large prompt text directly in state-transition rules.
+
+The default Calypso template set should define a battle-tested baseline methodology rather than an empty schema. Representative default gates include:
+
+- `doctor-clean`
+- `feature-unit-bound`
+- `workflow-files-present`
+- `pr-canonicalized`
+- `prd-impl-plan-reconciled`
+- `blueprint-policy-clean`
+- `merge-drift-reviewed`
+- `rust-quality-green`
+- `test-matrix-green`
+- `dba-review-green`
+- `db-forward-compat-green`
+- `release-artifact-build-green`
+- `post-deploy-health-green`
+
+Some parts of the state machine should be able to refer to built-in deterministic Rust functions through reserved keywords rather than agent prompts.
+
+Examples include checks such as:
+
+- whether the pull request is merged
+- whether required CI jobs are failing
+- whether required workflow files are present
+- whether the current branch is compatible with `main`
+
+Repositories should be able to reference these built-ins from the state-machine rules template using well-defined reserved identifiers.
+
+The default methodology template set should be embedded into the Calypso executable at build time.
+
+If the repository root, or the path where the user is executing Calypso, contains repository-authored methodology YAML, that local YAML should take precedence over the embedded default.
+
+Any repository-authored methodology YAML must be parsed and validated for coherence before it is used. At minimum, coherence validation should check:
+
+- referenced states exist
+- referenced transitions are valid
+- referenced gates exist
+- referenced tasks exist
+- referenced prompts exist where required
+- built-in evaluator keywords are valid
+- concurrency and approval references are internally consistent
+
+If repository-authored methodology YAML is absent, Calypso should fall back to the embedded default template set.
+
+Calypso may also support materializing the embedded default template set into the repository on request, but repository-local copies are optional rather than required.
 
 ## 10. Pull Request and GitHub Guardrails
 
@@ -1002,12 +1089,20 @@ Calypso requires configuration for:
 - branch naming conventions
 - role definitions
 - gate definitions
+- agent task definitions
+- task prompt definitions
 - pull request templates
 - state machine definitions
 - GitHub repository settings
 - studio templates
 
-YAML should be the default format for repository-authored state-machine and gate templates.
+YAML should be the default format for repository-authored methodology templates.
+
+Methodology YAML should normally be separated into:
+
+- state-machine rule files
+- agent/task definition files
+- prompt definition files
 
 Representative repository layout might include:
 
@@ -1019,10 +1114,13 @@ Representative repository layout might include:
     default-feature.yml
     default-release.yml
     default-deploy.yml
+  agents/
+    default-agents.yml
+  prompts/
+    default-prompts.yml
   providers/
   features/
   roles/
-  templates/
   transcripts/
 ```
 

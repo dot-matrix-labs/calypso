@@ -35,11 +35,12 @@ The prototype should assume the canonical Calypso information architecture:
 The prototype should implement only the minimum slice necessary to validate the product thesis:
 
 1. Repository-local orchestrator state.
-2. Feature-to-branch-to-worktree-to-PR mapping for the current branch.
-3. Relevant GitHub status inspection for the current feature branch or pull request.
-4. A narrow local setup and doctor flow for required dependencies and GitHub repository context.
-5. Agent session supervision through Codex CLI.
-6. A TUI showing:
+2. A shipped YAML methodology template set representing the default Calypso methodology.
+3. Feature-to-branch-to-worktree-to-PR mapping for the current branch.
+4. Relevant GitHub status inspection for the current feature branch or pull request.
+5. A narrow local setup and doctor flow for required dependencies and GitHub repository context.
+6. Agent session supervision through Codex CLI.
+7. A TUI showing:
    - the current feature unit
    - active agent sessions for that feature
    - session identifiers
@@ -55,7 +56,7 @@ The prototype should implement only the minimum slice necessary to validate the 
 - Studio mode and embedded preview UI.
 - Kubernetes deployment, audit, or doctor workflows.
 - Database-state subcommands and digital-twin workflows.
-- Native secure-element key custody beyond locating or accepting an SSH key for GitHub operations.
+- Native secure-element key custody and broader key-management workflows.
 - Release and deploy automation beyond reading status relevant to the current feature branch.
 
 ## Engineering constraints
@@ -74,7 +75,7 @@ Prefer a short dependency list with clear justification:
 - CLI argument parsing: minimal crate or hand-rolled parser
 - terminal I/O and event handling: `crossterm` by default
 - TUI rendering and layout: hand-rolled on top of `crossterm` unless complexity proves that a higher-level framework is justified
-- JSON serialization: one standard serde stack if necessary
+- structured local serialization: use JSON for machine-written orchestration state and keep YAML for human-authored methodology templates
 - Process execution: std facilities unless a crate meaningfully improves streaming control
 
 Everything else should default to hand-written Rust unless there is a strong reason not to.
@@ -141,7 +142,15 @@ Those should be treated as one bound orchestration object rather than separate c
 
 ### Gate model
 
-The prototype should show grouped gates for the current feature branch, such as:
+The prototype should execute a shipped default YAML methodology template set.
+
+That template set should be separated into:
+
+- state-machine rules
+- agent/task definitions
+- prompt definitions
+
+The state-machine rules should include grouped gates for the current feature branch, such as:
 
 - specification gates
 - implementation gates
@@ -149,6 +158,15 @@ The prototype should show grouped gates for the current feature branch, such as:
 - merge-readiness gates
 
 Each gate must have a deterministic status source where possible, even if some statuses are initially manual.
+
+The motivating prototype should start with a small but concrete default gate set rather than only abstract gate groups.
+
+Template resolution should follow this rule:
+
+- if methodology YAML exists in the repository root or current execution path, use it
+- otherwise, use the embedded default template set
+
+Any repository-authored methodology YAML must be parsed and validated for coherence before it is accepted.
 
 ### Concurrency model
 
@@ -194,15 +212,28 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 
 - [ ] Define domain types for repository state, feature state, agent session, gate group, gate status, and agent outcome.
 - [ ] Define the canonical feature unit mapping: feature = branch = worktree = pull request.
-- [ ] Define a minimal feature workflow state machine.
+- [ ] Define a minimal YAML-backed feature workflow state machine model.
 - [ ] Define deterministic transition checks.
 - [ ] Define basic scheduling metadata for safe agent concurrency.
 - [ ] Add tests for state transitions and gate grouping logic.
 
+## Phase 1.5: YAML methodology template
+
+- [ ] Define the YAML schema for state-machine rules, transitions, gate groups, gates, and approval rules.
+- [ ] Define the YAML schema for agent/task definitions.
+- [ ] Define the YAML schema for prompt definitions keyed by task name.
+- [ ] Define the default shipped feature template set for the motivating prototype.
+- [ ] Embed the default template set into the executable at build time.
+- [ ] Include hook rules, doctor checks, and workflow requirements in the state-machine rules model.
+- [ ] Define reserved built-in evaluator keywords for deterministic Rust-backed checks.
+- [ ] Validate template loading and schema errors clearly.
+
 ## Phase 2: Local persistence
 
 - [ ] Implement repository-local state storage.
+- [ ] Store orchestration state with the managed repository/project.
 - [ ] Persist feature branch state, gate state, and tracked agent sessions.
+- [ ] Store orchestration state as JSON and keep the serialization boundary localized.
 - [ ] Keep file formats simple and stable.
 - [ ] Add tests for load, save, resume, and corruption handling.
 
@@ -213,6 +244,17 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 - [ ] Read enough Git information to support the prototype state machine.
 - [ ] Validate the expected local GitHub remote context for the repository.
 - [ ] Add tests using fixture repositories where practical.
+
+## Phase 3.5: Gate evaluation runtime
+
+- [ ] Implement a deterministic runtime that evaluates gate state from the YAML state-machine rules.
+- [ ] Implement template resolution: repository-local YAML first, embedded default second.
+- [ ] Reject repository-authored YAML that fails coherence validation.
+- [ ] Resolve task execution from the agent/task catalog and prompt definitions.
+- [ ] Map built-in evaluator keywords to deterministic Rust functions.
+- [ ] Map gate status sources to Git, `gh`, local documents, doctor checks, built-in evaluators, and agent outcomes.
+- [ ] Compute blocking gates and available transitions from evaluated evidence.
+- [ ] Add tests for template-driven gate evaluation.
 
 ## Phase 4: GitHub status inspection
 
@@ -226,6 +268,12 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 - [ ] Check repository context, `gh` install/auth state, and Codex CLI availability.
 - [ ] Check that required GitHub workflow files are present in the repository.
 - [ ] Emit actionable fixes for missing or invalid local setup.
+
+## Phase 4.75: Hook and checklist integration
+
+- [ ] Implement evaluation for hook-driven rules such as merge drift and PRD-to-implementation-plan reconciliation.
+- [ ] Map grouped gate state to PR checklist semantics for the motivating prototype.
+- [ ] Ensure tag-push exemption is represented in the hook model.
 
 ## Phase 5: Codex CLI adapter
 
@@ -259,6 +307,7 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 - [ ] The tool can launch Codex CLI, stream output, and display the provider session ID when available.
 - [ ] The user can enter follow-up content from the TUI.
 - [ ] The tool can inspect the GitHub status relevant to the current branch or PR.
+- [ ] The `doctor` command can report whether repository context, `gh`, Codex CLI, and required workflow files are ready for the prototype workflow.
 - [ ] The tool can clearly show whether the feature branch is blocked, waiting for human input, or ready for review.
 - [ ] `-v` or `--version` prints semantic version, 6-character Git hash, build time, and available Git tag information.
 - [ ] `-h` or `--help` exposes version information visibly.
@@ -273,13 +322,16 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 
 1. Phase 0
 2. Phase 1
-3. Phase 2
-4. Phase 3
-5. Phase 4
-6. Phase 4.5
-7. Phase 5
-8. Phase 6
-9. Phase 7
+3. Phase 1.5
+4. Phase 2
+5. Phase 3
+6. Phase 3.5
+7. Phase 4
+8. Phase 4.5
+9. Phase 4.75
+10. Phase 5
+11. Phase 6
+12. Phase 7
 
 ## Prototype note
 
