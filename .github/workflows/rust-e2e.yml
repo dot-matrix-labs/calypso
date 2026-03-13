@@ -2,14 +2,8 @@ name: Rust end-to-end tests — cli
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "cli/**"
-      - ".github/workflows/rust-e2e.yml"
+    branches: [main, "feat/**"]
   pull_request:
-    paths:
-      - "cli/**"
-      - ".github/workflows/rust-e2e.yml"
   schedule:
     - cron: "35 1 * * *"
   workflow_dispatch:
