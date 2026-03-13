@@ -1,11 +1,5 @@
 name: Rust coverage — cli
 
-env:
-  # Coverage percentages are sensitive to rustc/LLVM version changes, so we pin
-  # the toolchain used for coverage calculation even though the rest of CI also
-  # validates a wider compatibility range.
-  COVERAGE_RUST_VERSION: "1.94.0"
-
 on:
   push:
     branches: [main]
@@ -16,8 +10,6 @@ on:
     paths:
       - "cli/**"
       - ".github/workflows/rust-coverage.yml"
-  schedule:
-    - cron: "45 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -29,8 +21,6 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ env.COVERAGE_RUST_VERSION }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -41,52 +31,21 @@ jobs:
           workspaces: |
             cli -> target
 
-      - name: Generate coverage reports
+      - name: Run coverage with 99% line threshold
         working-directory: cli
-        run: |
-          cargo llvm-cov --all-features --workspace --no-report
-          cargo llvm-cov report --lcov --output-path lcov.info
-          cargo llvm-cov report --summary-only | tee coverage-summary.txt
-          cargo llvm-cov report --show-missing-lines | tee coverage-details.txt
-          total_line=$(awk '/^TOTAL/ {print $10}' coverage-summary.txt)
-          total_region=$(awk '/^TOTAL/ {print $4}' coverage-summary.txt)
-          total_line_count=$(awk '/^TOTAL/ {print $8}' coverage-summary.txt)
-          total_region_count=$(awk '/^TOTAL/ {print $2}' coverage-summary.txt)
-          echo "CLI_LINE_COVERAGE=${total_line}" >> "$GITHUB_ENV"
-          echo "CLI_REGION_COVERAGE=${total_region}" >> "$GITHUB_ENV"
-          echo "CLI_LINE_COUNT=${total_line_count}" >> "$GITHUB_ENV"
-          echo "CLI_REGION_COUNT=${total_region_count}" >> "$GITHUB_ENV"
+        run: cargo coverage
 
       - name: Upload coverage artifact
-        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: cli-coverage-lcov
           path: cli/lcov.info
 
       - name: Append coverage summary
-        if: always()
         working-directory: cli
         shell: bash
         run: |
           echo "## CLI Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Enforced line coverage target: 99%" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Coverage Rust toolchain: ${COVERAGE_RUST_VERSION}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Test expectation on stable: all dedicated test workflows must pass" >> "$GITHUB_STEP_SUMMARY"
           echo "- LCOV artifact: cli-coverage-lcov" >> "$GITHUB_STEP_SUMMARY"
-          if [[ -n "${CLI_LINE_COVERAGE:-}" ]]; then
-            echo "- Total line coverage: ${CLI_LINE_COVERAGE} (${CLI_LINE_COUNT} lines)" >> "$GITHUB_STEP_SUMMARY"
-            echo "- Total region coverage: ${CLI_REGION_COVERAGE} (${CLI_REGION_COUNT} regions)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "- Coverage summary: not generated" >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Enforce line coverage threshold
-        working-directory: cli
-        run: |
-          line_coverage="${CLI_LINE_COVERAGE%\%}"
-          awk "BEGIN { exit !(${line_coverage} >= 99.0) }" || {
-            echo "line coverage below threshold: ${CLI_LINE_COVERAGE} < 99.00%"
-            exit 1
-          }
