@@ -208,6 +208,7 @@ impl CodexSessionSnapshot {
             provider_session_id: self.provider_session_id.clone(),
             status: self.status.into(),
             output: self.output.clone(),
+            pending_follow_ups: Vec::new(),
             terminal_outcome: self.terminal_outcome.map(Into::into),
         }
     }

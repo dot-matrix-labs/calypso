@@ -1,4 +1,6 @@
 use calypso_cli::app::{run_doctor, run_status};
+use calypso_cli::state::RepositoryState;
+use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -18,17 +20,15 @@ fn build_info() -> BuildInfo<'static> {
 
 fn main() {
     let info = build_info();
-    let arg = std::env::args().nth(1);
+    let args: Vec<String> = std::env::args().skip(1).collect();
 
-    match arg.as_deref() {
-        Some("-v") | Some("--version") => {
-            println!("{}", render_version(info));
-        }
-        Some("doctor") => {
+    match args.as_slice() {
+        [flag] if flag == "-v" || flag == "--version" => println!("{}", render_version(info)),
+        [command] if command == "doctor" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             println!("{}", run_doctor(&cwd));
         }
-        Some("status") => {
+        [command] if command == "status" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             match run_status(&cwd) {
                 Ok(output) => println!("{output}"),
@@ -38,8 +38,35 @@ fn main() {
                 }
             }
         }
-        _ => {
-            println!("{}", render_help(info));
+        [command, flag, path, headless]
+            if command == "status" && flag == "--state" && headless == "--headless" =>
+        {
+            render_status(path)
         }
+        [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
+        _ => println!("{}", render_help(info)),
     }
+}
+
+fn render_status(path: &str) {
+    let state = RepositoryState::load_from_path(std::path::Path::new(path))
+        .expect("status state file should load");
+    let surface = OperatorSurface::from_feature_state(&state.current_feature);
+    println!("{}", surface.render());
+}
+
+fn run_status_tui(path: &str) {
+    run_status_tui_with(path, run_terminal_surface).expect("status tui should complete");
+}
+
+fn run_status_tui_with<Runner>(path: &str, runner: Runner) -> Result<(), String>
+where
+    Runner: FnOnce(&mut calypso_cli::state::FeatureState) -> std::io::Result<()>,
+{
+    let mut state = RepositoryState::load_from_path(std::path::Path::new(path))
+        .map_err(|error| error.to_string())?;
+    runner(&mut state.current_feature).map_err(|error| error.to_string())?;
+    state
+        .save_to_path(std::path::Path::new(path))
+        .map_err(|error| error.to_string())
 }

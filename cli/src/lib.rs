@@ -5,6 +5,7 @@ pub mod github;
 pub mod runtime;
 pub mod state;
 pub mod template;
+pub mod tui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {
@@ -23,7 +24,7 @@ pub fn render_version(info: BuildInfo<'_>) -> String {
 
 pub fn render_help(info: BuildInfo<'_>) -> String {
     format!(
-        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor      Check local Calypso prerequisites\n  status      Inspect feature and gate state\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
+        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor      Check local Calypso prerequisites\n  status      Render the operator surface from a state file\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
         info.version, info.git_hash, info.build_time, info.git_tags
     )
 }

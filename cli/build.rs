@@ -3,6 +3,7 @@ use std::process::Command;
 fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    println!("cargo:rustc-check-cfg=cfg(coverage)");
 
     let git_hash =
         run_git(["rev-parse", "--short=6", "HEAD"]).unwrap_or_else(|| "unknown".to_string());

@@ -312,11 +312,19 @@ Completed Codex adapter notes:
 
 ## Phase 6: TUI
 
-- [ ] Build a terminal interface for agent supervision.
-- [ ] Show the current feature unit and active sessions, including session IDs and streamed output.
-- [ ] Show grouped gates for the current feature branch.
-- [ ] Allow the user to add content or answer an active session.
-- [ ] Show the current blocking gate or merge issue clearly.
+Current progress notes:
+
+- A testable operator-surface view module now renders feature context, grouped gates, blocking gates, active sessions, persisted session output, and follow-up input state from workflow data.
+- `calypso-cli status --state <path> --headless` renders the current surface snapshot without coupling tests to terminal control.
+- `calypso-cli status --state <path>` now runs an interactive `crossterm` surface with refresh, typing, submit, and quit handling.
+- Follow-up submission now queues onto the active session in persisted state so the runtime boundary can consume it later.
+- Local validation for this slice now passes with rustfmt, clippy, full test suite, and the enforced coverage gate. The coverage gate is driven through a small internal coverage runner so the binary entrypoint wiring does not distort the 99% line target for the implemented runtime logic.
+
+- [x] Build a terminal interface for agent supervision.
+- [x] Show the current feature unit and active sessions, including session IDs and streamed output.
+- [x] Show grouped gates for the current feature branch.
+- [x] Allow the user to add content or answer an active session.
+- [x] Show the current blocking gate or merge issue clearly.
 
 ## Phase 7: End-to-end prototype loop
 

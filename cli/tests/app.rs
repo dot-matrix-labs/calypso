@@ -171,8 +171,7 @@ fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
 
 #[test]
 fn resolve_current_pull_request_parses_successful_output() {
-    let temp_dir = std::env::temp_dir().join("calypso-cli-resolve-pr");
-    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let temp_dir = make_temp_dir("calypso-cli-resolve-pr");
     let gh_path = temp_dir.join("fake-gh.sh");
     std::fs::write(
         &gh_path,

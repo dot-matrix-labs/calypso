@@ -186,9 +186,14 @@ pub enum GateStatus {
 pub struct AgentSession {
     pub role: String,
     pub session_id: String,
+    #[serde(default)]
     pub provider_session_id: Option<String>,
     pub status: AgentSessionStatus,
+    #[serde(default)]
     pub output: Vec<SessionOutput>,
+    #[serde(default)]
+    pub pending_follow_ups: Vec<String>,
+    #[serde(default)]
     pub terminal_outcome: Option<AgentTerminalOutcome>,
 }
 

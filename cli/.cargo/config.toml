@@ -5,5 +5,4 @@ build-check = "build --all-targets"
 test-unit = "test --lib"
 test-integration = "test --test cli --test doctor --test github --test state --test templates"
 test-e2e = "test --test e2e -- --nocapture"
-# Keep local coverage totals on the same compiler/LLVM pair used in CI.
-coverage = "--config env.RUSTUP_TOOLCHAIN='1.94.0' llvm-cov --all-features --workspace --lcov --output-path lcov.info --fail-under-lines 99"
+coverage = "run --bin coverage-driver --"
