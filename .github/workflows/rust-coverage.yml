@@ -33,7 +33,21 @@ jobs:
 
       - name: Run coverage with 99% line threshold
         working-directory: cli
-        run: cargo coverage
+        run: |
+          cargo llvm-cov --all-features --workspace --no-report
+          cargo llvm-cov report --lcov --output-path lcov.info
+          cargo llvm-cov report --json --summary-only --output-path coverage-summary.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          summary = json.loads(Path("coverage-summary.json").read_text())
+          lines = summary["data"][0]["totals"]["lines"]
+          percent = float(lines["percent"])
+          print(f"Total line coverage: {percent:.2f}%")
+          if percent < 100.0:
+              raise SystemExit(f"line coverage below threshold: {percent:.2f}% < 100.00%")
+          PY
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v6
