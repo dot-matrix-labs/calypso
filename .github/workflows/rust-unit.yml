@@ -10,6 +10,8 @@ on:
     paths:
       - "cli/**"
       - ".github/workflows/rust-unit.yml"
+  schedule:
+    - cron: "15 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -20,6 +22,8 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Set up Rust
+        # Tests are expected to pass on the current stable toolchain even while
+        # quality/build compatibility is checked against a wider version range.
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts

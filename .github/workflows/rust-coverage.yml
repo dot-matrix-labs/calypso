@@ -1,5 +1,11 @@
 name: Rust coverage — cli
 
+env:
+  # Coverage percentages are sensitive to rustc/LLVM version changes, so we pin
+  # the toolchain used for coverage calculation even though the rest of CI also
+  # validates a wider compatibility range.
+  COVERAGE_RUST_VERSION: "1.94.0"
+
 on:
   push:
     branches: [main]
@@ -10,6 +16,8 @@ on:
     paths:
       - "cli/**"
       - ".github/workflows/rust-coverage.yml"
+  schedule:
+    - cron: "45 1 * * *"
   workflow_dispatch:
 
 jobs:
@@ -21,6 +29,8 @@ jobs:
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.COVERAGE_RUST_VERSION }}
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
@@ -62,6 +72,8 @@ jobs:
           echo "## CLI Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "- Enforced line coverage target: 99%" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Coverage Rust toolchain: ${COVERAGE_RUST_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Test expectation on stable: all dedicated test workflows must pass" >> "$GITHUB_STEP_SUMMARY"
           echo "- LCOV artifact: cli-coverage-lcov" >> "$GITHUB_STEP_SUMMARY"
           if [[ -n "${CLI_LINE_COVERAGE:-}" ]]; then
             echo "- Total line coverage: ${CLI_LINE_COVERAGE} (${CLI_LINE_COUNT} lines)" >> "$GITHUB_STEP_SUMMARY"

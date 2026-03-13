@@ -10,11 +10,29 @@ on:
     paths:
       - "cli/**"
       - ".github/workflows/rust-quality.yml"
+  schedule:
+    - cron: "05 1 * * *"
   workflow_dispatch:
 
 jobs:
   format:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # We do not declare a project-wide rust-version, but quality/build
+          # compatibility is intentionally exercised starting from 1.85.0.
+          - label: msrv
+            toolchain: "1.85.0"
+          # Keep the pinned coverage toolchain in the matrix so quality checks
+          # are evaluated on the same compiler used for coverage totals.
+          - label: coverage-pinned
+            toolchain: "1.94.0"
+          # Stable remains the main compatibility target for day-to-day use.
+          - label: stable
+            toolchain: stable
+    name: format (${{ matrix.label }} / rust ${{ matrix.toolchain }})
 
     steps:
       - uses: actions/checkout@v5
@@ -22,7 +40,8 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -36,6 +55,17 @@ jobs:
 
   clippy:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: msrv
+            toolchain: "1.85.0"
+          - label: coverage-pinned
+            toolchain: "1.94.0"
+          - label: stable
+            toolchain: stable
+    name: clippy (${{ matrix.label }} / rust ${{ matrix.toolchain }})
 
     steps:
       - uses: actions/checkout@v5
@@ -43,6 +73,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: ${{ matrix.toolchain }}
           components: clippy
 
       - name: Cache cargo artifacts
@@ -57,12 +88,25 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: msrv
+            toolchain: "1.85.0"
+          - label: coverage-pinned
+            toolchain: "1.94.0"
+          - label: stable
+            toolchain: stable
+    name: build (${{ matrix.label }} / rust ${{ matrix.toolchain }})
 
     steps:
       - uses: actions/checkout@v5
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ matrix.toolchain }}
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
