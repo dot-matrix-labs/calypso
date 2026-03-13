@@ -1,0 +1,13 @@
+[package]
+name = "calypso-cli"
+version = "0.1.0"
+edition = "2024"
+build = "build.rs"
+
+[lib]
+name = "calypso_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "calypso-cli"
+path = "src/main.rs"
