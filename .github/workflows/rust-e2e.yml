@@ -28,12 +28,6 @@ jobs:
           workspaces: |
             cli -> target
 
-      - name: Run end-to-end tests if present
+      - name: Run end-to-end tests
         working-directory: cli
-        shell: bash
-        run: |
-          if find tests/e2e -type f -name '*.rs' 2>/dev/null | grep -q .; then
-            cargo test --test e2e -- --nocapture
-          else
-            echo "No end-to-end tests found."
-          fi
+        run: cargo test-e2e

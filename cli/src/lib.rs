@@ -15,7 +15,7 @@ pub fn render_version(info: BuildInfo<'_>) -> String {
 
 pub fn render_help(info: BuildInfo<'_>) -> String {
     format!(
-        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS]\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
+        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor      Check local Calypso prerequisites\n  status      Inspect feature and gate state\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
         info.version, info.git_hash, info.build_time, info.git_tags
     )
 }
@@ -50,5 +50,6 @@ mod tests {
         assert!(output.contains("calypso-cli"));
         assert!(output.contains("Version: 0.1.0+abc123"));
         assert!(output.contains("Git hash: abc123"));
+        assert!(output.contains("Commands:"));
     }
 }

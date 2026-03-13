@@ -28,12 +28,6 @@ jobs:
           workspaces: |
             cli -> target
 
-      - name: Run integration tests if present
+      - name: Run integration tests
         working-directory: cli
-        shell: bash
-        run: |
-          if find tests -maxdepth 1 -type f -name '*.rs' | grep -q .; then
-            cargo test --tests
-          else
-            echo "No integration tests found."
-          fi
+        run: cargo test-integration
