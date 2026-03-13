@@ -2,14 +2,8 @@ name: Rust integration tests — cli
 
 on:
   push:
-    branches: [main]
-    paths:
-      - "cli/**"
-      - ".github/workflows/rust-integration.yml"
+    branches: [main, "feat/**"]
   pull_request:
-    paths:
-      - "cli/**"
-      - ".github/workflows/rust-integration.yml"
   schedule:
     - cron: "25 1 * * *"
   workflow_dispatch:
