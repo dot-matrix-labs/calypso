@@ -1,8 +1,10 @@
+use crossterm::event::{KeyCode, KeyEvent};
+
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
     WorkflowState,
 };
-use calypso_cli::tui::{InputBuffer, OperatorSurface};
+use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent};
 
 fn sample_feature() -> FeatureState {
     FeatureState {
@@ -88,4 +90,29 @@ fn input_buffer_supports_editing_and_submit() {
     assert_eq!(input.submit(), Some("h!".to_string()));
     assert_eq!(input.as_str(), "");
     assert_eq!(input.submit(), None);
+}
+
+#[test]
+fn operator_surface_handles_follow_up_submission_and_quit() {
+    let feature = sample_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature, Vec::new());
+
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Char('o'))),
+        SurfaceEvent::Continue
+    );
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Char('k'))),
+        SurfaceEvent::Continue
+    );
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Enter)),
+        SurfaceEvent::Submitted("ok".to_string())
+    );
+    assert!(surface.render().contains("Queued follow-ups: 1"));
+    assert!(surface.render().contains("Last event: queued follow-up"));
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Esc)),
+        SurfaceEvent::Quit
+    );
 }

@@ -316,13 +316,14 @@ Current progress notes:
 
 - A testable operator-surface view module now renders feature context, grouped gates, blocking gates, active sessions, and follow-up input state from persisted workflow data.
 - `calypso-cli status --state <path> --headless` renders the current surface snapshot without coupling tests to terminal control.
-- Interactive terminal event-loop wiring and follow-up submission routing remain incomplete.
+- `calypso-cli status --state <path>` now runs an interactive `crossterm` surface with refresh, typing, submit, and quit handling.
+- Follow-up submission is currently queued locally inside the TUI layer; runtime-backed session submission remains incomplete.
 
-- [ ] Build a terminal interface for agent supervision.
+- [x] Build a terminal interface for agent supervision.
 - [ ] Show the current feature unit and active sessions, including session IDs and streamed output.
-- [ ] Show grouped gates for the current feature branch.
+- [x] Show grouped gates for the current feature branch.
 - [ ] Allow the user to add content or answer an active session.
-- [ ] Show the current blocking gate or merge issue clearly.
+- [x] Show the current blocking gate or merge issue clearly.
 
 ## Phase 7: End-to-end prototype loop
 

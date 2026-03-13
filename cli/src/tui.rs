@@ -1,4 +1,14 @@
 use std::collections::BTreeMap;
+use std::io::{self, Write};
+use std::time::Duration;
+
+use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
+use crossterm::terminal::{
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
+};
+use crossterm::{execute, queue};
 
 use crate::state::{AgentSessionStatus, FeatureState, GateStatus, WorkflowState};
 
@@ -40,6 +50,8 @@ pub struct OperatorSurface {
     gate_groups: Vec<GateGroupView>,
     sessions: Vec<SessionView>,
     input: InputBuffer,
+    queued_follow_ups: Vec<String>,
+    last_event: String,
 }
 
 impl OperatorSurface {
@@ -84,6 +96,8 @@ impl OperatorSurface {
                 })
                 .collect(),
             input: InputBuffer::default(),
+            queued_follow_ups: Vec::new(),
+            last_event: "idle".to_string(),
         }
     }
 
@@ -94,6 +108,8 @@ impl OperatorSurface {
             format!("Branch: {}", self.branch),
             format!("Workflow: {}", self.workflow),
             format!("Pull request: #{}", self.pull_request_number),
+            format!("Queued follow-ups: {}", self.queued_follow_ups.len()),
+            format!("Last event: {}", self.last_event),
             format!(
                 "Blocking: {}",
                 if self.blocking_gate_ids.is_empty() {
@@ -133,6 +149,77 @@ impl OperatorSurface {
         lines.push(String::new());
         lines.push(format!("Follow-up input: {}", self.input.as_str()));
         lines.join("\n")
+    }
+
+    pub fn handle_key_event(&mut self, event: KeyEvent) -> SurfaceEvent {
+        match event.code {
+            KeyCode::Char(character) => {
+                self.input.push(character);
+                self.last_event = "typing".to_string();
+                SurfaceEvent::Continue
+            }
+            KeyCode::Backspace => {
+                self.input.backspace();
+                self.last_event = "editing".to_string();
+                SurfaceEvent::Continue
+            }
+            KeyCode::Enter => match self.input.submit() {
+                Some(follow_up) => {
+                    self.queued_follow_ups.push(follow_up.clone());
+                    self.last_event = "queued follow-up".to_string();
+                    SurfaceEvent::Submitted(follow_up)
+                }
+                None => {
+                    self.last_event = "ignored empty follow-up".to_string();
+                    SurfaceEvent::Continue
+                }
+            },
+            KeyCode::Esc => {
+                self.last_event = "quit requested".to_string();
+                SurfaceEvent::Quit
+            }
+            _ => SurfaceEvent::Continue,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SurfaceEvent {
+    Continue,
+    Submitted(String),
+    Quit,
+}
+
+pub fn run_terminal_surface(
+    feature: &FeatureState,
+    session_output: Vec<(String, Vec<String>)>,
+) -> io::Result<()> {
+    let mut stdout = io::stdout();
+    let mut surface = OperatorSurface::from_feature_state(feature, session_output);
+
+    enable_raw_mode()?;
+    execute!(stdout, EnterAlternateScreen, Hide)?;
+
+    let result = run_terminal_loop(&mut stdout, &mut surface);
+
+    execute!(stdout, Show, LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+    result
+}
+
+fn run_terminal_loop(stdout: &mut impl Write, surface: &mut OperatorSurface) -> io::Result<()> {
+    loop {
+        queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+        write!(stdout, "{}", surface.render())?;
+        stdout.flush()?;
+
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key_event) = event::read()? {
+                if surface.handle_key_event(key_event) == SurfaceEvent::Quit {
+                    return Ok(());
+                }
+            }
+        }
     }
 }
 
