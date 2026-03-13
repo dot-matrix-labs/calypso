@@ -1,6 +1,6 @@
 use calypso_cli::github::{
-    GithubCheckId, GithubEnvironment, GithubMergeability, GithubPullRequestSnapshot,
-    GithubReviewStatus, collect_github_report, parse_pull_request_view_json,
+    collect_github_report, parse_pull_request_view_json, GithubCheckId, GithubEnvironment,
+    GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus,
 };
 use calypso_cli::state::{EvidenceStatus, PullRequestRef};
 
@@ -139,7 +139,10 @@ fn github_report_preserves_actionable_errors() {
     );
 
     assert_eq!(report.snapshot, None);
-    assert_eq!(report.error.as_deref(), Some("Run `gh auth login`."));
+    assert_eq!(
+        report.error.as_deref(),
+        Some("unsupported GitHub value for gh: Run `gh auth login`.")
+    );
     assert_eq!(
         report.checks[0].status,
         EvidenceStatus::Failing,
@@ -227,9 +230,106 @@ fn gh_pr_view_parser_rejects_incomplete_check_data() {
     )
     .expect_err("missing check status should fail loudly");
 
-    assert!(
-        error
-            .to_string()
-            .contains("statusCheckRollup entry is missing status")
-    );
+    assert!(error
+        .to_string()
+        .contains("statusCheckRollup entry is missing status"));
+}
+
+#[test]
+fn gh_pr_view_parser_rejects_unknown_state() {
+    let error = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "CLOSED",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "CLEAN",
+  "statusCheckRollup": []
+}"#,
+    )
+    .expect_err("unknown state should fail");
+
+    assert!(error
+        .to_string()
+        .contains("unsupported GitHub value for state: CLOSED"));
+}
+
+#[test]
+fn gh_pr_view_parser_rejects_unknown_review_decision() {
+    let error = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "UNKNOWN_STATUS",
+  "mergeStateStatus": "CLEAN",
+  "statusCheckRollup": []
+}"#,
+    )
+    .expect_err("unknown review decision should fail");
+
+    assert!(error
+        .to_string()
+        .contains("unsupported GitHub value for reviewDecision: UNKNOWN_STATUS"));
+}
+
+#[test]
+fn gh_pr_view_parser_rejects_unknown_merge_state() {
+    let error = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "INVALID_VALUE",
+  "statusCheckRollup": []
+}"#,
+    )
+    .expect_err("unknown merge state should fail");
+
+    assert!(error
+        .to_string()
+        .contains("unsupported GitHub value for mergeStateStatus: INVALID_VALUE"));
+}
+
+#[test]
+fn gh_pr_view_parser_rejects_missing_check_conclusion() {
+    let error = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "CLEAN",
+  "statusCheckRollup": [
+    { "status": "COMPLETED", "conclusion": null }
+  ]
+}"#,
+    )
+    .expect_err("missing conclusion should fail");
+
+    assert!(error
+        .to_string()
+        .contains("statusCheckRollup entry is missing conclusion"));
+}
+
+#[test]
+fn gh_pr_view_parser_rejects_unknown_check_status() {
+    let error = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "CLEAN",
+  "statusCheckRollup": [
+    { "status": "UNKNOWN_STATUS", "conclusion": "SUCCESS" }
+  ]
+}"#,
+    )
+    .expect_err("unknown check status should fail");
+
+    assert!(error
+        .to_string()
+        .contains("unsupported GitHub value for statusCheckRollup.status: UNKNOWN_STATUS"));
 }
