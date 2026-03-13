@@ -1,6 +1,10 @@
 use calypso_cli::template::{
     AgentTaskKind, TemplateError, TemplateSet, load_embedded_template_set,
+    resolve_template_set_for_path,
 };
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_STATE_MACHINE: &str = r#"
 initial_state: new
@@ -38,6 +42,24 @@ prompts:
   pr-editor: |
     Keep the pull request description aligned with the current feature state.
 "#;
+
+fn temp_template_dir() -> PathBuf {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_nanos();
+    let path = std::env::temp_dir().join(format!("calypso-template-test-{unique}"));
+    fs::create_dir_all(&path).expect("temp template directory should be created");
+    path
+}
+
+fn write_override_templates(root: &Path) {
+    fs::write(root.join("calypso-state-machine.yml"), VALID_STATE_MACHINE)
+        .expect("state machine override should write");
+    fs::write(root.join("calypso-agents.yml"), VALID_AGENTS).expect("agents override should write");
+    fs::write(root.join("calypso-prompts.yml"), VALID_PROMPTS)
+        .expect("prompts override should write");
+}
 
 #[test]
 fn template_set_parses_and_validates_across_split_yaml_files() {
@@ -224,4 +246,79 @@ fn template_error_formats_yaml_failures() {
 
     assert!(matches!(error, TemplateError::Yaml(_)));
     assert!(error.to_string().contains("template YAML error"));
+}
+
+#[test]
+fn template_resolution_falls_back_to_embedded_defaults_when_no_local_files_exist() {
+    let temp_dir = temp_template_dir();
+
+    let template = resolve_template_set_for_path(&temp_dir)
+        .expect("embedded template set should load without local overrides");
+
+    assert_eq!(template.state_machine.initial_state, "new");
+    assert!(
+        template
+            .state_machine
+            .gate_groups
+            .iter()
+            .any(|group| group.id == "merge-readiness")
+    );
+
+    fs::remove_dir_all(temp_dir).expect("temp template directory should be removed");
+}
+
+#[test]
+fn template_resolution_prefers_complete_local_override_set() {
+    let temp_dir = temp_template_dir();
+    write_override_templates(&temp_dir);
+
+    let template =
+        resolve_template_set_for_path(&temp_dir).expect("local override template set should load");
+
+    assert_eq!(template.state_machine.gate_groups.len(), 2);
+    assert_eq!(template.agents.tasks.len(), 2);
+    assert_eq!(template.prompts.prompts.len(), 1);
+
+    fs::remove_dir_all(temp_dir).expect("temp template directory should be removed");
+}
+
+#[test]
+fn template_resolution_rejects_partial_local_override_set() {
+    let temp_dir = temp_template_dir();
+    fs::write(
+        temp_dir.join("calypso-state-machine.yml"),
+        VALID_STATE_MACHINE,
+    )
+    .expect("partial override should write");
+
+    let error = resolve_template_set_for_path(&temp_dir)
+        .expect_err("partial local override should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("calypso-agents.yml"));
+    assert!(error.to_string().contains("calypso-prompts.yml"));
+
+    fs::remove_dir_all(temp_dir).expect("temp template directory should be removed");
+}
+
+#[test]
+fn template_resolution_reports_local_io_failures() {
+    let temp_dir = temp_template_dir();
+    fs::write(
+        temp_dir.join("calypso-state-machine.yml"),
+        VALID_STATE_MACHINE,
+    )
+    .expect("state machine override should write");
+    fs::write(temp_dir.join("calypso-agents.yml"), VALID_AGENTS)
+        .expect("agents override should write");
+    fs::create_dir(temp_dir.join("calypso-prompts.yml"))
+        .expect("prompts path directory should be created");
+
+    let error = resolve_template_set_for_path(&temp_dir)
+        .expect_err("unreadable local override should fail with an I/O error");
+
+    assert!(matches!(error, TemplateError::Io(_)));
+    assert!(error.to_string().contains("template I/O error"));
+
+    fs::remove_dir_all(temp_dir).expect("temp template directory should be removed");
 }

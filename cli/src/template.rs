@@ -1,11 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fs;
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_STATE_MACHINE_YAML: &str = include_str!("../templates/default/state-machine.yml");
 const DEFAULT_AGENTS_YAML: &str = include_str!("../templates/default/agents.yml");
 const DEFAULT_PROMPTS_YAML: &str = include_str!("../templates/default/prompts.yml");
+const LOCAL_STATE_MACHINE_FILE: &str = "calypso-state-machine.yml";
+const LOCAL_AGENTS_FILE: &str = "calypso-agents.yml";
+const LOCAL_PROMPTS_FILE: &str = "calypso-prompts.yml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateSet {
@@ -135,6 +140,45 @@ pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
     )
 }
 
+pub fn resolve_template_set_for_path(root: &Path) -> Result<TemplateSet, TemplateError> {
+    let state_machine_path = root.join(LOCAL_STATE_MACHINE_FILE);
+    let agents_path = root.join(LOCAL_AGENTS_FILE);
+    let prompts_path = root.join(LOCAL_PROMPTS_FILE);
+
+    let local_files = [
+        state_machine_path.as_path(),
+        agents_path.as_path(),
+        prompts_path.as_path(),
+    ];
+    let existing_count = local_files.iter().filter(|path| path.exists()).count();
+
+    if existing_count == 0 {
+        return load_embedded_template_set();
+    }
+
+    if existing_count != local_files.len() {
+        let missing_files: Vec<&str> = [
+            (state_machine_path.exists(), LOCAL_STATE_MACHINE_FILE),
+            (agents_path.exists(), LOCAL_AGENTS_FILE),
+            (prompts_path.exists(), LOCAL_PROMPTS_FILE),
+        ]
+        .into_iter()
+        .filter_map(|(exists, name)| (!exists).then_some(name))
+        .collect();
+
+        return Err(TemplateError::Validation(format!(
+            "local methodology override is incomplete; missing files: {}",
+            missing_files.join(", ")
+        )));
+    }
+
+    let state_machine_yaml = fs::read_to_string(&state_machine_path).map_err(TemplateError::Io)?;
+    let agents_yaml = fs::read_to_string(&agents_path).map_err(TemplateError::Io)?;
+    let prompts_yaml = fs::read_to_string(&prompts_path).map_err(TemplateError::Io)?;
+
+    TemplateSet::from_yaml_strings(&state_machine_yaml, &agents_yaml, &prompts_yaml)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateMachineTemplate {
     pub initial_state: String,
@@ -185,6 +229,7 @@ pub struct PromptCatalog {
 
 #[derive(Debug)]
 pub enum TemplateError {
+    Io(std::io::Error),
     Yaml(serde_yaml::Error),
     Validation(String),
 }
@@ -192,6 +237,7 @@ pub enum TemplateError {
 impl fmt::Display for TemplateError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            TemplateError::Io(error) => write!(f, "template I/O error: {error}"),
             TemplateError::Yaml(error) => write!(f, "template YAML error: {error}"),
             TemplateError::Validation(error) => write!(f, "template validation error: {error}"),
         }
