@@ -249,7 +249,7 @@ impl BuiltinEvidence {
         self
     }
 
-    fn result_for(&self, builtin: &str) -> Option<bool> {
+    pub fn result_for(&self, builtin: &str) -> Option<bool> {
         self.results.get(builtin).copied()
     }
 }

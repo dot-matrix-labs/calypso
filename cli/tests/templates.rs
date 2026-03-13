@@ -4,6 +4,7 @@ use calypso_cli::template::{
 };
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_STATE_MACHINE: &str = r#"
@@ -43,12 +44,18 @@ prompts:
     Keep the pull request description aligned with the current feature state.
 "#;
 
+static TEMPLATE_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 fn temp_template_dir() -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("calypso-template-test-{unique}"));
+    let counter = TEMPLATE_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "calypso-template-test-{}-{unique}-{counter}",
+        std::process::id()
+    ));
     fs::create_dir_all(&path).expect("temp template directory should be created");
     path
 }

@@ -1,3 +1,4 @@
+pub mod doctor;
 pub mod state;
 pub mod template;
 
