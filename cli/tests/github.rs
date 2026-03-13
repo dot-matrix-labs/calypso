@@ -1,6 +1,6 @@
 use calypso_cli::github::{
-    collect_github_report, parse_pull_request_view_json, GithubCheckId, GithubEnvironment,
-    GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus,
+    GithubCheckId, GithubEnvironment, GithubMergeability, GithubPullRequestSnapshot,
+    GithubReviewStatus, collect_github_report, parse_pull_request_view_json,
 };
 use calypso_cli::state::{EvidenceStatus, PullRequestRef};
 
@@ -230,9 +230,11 @@ fn gh_pr_view_parser_rejects_incomplete_check_data() {
     )
     .expect_err("missing check status should fail loudly");
 
-    assert!(error
-        .to_string()
-        .contains("statusCheckRollup entry is missing status"));
+    assert!(
+        error
+            .to_string()
+            .contains("statusCheckRollup entry is missing status")
+    );
 }
 
 #[test]
@@ -249,9 +251,11 @@ fn gh_pr_view_parser_rejects_unknown_state() {
     )
     .expect_err("unknown state should fail");
 
-    assert!(error
-        .to_string()
-        .contains("unsupported GitHub value for state: CLOSED"));
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported GitHub value for state: CLOSED")
+    );
 }
 
 #[test]
@@ -268,9 +272,11 @@ fn gh_pr_view_parser_rejects_unknown_review_decision() {
     )
     .expect_err("unknown review decision should fail");
 
-    assert!(error
-        .to_string()
-        .contains("unsupported GitHub value for reviewDecision: UNKNOWN_STATUS"));
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported GitHub value for reviewDecision: UNKNOWN_STATUS")
+    );
 }
 
 #[test]
@@ -287,9 +293,11 @@ fn gh_pr_view_parser_rejects_unknown_merge_state() {
     )
     .expect_err("unknown merge state should fail");
 
-    assert!(error
-        .to_string()
-        .contains("unsupported GitHub value for mergeStateStatus: INVALID_VALUE"));
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported GitHub value for mergeStateStatus: INVALID_VALUE")
+    );
 }
 
 #[test]
@@ -308,9 +316,11 @@ fn gh_pr_view_parser_rejects_missing_check_conclusion() {
     )
     .expect_err("missing conclusion should fail");
 
-    assert!(error
-        .to_string()
-        .contains("statusCheckRollup entry is missing conclusion"));
+    assert!(
+        error
+            .to_string()
+            .contains("statusCheckRollup entry is missing conclusion")
+    );
 }
 
 #[test]
@@ -329,7 +339,9 @@ fn gh_pr_view_parser_rejects_unknown_check_status() {
     )
     .expect_err("unknown check status should fail");
 
-    assert!(error
-        .to_string()
-        .contains("unsupported GitHub value for statusCheckRollup.status: UNKNOWN_STATUS"));
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported GitHub value for statusCheckRollup.status: UNKNOWN_STATUS")
+    );
 }
