@@ -1,4 +1,22 @@
 tasks:
+  - name: gh-installed
+    kind: builtin
+    builtin: builtin.doctor.gh_installed
+  - name: codex-installed
+    kind: builtin
+    builtin: builtin.doctor.codex_installed
+  - name: gh-authenticated
+    kind: builtin
+    builtin: builtin.doctor.gh_authenticated
+  - name: github-remote-configured
+    kind: builtin
+    builtin: builtin.doctor.github_remote_configured
+  - name: feature-pr-exists
+    kind: builtin
+    builtin: builtin.github.pr_exists
+  - name: feature-pr-checks-green
+    kind: builtin
+    builtin: builtin.github.pr_checks_green
   - name: pr-editor
     kind: agent
     role: pr-editor

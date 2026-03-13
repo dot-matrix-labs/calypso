@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Command;
 
 use crate::state::BuiltinEvidence;
 
@@ -57,6 +58,37 @@ pub trait DoctorEnvironment {
     fn has_github_remote(&self, repo_root: &Path) -> bool;
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HostDoctorEnvironment;
+
+impl DoctorEnvironment for HostDoctorEnvironment {
+    fn command_exists(&self, command: &str) -> bool {
+        Command::new("which")
+            .arg(command)
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    fn gh_authenticated(&self) -> bool {
+        Command::new("gh")
+            .args(["auth", "status"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
+    fn has_github_remote(&self, repo_root: &Path) -> bool {
+        Command::new("git")
+            .args(["remote", "-v"])
+            .current_dir(repo_root)
+            .output()
+            .ok()
+            .filter(|output| output.status.success())
+            .is_some_and(|output| {
+                git_remote_output_has_github_remote(&String::from_utf8_lossy(&output.stdout))
+            })
+    }
+}
+
 pub fn collect_doctor_report(
     environment: &impl DoctorEnvironment,
     repo_root: &Path,
@@ -89,4 +121,12 @@ fn status_from_bool(passing: bool) -> DoctorStatus {
     } else {
         DoctorStatus::Failing
     }
+}
+
+pub fn git_remote_output_has_github_remote(output: &str) -> bool {
+    output.lines().any(|line| {
+        line.contains("github.com/")
+            || line.contains("github.com:")
+            || line.contains("git@github.com")
+    })
 }

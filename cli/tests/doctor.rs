@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use calypso_cli::doctor::{DoctorCheckId, DoctorEnvironment, DoctorStatus, collect_doctor_report};
+use calypso_cli::doctor::{
+    DoctorCheckId, DoctorEnvironment, DoctorStatus, collect_doctor_report,
+    git_remote_output_has_github_remote,
+};
 
 #[derive(Default)]
 struct FakeEnvironment {
@@ -127,4 +130,22 @@ fn doctor_report_converts_check_results_into_builtin_evidence() {
         evidence.result_for("builtin.doctor.github_remote_configured"),
         Some(true)
     );
+}
+
+#[test]
+fn git_remote_parser_detects_github_https_and_ssh_remotes() {
+    assert!(git_remote_output_has_github_remote(
+        "origin\thttps://github.com/acme/calypso.git (fetch)\n"
+    ));
+    assert!(git_remote_output_has_github_remote(
+        "origin\tgit@github.com:acme/calypso.git (push)\n"
+    ));
+}
+
+#[test]
+fn git_remote_parser_rejects_non_github_remotes() {
+    assert!(!git_remote_output_has_github_remote(
+        "origin\thttps://gitlab.com/acme/calypso.git (fetch)\n"
+    ));
+    assert!(!git_remote_output_has_github_remote(""));
 }

@@ -258,25 +258,25 @@ Immediate next step:
 
 ## Phase 3.5: Gate evaluation runtime
 
-- [ ] Implement a deterministic runtime that evaluates gate state from the YAML state-machine rules.
-- [ ] Implement template resolution: repository-local YAML first, embedded default second.
-- [ ] Reject repository-authored YAML that fails coherence validation.
+- [x] Implement a deterministic runtime that evaluates gate state from the YAML state-machine rules.
+- [x] Implement template resolution: repository-local YAML first, embedded default second.
+- [x] Reject repository-authored YAML that fails coherence validation.
 - [ ] Resolve task execution from the agent/task catalog and prompt definitions.
 - [ ] Map built-in evaluator keywords to deterministic Rust functions.
 - [ ] Map gate status sources to Git, `gh`, local documents, doctor checks, built-in evaluators, and agent outcomes.
 - [ ] Compute blocking gates and available transitions from evaluated evidence.
-- [ ] Add tests for template-driven gate evaluation.
+- [x] Add tests for template-driven gate evaluation.
 
 ## Phase 4: GitHub status inspection
 
-- [ ] Implement the narrowest GitHub integration needed to inspect branch or PR status.
-- [ ] Use `gh` for the required GitHub status and pull-request inspection paths.
-- [ ] Surface only the statuses relevant to gates and merge readiness.
+- [x] Implement the narrowest GitHub integration needed to inspect branch or PR status.
+- [x] Use `gh` for the required GitHub status and pull-request inspection paths.
+- [x] Surface only the statuses relevant to gates and merge readiness.
 
 ## Phase 4.5: Local doctor
 
-- [ ] Implement a narrow `doctor` command for prototype prerequisites.
-- [ ] Check repository context, `gh` install/auth state, and Codex CLI availability.
+- [x] Implement a narrow `doctor` command for prototype prerequisites.
+- [x] Check repository context, `gh` install/auth state, and Codex CLI availability.
 - [ ] Check that required GitHub workflow files are present in the repository.
 - [ ] Emit actionable fixes for missing or invalid local setup.
 
@@ -314,20 +314,26 @@ Immediate next step:
 ## Success criteria for the motivating prototype
 
 - [ ] Running `calypso-cli` in a feature branch loads or creates workflow state for the bound feature/branch/worktree/pull-request unit.
-- [ ] The tool can display grouped gates for the branch and mark their status deterministically where possible.
+- [x] The tool can display grouped gates for the branch and mark their status deterministically where possible.
 - [ ] The tool can launch Codex CLI, stream output, and display the provider session ID when available.
 - [ ] The user can enter follow-up content from the TUI.
-- [ ] The tool can inspect the GitHub status relevant to the current branch or PR.
+- [x] The tool can inspect the GitHub status relevant to the current branch or PR.
 - [ ] The `doctor` command can report whether repository context, `gh`, Codex CLI, and required workflow files are ready for the prototype workflow.
 - [ ] The tool can clearly show whether the feature branch is blocked, waiting for human input, or ready for review.
-- [ ] `-v` or `--version` prints semantic version, 6-character Git hash, build time, and available Git tag information.
-- [ ] `-h` or `--help` exposes version information visibly.
+- [x] `-v` or `--version` prints semantic version, 6-character Git hash, build time, and available Git tag information.
+- [x] `-h` or `--help` exposes version information visibly.
 
 ## Risks
 
 - Codex CLI session behavior may not expose stable identifiers in a way that is easy to normalize.
 - `gh` integration may expose output-shape and environment differences that require defensive handling.
 - TUI complexity can expand quickly if the first layout is too ambitious.
+
+## Current slice notes
+
+- `doctor` now runs against the host environment and reports `gh`, Codex, auth, and GitHub remote evidence.
+- `status` now resolves the current repo/branch, queries the active PR through `gh` when available, merges doctor/GitHub evidence, and renders grouped gate state.
+- Remaining gaps in this area are doctor workflow-file checks and more actionable remediation output.
 
 ## Recommended build order
 

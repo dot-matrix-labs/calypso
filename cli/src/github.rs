@@ -1,3 +1,7 @@
+use std::process::Command;
+
+use serde::Deserialize;
+
 use crate::state::{BuiltinEvidence, PullRequestRef};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,6 +57,30 @@ pub trait GithubEnvironment {
     fn checks_green(&self, pull_request: &PullRequestRef) -> bool;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestStatus {
+    pub exists: bool,
+    pub merged: bool,
+    pub checks_green: bool,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct HostGithubEnvironment;
+
+impl GithubEnvironment for HostGithubEnvironment {
+    fn pr_exists(&self, pull_request: &PullRequestRef) -> bool {
+        fetch_pull_request_status(pull_request).is_some()
+    }
+
+    fn pr_merged(&self, pull_request: &PullRequestRef) -> bool {
+        fetch_pull_request_status(pull_request).is_some_and(|status| status.merged)
+    }
+
+    fn checks_green(&self, pull_request: &PullRequestRef) -> bool {
+        fetch_pull_request_status(pull_request).is_some_and(|status| status.checks_green)
+    }
+}
+
 pub fn collect_github_report(
     environment: &impl GithubEnvironment,
     pull_request: &PullRequestRef,
@@ -81,4 +109,55 @@ fn status_from_bool(passing: bool) -> GithubStatus {
     } else {
         GithubStatus::Failing
     }
+}
+
+pub fn parse_pull_request_view_json(json: &str) -> Result<PullRequestStatus, serde_json::Error> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PrView {
+        merged_at: Option<String>,
+        state: String,
+        #[serde(default)]
+        status_check_rollup: Vec<CheckRollup>,
+    }
+
+    #[derive(Deserialize, Default)]
+    struct CheckRollup {
+        status: Option<String>,
+        conclusion: Option<String>,
+    }
+
+    let view: PrView = serde_json::from_str(json)?;
+    let checks_green = view.status_check_rollup.iter().all(|check| {
+        matches!(check.status.as_deref(), None | Some("COMPLETED"))
+            && matches!(
+                check.conclusion.as_deref(),
+                None | Some("SUCCESS") | Some("NEUTRAL") | Some("SKIPPED")
+            )
+    });
+
+    Ok(PullRequestStatus {
+        exists: true,
+        merged: view.state == "MERGED" || view.merged_at.is_some(),
+        checks_green,
+    })
+}
+
+fn fetch_pull_request_status(pull_request: &PullRequestRef) -> Option<PullRequestStatus> {
+    let output = Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &pull_request.number.to_string(),
+            "--json",
+            "state,mergedAt,statusCheckRollup",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    parse_pull_request_view_json(&String::from_utf8_lossy(&output.stdout)).ok()
 }
