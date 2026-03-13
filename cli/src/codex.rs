@@ -138,6 +138,15 @@ impl CodexSession {
     }
 
     pub fn send_follow_up(&mut self, input: &str) -> Result<(), CodexError> {
+        if matches!(
+            self.refresh_status()?,
+            SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Aborted
+        ) {
+            return Err(CodexError::Io(std::io::Error::from(
+                std::io::ErrorKind::BrokenPipe,
+            )));
+        }
+
         write_follow_up_line(&mut self.stdin, input)?;
 
         if self.snapshot.status == SessionStatus::WaitingForHuman {
