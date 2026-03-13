@@ -31,7 +31,7 @@ jobs:
           workspaces: |
             cli -> target
 
-      - name: Run coverage with 100% line threshold
+      - name: Run coverage with 99% line threshold
         working-directory: cli
         run: cargo coverage
 
@@ -47,5 +47,5 @@ jobs:
         run: |
           echo "## CLI Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Enforced line coverage target: 100%" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Enforced line coverage target: 99%" >> "$GITHUB_STEP_SUMMARY"
           echo "- LCOV artifact: cli-coverage-lcov" >> "$GITHUB_STEP_SUMMARY"

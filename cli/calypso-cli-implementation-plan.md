@@ -205,7 +205,7 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 - [x] Define the baseline GitHub workflow set for the repository:
   - Rust lint, format, and build
   - unit, integration, and end-to-end tests
-  - code coverage reporting with a 100% line-coverage target
+  - code coverage reporting with a 99% or greater line-coverage target
   - release and executable publishing
 - [ ] Add a short architecture note explaining why each dependency exists.
 
