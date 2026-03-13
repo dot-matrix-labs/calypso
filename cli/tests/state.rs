@@ -511,3 +511,77 @@ fn feature_state_rejects_unknown_task_bindings_during_evaluation() {
     assert!(matches!(error, GateEvaluationError::UnknownTask(_)));
     assert!(error.to_string().contains("rust-quality"));
 }
+
+#[test]
+fn builtin_evidence_merge_prefers_later_results_for_duplicate_keys() {
+    let merged = BuiltinEvidence::new()
+        .with_result("builtin.doctor.gh_installed", true)
+        .merge(
+            &BuiltinEvidence::new()
+                .with_result("builtin.github.pr_exists", true)
+                .with_result("builtin.doctor.gh_installed", false),
+        );
+
+    assert_eq!(merged.result_for("builtin.github.pr_exists"), Some(true));
+    assert_eq!(
+        merged.result_for("builtin.doctor.gh_installed"),
+        Some(false)
+    );
+}
+
+#[test]
+fn embedded_template_evaluates_doctor_and_github_builtin_gates() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-auth-refresh",
+        "feat/123-token-refresh",
+        "/worktrees/feat-123-token-refresh",
+        PullRequestRef {
+            number: 231,
+            url: "https://github.com/org/repo/pull/231".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+    let evidence = BuiltinEvidence::new()
+        .with_result("builtin.doctor.gh_installed", true)
+        .with_result("builtin.doctor.codex_installed", false)
+        .with_result("builtin.github.pr_exists", true)
+        .with_result("builtin.github.pr_checks_green", false);
+
+    feature
+        .evaluate_gates(&template, &evidence)
+        .expect("gate evaluation should succeed");
+
+    let gh_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "gh-cli-installed")
+        .expect("gh installed gate should exist");
+    assert_eq!(gh_gate.status, GateStatus::Passing);
+
+    let codex_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "codex-cli-installed")
+        .expect("codex gate should exist");
+    assert_eq!(codex_gate.status, GateStatus::Failing);
+
+    let pr_exists_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "feature-pr-exists")
+        .expect("pr exists gate should exist");
+    assert_eq!(pr_exists_gate.status, GateStatus::Passing);
+
+    let pr_checks_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "feature-pr-checks-green")
+        .expect("pr checks gate should exist");
+    assert_eq!(pr_checks_gate.status, GateStatus::Failing);
+}

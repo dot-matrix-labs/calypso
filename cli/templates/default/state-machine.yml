@@ -21,6 +21,24 @@ gate_groups:
   - id: validation
     label: Validation
     gates:
+      - id: gh-cli-installed
+        label: GH CLI installed
+        task: gh-installed
+      - id: codex-cli-installed
+        label: Codex CLI installed
+        task: codex-installed
+      - id: gh-cli-authenticated
+        label: GH CLI authenticated
+        task: gh-authenticated
+      - id: github-remote-configured
+        label: GitHub remote configured
+        task: github-remote-configured
+      - id: feature-pr-exists
+        label: Feature PR exists
+        task: feature-pr-exists
+      - id: feature-pr-checks-green
+        label: Feature PR checks green
+        task: feature-pr-checks-green
       - id: rust-quality-green
         label: Rust quality green
         task: rust-quality

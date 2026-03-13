@@ -1,3 +1,4 @@
+use calypso_cli::app::{run_doctor, run_status};
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -22,6 +23,20 @@ fn main() {
     match arg.as_deref() {
         Some("-v") | Some("--version") => {
             println!("{}", render_version(info));
+        }
+        Some("doctor") => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            println!("{}", run_doctor(&cwd));
+        }
+        Some("status") => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            match run_status(&cwd) {
+                Ok(output) => println!("{output}"),
+                Err(error) => {
+                    eprintln!("status error: {error}");
+                    std::process::exit(1);
+                }
+            }
         }
         _ => {
             println!("{}", render_help(info));

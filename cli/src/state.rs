@@ -278,6 +278,11 @@ impl BuiltinEvidence {
     pub fn result_for(&self, builtin: &str) -> Option<bool> {
         self.results.get(builtin).copied()
     }
+
+    pub fn merge(mut self, other: &Self) -> Self {
+        self.results.extend(other.results.clone());
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,4 +1,7 @@
-use calypso_cli::github::{GithubCheckId, GithubEnvironment, GithubStatus, collect_github_report};
+use calypso_cli::github::{
+    GithubCheckId, GithubEnvironment, GithubStatus, collect_github_report,
+    parse_pull_request_view_json,
+};
 use calypso_cli::state::PullRequestRef;
 
 #[derive(Default)]
@@ -97,4 +100,54 @@ fn github_report_converts_statuses_to_builtin_evidence() {
         evidence.result_for("builtin.github.pr_checks_green"),
         Some(false)
     );
+}
+
+#[test]
+fn gh_pr_view_parser_maps_merge_and_check_state() {
+    let status = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "mergedAt": null,
+  "statusCheckRollup": [
+    { "status": "COMPLETED", "conclusion": "SUCCESS" },
+    { "status": "COMPLETED", "conclusion": "NEUTRAL" }
+  ]
+}"#,
+    )
+    .expect("json should parse");
+
+    assert!(status.exists);
+    assert!(!status.merged);
+    assert!(status.checks_green);
+}
+
+#[test]
+fn gh_pr_view_parser_marks_pending_or_failed_checks_as_not_green() {
+    let pending = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "OPEN",
+  "mergedAt": null,
+  "statusCheckRollup": [
+    { "status": "IN_PROGRESS", "conclusion": null }
+  ]
+}"#,
+    )
+    .expect("json should parse");
+    assert!(!pending.checks_green);
+
+    let failing = parse_pull_request_view_json(
+        r#"{
+  "number": 231,
+  "state": "MERGED",
+  "mergedAt": "2026-03-13T00:00:00Z",
+  "statusCheckRollup": [
+    { "status": "COMPLETED", "conclusion": "FAILURE" }
+  ]
+}"#,
+    )
+    .expect("json should parse");
+    assert!(failing.merged);
+    assert!(!failing.checks_green);
 }
