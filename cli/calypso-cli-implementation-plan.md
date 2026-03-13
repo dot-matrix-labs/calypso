@@ -48,6 +48,16 @@ The prototype should implement only the minimum slice necessary to validate the 
    - a way for the user to add follow-up content or answers
    - grouped content gates for the current feature branch
 
+## PR #19 Slice Status
+
+- [x] Detect the current Git repository root and current branch.
+- [x] Derive a bound feature unit for the current branch, including worktree path and pull request identity.
+- [x] Resolve methodology templates from repository-local YAML overrides or embedded defaults.
+- [x] Load an existing repository-local JSON orchestration state file or initialize a new one from the template set.
+- [x] Persist repository and feature state back to disk deterministically.
+- [x] Expose a reusable runtime API for repository discovery and state bootstrap.
+- [x] Cover repository discovery, load-or-initialize, resume, and corrupt-state behavior with tests.
+
 ## Explicitly out of scope for the prototype
 
 - Multi-provider support beyond Codex CLI.
@@ -230,31 +240,31 @@ Immediate next step:
 
 ## Phase 1.5: YAML methodology template
 
-- [ ] Define the YAML schema for state-machine rules, transitions, gate groups, gates, and approval rules.
-- [ ] Define the YAML schema for agent/task definitions.
-- [ ] Define the YAML schema for prompt definitions keyed by task name.
-- [ ] Define the default shipped feature template set for the motivating prototype.
-- [ ] Embed the default template set into the executable at build time.
+- [x] Define the YAML schema for state-machine rules, transitions, gate groups, gates, and approval rules.
+- [x] Define the YAML schema for agent/task definitions.
+- [x] Define the YAML schema for prompt definitions keyed by task name.
+- [x] Define the default shipped feature template set for the motivating prototype.
+- [x] Embed the default template set into the executable at build time.
 - [ ] Include hook rules, doctor checks, and workflow requirements in the state-machine rules model.
-- [ ] Define reserved built-in evaluator keywords for deterministic Rust-backed checks.
-- [ ] Validate template loading and schema errors clearly.
+- [x] Define reserved built-in evaluator keywords for deterministic Rust-backed checks.
+- [x] Validate template loading and schema errors clearly.
 
 ## Phase 2: Local persistence
 
-- [ ] Implement repository-local state storage.
-- [ ] Store orchestration state with the managed repository/project.
-- [ ] Persist feature branch state, gate state, and tracked agent sessions.
-- [ ] Store orchestration state as JSON and keep the serialization boundary localized.
-- [ ] Keep file formats simple and stable.
-- [ ] Add tests for load, save, resume, and corruption handling.
+- [x] Implement repository-local state storage.
+- [x] Store orchestration state with the managed repository/project.
+- [x] Persist feature branch state, gate state, and tracked agent sessions.
+- [x] Store orchestration state as JSON and keep the serialization boundary localized.
+- [x] Keep file formats simple and stable.
+- [x] Add tests for load, save, resume, and corruption handling.
 
 ## Phase 3: Git and branch context
 
-- [ ] Detect current repository and current branch.
-- [ ] Map the current branch to Calypso feature context and its bound worktree and pull request identity.
-- [ ] Read enough Git information to support the prototype state machine.
+- [x] Detect current repository and current branch.
+- [x] Map the current branch to Calypso feature context and its bound worktree and pull request identity.
+- [x] Read enough Git information to support the prototype state machine.
 - [ ] Validate the expected local GitHub remote context for the repository.
-- [ ] Add tests using fixture repositories where practical.
+- [x] Add tests using fixture repositories where practical.
 
 ## Phase 3.5: Gate evaluation runtime
 
