@@ -64,10 +64,13 @@ fn coverage_totals(lcov: &str) -> (u64, u64) {
             lines_found = None;
         } else if let Some(found) = line.strip_prefix("LF:") {
             lines_found = found.parse::<u64>().ok();
-        } else if let Some(hit) = line.strip_prefix("LH:") {
-            if !is_excluded_from_gate(&file) {
-                total += lines_found.unwrap_or_default();
-                covered += hit.parse::<u64>().unwrap_or_default();
+        } else {
+            match line.strip_prefix("LH:") {
+                Some(hit) if !is_excluded_from_gate(&file) => {
+                    total += lines_found.unwrap_or_default();
+                    covered += hit.parse::<u64>().unwrap_or_default();
+                }
+                _ => {}
             }
         }
     }
