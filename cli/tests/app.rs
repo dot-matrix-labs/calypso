@@ -1,14 +1,14 @@
-use std::io::Write as _;
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
-
-static EXEC_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 use calypso_cli::app::{
     CommandOutput, gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
     parse_pull_request_ref, render_feature_status, resolve_current_branch,
     resolve_current_pull_request_with_program, resolve_repo_root, run_command, run_doctor,
+    run_status,
 };
+
+static PATH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 use calypso_cli::state::{
     EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus, GithubMergeability,
     GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, WorkflowState,
@@ -214,10 +214,10 @@ fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
 
 #[test]
 fn resolve_current_pull_request_parses_successful_output() {
-    let _lock = EXEC_LOCK.lock().unwrap();
     let temp_dir = make_temp_dir("calypso-cli-resolve-pr");
     let gh_path = temp_dir.join("fake-gh.sh");
     {
+        use std::io::Write as _;
         let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
         f.write_all(b"#!/bin/sh\nprintf '{\"number\":7,\"url\":\"https://github.com/dot-matrix-labs/calypso/pull/7\"}'\n")
             .expect("fake gh should be written");
@@ -263,4 +263,220 @@ fn render_feature_status_includes_github_error_when_snapshot_is_unavailable() {
 
     assert!(rendered.contains("GitHub"));
     assert!(rendered.contains("- Error: Run `gh auth login`."));
+}
+
+#[test]
+fn render_feature_status_labels_all_github_review_and_mergeability_variants() {
+    use calypso_cli::state::EvidenceStatus;
+
+    // ReviewRequired → "review-required"
+    let mut feature = feature_with_gate_statuses(&[GateStatus::Passing]);
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: true,
+        review_status: GithubReviewStatus::ReviewRequired,
+        checks: EvidenceStatus::Failing,
+        mergeability: GithubMergeability::Conflicting,
+    });
+    let rendered = render_feature_status(
+        Path::new("/tmp/feature"),
+        "feature",
+        Some(&feature.pull_request),
+        &feature,
+    );
+    assert!(rendered.contains("- PR state: draft"));
+    assert!(rendered.contains("- Review: review-required"));
+    assert!(rendered.contains("- Checks: failing"));
+    assert!(rendered.contains("- Mergeability: conflicting"));
+
+    // ChangesRequested + Blocked + Pending checks
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::ChangesRequested,
+        checks: EvidenceStatus::Pending,
+        mergeability: GithubMergeability::Blocked,
+    });
+    let rendered = render_feature_status(
+        Path::new("/tmp/feature"),
+        "feature",
+        Some(&feature.pull_request),
+        &feature,
+    );
+    assert!(rendered.contains("- Review: changes-requested"));
+    assert!(rendered.contains("- Checks: pending"));
+    assert!(rendered.contains("- Mergeability: blocked"));
+
+    // Manual checks + Unknown mergeability
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Manual,
+        mergeability: GithubMergeability::Unknown,
+    });
+    let rendered = render_feature_status(
+        Path::new("/tmp/feature"),
+        "feature",
+        Some(&feature.pull_request),
+        &feature,
+    );
+    assert!(rendered.contains("- Checks: manual"));
+    assert!(rendered.contains("- Mergeability: unknown"));
+}
+
+#[test]
+fn resolve_repo_root_returns_none_outside_a_git_repo() {
+    let temp_dir = make_temp_dir("calypso-cli-no-git-root");
+
+    assert_eq!(resolve_repo_root(&temp_dir), None);
+
+    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn resolve_current_branch_returns_none_for_non_git_directory() {
+    // Running git branch --show-current outside a git repo exits non-zero.
+    let temp_dir = make_temp_dir("calypso-cli-no-git-branch");
+
+    assert_eq!(resolve_current_branch(&temp_dir), None);
+
+    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
+    let temp_dir = make_temp_dir("calypso-cli-pr-error");
+    let gh_path = temp_dir.join("fake-gh.sh");
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
+        f.write_all(b"#!/bin/sh\necho 'fatal: repository not found' >&2\nexit 1\n")
+            .expect("fake gh should be written");
+        f.sync_all().expect("fake gh should be synced");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&gh_path)
+            .expect("fake gh metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&gh_path, permissions).expect("fake gh should be executable");
+    }
+
+    let error = resolve_current_pull_request_with_program(
+        &temp_dir,
+        gh_path.to_str().expect("path should be valid utf-8"),
+    )
+    .expect_err("unrecognised gh failure should return an error");
+
+    assert!(error.contains("repository not found"));
+
+    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn run_command_uses_status_message_when_stderr_is_empty() {
+    // Exit non-zero with no stderr — the error should mention the exit status.
+    let result = run_command(
+        Path::new("."),
+        "/bin/sh",
+        &["-c", "exit 2"],
+    );
+
+    assert!(matches!(result, Ok(CommandOutput::Failure(ref msg)) if msg.contains("exit")));
+}
+
+#[test]
+fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
+    let _guard = PATH_LOCK.lock().expect("path lock should be available");
+
+    let repo_root = init_git_repo("feat/run-status-gh-error");
+    // Make an initial commit so the repo is valid
+    std::fs::write(repo_root.join("README"), "init").expect("readme should write");
+    std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(&repo_root)
+        .output()
+        .expect("git add should run");
+    std::process::Command::new("git")
+        .args([
+            "-c", "user.email=test@test.com",
+            "-c", "user.name=Test",
+            "commit", "-m", "init",
+        ])
+        .current_dir(&repo_root)
+        .output()
+        .expect("git commit should run");
+
+    let fake_gh_dir = make_temp_dir("calypso-cli-run-status-gh-err");
+    let gh_path = fake_gh_dir.join("gh");
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
+        f.write_all(b"#!/bin/sh\necho 'fatal: repo not found' >&2\nexit 1\n")
+            .expect("fake gh should be written");
+        f.sync_all().expect("fake gh should be synced");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&gh_path)
+            .expect("fake gh metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&gh_path, permissions).expect("fake gh should be executable");
+    }
+
+    let original_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut search_path = std::ffi::OsString::new();
+    search_path.push(&fake_gh_dir);
+    search_path.push(std::ffi::OsStr::new(":"));
+    search_path.push(&original_path);
+
+    unsafe {
+        std::env::set_var("PATH", &search_path);
+    }
+
+    let output = run_status(&repo_root).expect("run_status should succeed even with gh error");
+
+    unsafe {
+        std::env::set_var("PATH", original_path);
+    }
+
+    assert!(output.contains("Feature status"));
+    assert!(output.contains("Error:") || output.contains("GitHub"));
+
+    std::fs::remove_dir_all(repo_root).expect("repo should be removed");
+    std::fs::remove_dir_all(fake_gh_dir).expect("fake gh dir should be removed");
+}
+
+#[test]
+fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_json() {
+    let temp_dir = make_temp_dir("calypso-cli-pr-malformed");
+    let gh_path = temp_dir.join("fake-gh.sh");
+    {
+        use std::io::Write as _;
+        let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
+        f.write_all(b"#!/bin/sh\nprintf 'not valid json'\n")
+            .expect("fake gh should be written");
+        f.sync_all().expect("fake gh should be synced");
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = std::fs::metadata(&gh_path)
+            .expect("fake gh metadata should exist")
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&gh_path, permissions).expect("fake gh should be executable");
+    }
+
+    let error = resolve_current_pull_request_with_program(
+        &temp_dir,
+        gh_path.to_str().expect("path should be valid utf-8"),
+    )
+    .expect_err("malformed JSON from gh should return an error");
+
+    assert!(error.contains("malformed pull request JSON"));
+
+    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }

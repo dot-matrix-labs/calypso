@@ -324,6 +324,62 @@ fn gh_pr_view_parser_rejects_missing_check_conclusion() {
 }
 
 #[test]
+fn github_snapshot_error_missing_field_formats_message() {
+    let error = calypso_cli::github::GithubSnapshotError::MissingField("gh command failed to spawn");
+    assert_eq!(error.to_string(), "gh command failed to spawn");
+}
+
+#[test]
+fn github_snapshot_error_json_formats_message() {
+    let error = parse_pull_request_view_json("not-json")
+        .expect_err("invalid json should fail");
+
+    assert!(error.to_string().contains("invalid GitHub JSON:"));
+}
+
+#[test]
+fn gh_pr_view_parser_treats_unknown_merge_state_as_pending() {
+    let status = parse_pull_request_view_json(
+        r#"{
+  "state": "OPEN",
+  "isDraft": false,
+  "reviewDecision": "APPROVED",
+  "mergeStateStatus": "UNKNOWN",
+  "statusCheckRollup": []
+}"#,
+    )
+    .expect("json should parse");
+
+    assert_eq!(status.mergeability, GithubMergeability::Unknown);
+}
+
+#[test]
+fn github_report_converts_changes_requested_review_to_failing_evidence() {
+    let report = collect_github_report(
+        &FakeGithubEnvironment::default().with_snapshot(GithubPullRequestSnapshot {
+            is_draft: false,
+            review_status: GithubReviewStatus::ChangesRequested,
+            checks: EvidenceStatus::Pending,
+            mergeability: GithubMergeability::Unknown,
+        }),
+        &sample_pr(),
+    );
+
+    let evidence = report.to_builtin_evidence();
+
+    assert_eq!(
+        evidence.result_for("builtin.github.pr_review_approved"),
+        Some(false),
+        "ChangesRequested review should map to failing evidence"
+    );
+    assert_eq!(
+        evidence.status_for("builtin.github.pr_mergeable"),
+        Some(EvidenceStatus::Pending),
+        "Unknown mergeability should map to pending evidence"
+    );
+}
+
+#[test]
 fn gh_pr_view_parser_rejects_unknown_check_status() {
     let error = parse_pull_request_view_json(
         r#"{
