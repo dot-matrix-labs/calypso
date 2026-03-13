@@ -8,7 +8,7 @@ use calypso_cli::state::{
     GateStatus, PullRequestRef, RepositoryState, SessionOutput, SessionOutputStream, StateError,
     TransitionError, TransitionFacts, WorkflowState,
 };
-use calypso_cli::template::{load_embedded_template_set, TemplateSet};
+use calypso_cli::template::{TemplateSet, load_embedded_template_set};
 
 fn sample_state() -> RepositoryState {
     RepositoryState {
@@ -220,11 +220,13 @@ fn feature_state_initializes_gate_groups_from_template() {
         template.state_machine.gate_groups.len()
     );
     assert_eq!(feature.gate_groups[0].gates[0].task, "pr-editor");
-    assert!(feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .all(|gate| gate.status == GateStatus::Pending));
+    assert!(
+        feature
+            .gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .all(|gate| gate.status == GateStatus::Pending)
+    );
 }
 
 #[test]
@@ -387,12 +389,14 @@ fn feature_state_leaves_builtin_gate_pending_without_evidence() {
         .evaluate_gates(&template, &BuiltinEvidence::new())
         .expect("gate evaluation should succeed");
 
-    assert!(feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .filter(|gate| gate.id == "rust-quality-green" || gate.id == "merge-drift-reviewed")
-        .all(|gate| gate.status == GateStatus::Pending));
+    assert!(
+        feature
+            .gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .filter(|gate| gate.id == "rust-quality-green" || gate.id == "merge-drift-reviewed")
+            .all(|gate| gate.status == GateStatus::Pending)
+    );
 }
 
 #[test]
