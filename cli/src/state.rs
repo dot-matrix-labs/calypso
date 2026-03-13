@@ -1,10 +1,11 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::template::TemplateSet;
+use crate::template::{AgentTaskKind, TemplateSet};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryState {
@@ -81,6 +82,48 @@ impl FeatureState {
                 .collect(),
             active_sessions: Vec::new(),
         })
+    }
+
+    pub fn evaluate_gates(
+        &mut self,
+        template: &TemplateSet,
+        evidence: &BuiltinEvidence,
+    ) -> Result<(), GateEvaluationError> {
+        for group in &mut self.gate_groups {
+            for gate in &mut group.gates {
+                let task = template
+                    .task_by_name(gate.task.as_str())
+                    .ok_or_else(|| GateEvaluationError::UnknownTask(gate.task.clone()))?;
+
+                gate.status = match task.kind {
+                    AgentTaskKind::Builtin => {
+                        let builtin = task
+                            .builtin
+                            .as_deref()
+                            .expect("validated builtin tasks must define a builtin evaluator");
+
+                        match evidence.result_for(builtin) {
+                            Some(true) => GateStatus::Passing,
+                            Some(false) => GateStatus::Failing,
+                            None => GateStatus::Pending,
+                        }
+                    }
+                    AgentTaskKind::Human => GateStatus::Manual,
+                    AgentTaskKind::Agent | AgentTaskKind::Hook => GateStatus::Pending,
+                };
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn blocking_gate_ids(&self) -> Vec<String> {
+        self.gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .filter(|gate| gate.status != GateStatus::Passing)
+            .map(|gate| gate.id.clone())
+            .collect()
     }
 }
 
@@ -190,3 +233,40 @@ impl fmt::Display for GateInitializationError {
 }
 
 impl std::error::Error for GateInitializationError {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BuiltinEvidence {
+    results: BTreeMap<String, bool>,
+}
+
+impl BuiltinEvidence {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_result(mut self, builtin: &str, passed: bool) -> Self {
+        self.results.insert(builtin.to_string(), passed);
+        self
+    }
+
+    fn result_for(&self, builtin: &str) -> Option<bool> {
+        self.results.get(builtin).copied()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GateEvaluationError {
+    UnknownTask(String),
+}
+
+impl fmt::Display for GateEvaluationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GateEvaluationError::UnknownTask(task) => {
+                write!(f, "gate evaluation references unknown task '{task}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for GateEvaluationError {}

@@ -130,6 +130,10 @@ impl TemplateSet {
 
         Ok(())
     }
+
+    pub fn task_by_name(&self, task_name: &str) -> Option<&AgentTask> {
+        self.agents.tasks.iter().find(|task| task.name == task_name)
+    }
 }
 
 pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
