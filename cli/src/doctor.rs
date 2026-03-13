@@ -1,6 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use crate::runtime::discover_current_repository_context;
 use crate::state::BuiltinEvidence;
 
 const REQUIRED_WORKFLOW_FILES: [&str; 6] = [
@@ -18,6 +19,7 @@ pub enum DoctorCheckId {
     CodexInstalled,
     GhAuthenticated,
     GithubRemoteConfigured,
+    FeatureBindingResolved,
     RequiredWorkflowFilesPresent,
 }
 
@@ -28,6 +30,7 @@ impl DoctorCheckId {
             DoctorCheckId::CodexInstalled => "builtin.doctor.codex_installed",
             DoctorCheckId::GhAuthenticated => "builtin.doctor.gh_authenticated",
             DoctorCheckId::GithubRemoteConfigured => "builtin.doctor.github_remote_configured",
+            DoctorCheckId::FeatureBindingResolved => "builtin.doctor.feature_binding_resolved",
             DoctorCheckId::RequiredWorkflowFilesPresent => {
                 "builtin.doctor.required_workflows_present"
             }
@@ -40,6 +43,7 @@ impl DoctorCheckId {
             DoctorCheckId::CodexInstalled => "codex-installed",
             DoctorCheckId::GhAuthenticated => "gh-authenticated",
             DoctorCheckId::GithubRemoteConfigured => "github-remote-configured",
+            DoctorCheckId::FeatureBindingResolved => "feature-binding-resolved",
             DoctorCheckId::RequiredWorkflowFilesPresent => "required-workflows-present",
         }
     }
@@ -51,11 +55,19 @@ pub enum DoctorStatus {
     Failing,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DoctorCheckScope {
+    LocalConfiguration,
+    ExternalAuth,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoctorCheck {
     pub id: DoctorCheckId,
+    pub scope: DoctorCheckScope,
     pub status: DoctorStatus,
     pub detail: Option<String>,
+    pub remediation: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +92,7 @@ pub trait DoctorEnvironment {
     fn command_exists(&self, command: &str) -> bool;
     fn gh_authenticated(&self) -> bool;
     fn has_github_remote(&self, repo_root: &Path) -> bool;
+    fn feature_binding_status(&self, repo_root: &Path) -> Result<(), String>;
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String>;
 }
 
@@ -113,6 +126,12 @@ impl DoctorEnvironment for HostDoctorEnvironment {
             })
     }
 
+    fn feature_binding_status(&self, repo_root: &Path) -> Result<(), String> {
+        discover_current_repository_context(repo_root)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    }
+
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String> {
         let workflows_root = repo_root.join(".github/workflows");
         let mut missing = REQUIRED_WORKFLOW_FILES
@@ -129,37 +148,48 @@ pub fn collect_doctor_report(
     environment: &impl DoctorEnvironment,
     repo_root: &Path,
 ) -> DoctorReport {
+    let feature_binding_status = environment.feature_binding_status(repo_root);
     let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
     missing_workflow_files.sort();
 
     DoctorReport {
         checks: vec![
-            DoctorCheck {
-                id: DoctorCheckId::GhInstalled,
-                status: status_from_bool(environment.command_exists("gh")),
-                detail: None,
-            },
-            DoctorCheck {
-                id: DoctorCheckId::CodexInstalled,
-                status: status_from_bool(environment.command_exists("codex")),
-                detail: None,
-            },
-            DoctorCheck {
-                id: DoctorCheckId::GhAuthenticated,
-                status: status_from_bool(environment.gh_authenticated()),
-                detail: None,
-            },
-            DoctorCheck {
-                id: DoctorCheckId::GithubRemoteConfigured,
-                status: status_from_bool(environment.has_github_remote(repo_root)),
-                detail: None,
-            },
-            DoctorCheck {
-                id: DoctorCheckId::RequiredWorkflowFilesPresent,
-                status: status_from_bool(missing_workflow_files.is_empty()),
-                detail: (!missing_workflow_files.is_empty())
-                    .then_some(missing_workflow_files.join(", ")),
-            },
+            make_check(
+                DoctorCheckId::GhInstalled,
+                DoctorCheckScope::LocalConfiguration,
+                environment.command_exists("gh"),
+                None,
+            ),
+            make_check(
+                DoctorCheckId::CodexInstalled,
+                DoctorCheckScope::LocalConfiguration,
+                environment.command_exists("codex"),
+                None,
+            ),
+            make_check(
+                DoctorCheckId::GhAuthenticated,
+                DoctorCheckScope::ExternalAuth,
+                environment.gh_authenticated(),
+                None,
+            ),
+            make_check(
+                DoctorCheckId::GithubRemoteConfigured,
+                DoctorCheckScope::LocalConfiguration,
+                environment.has_github_remote(repo_root),
+                None,
+            ),
+            make_check(
+                DoctorCheckId::FeatureBindingResolved,
+                DoctorCheckScope::LocalConfiguration,
+                feature_binding_status.is_ok(),
+                feature_binding_status.err(),
+            ),
+            make_check(
+                DoctorCheckId::RequiredWorkflowFilesPresent,
+                DoctorCheckScope::LocalConfiguration,
+                missing_workflow_files.is_empty(),
+                (!missing_workflow_files.is_empty()).then_some(missing_workflow_files.join(", ")),
+            ),
         ],
     }
 }
@@ -169,6 +199,26 @@ fn status_from_bool(passing: bool) -> DoctorStatus {
         DoctorStatus::Passing
     } else {
         DoctorStatus::Failing
+    }
+}
+
+fn make_check(
+    id: DoctorCheckId,
+    scope: DoctorCheckScope,
+    passing: bool,
+    detail: Option<String>,
+) -> DoctorCheck {
+    let status = status_from_bool(passing);
+    let remediation = (status == DoctorStatus::Failing)
+        .then(|| failing_fix(id, detail.as_deref()))
+        .flatten();
+
+    DoctorCheck {
+        id,
+        scope,
+        status,
+        detail,
+        remediation,
     }
 }
 
@@ -191,7 +241,11 @@ pub fn render_doctor_report(report: &DoctorReport) -> String {
         };
         lines.push(format!("- [{status}] {}", check.id.label()));
 
-        if let Some(fix) = failing_fix(check) {
+        if let Some(detail) = &check.detail {
+            lines.push(format!("  detail: {detail}"));
+        }
+
+        if let Some(fix) = &check.remediation {
             lines.push(format!("  fix: {fix}"));
         }
     }
@@ -199,12 +253,8 @@ pub fn render_doctor_report(report: &DoctorReport) -> String {
     lines.join("\n")
 }
 
-fn failing_fix(check: &DoctorCheck) -> Option<String> {
-    if check.status != DoctorStatus::Failing {
-        return None;
-    }
-
-    match check.id {
+fn failing_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<String> {
+    match id {
         DoctorCheckId::GhInstalled => {
             Some("Install GitHub CLI and ensure `gh` is available on PATH.".to_string())
         }
@@ -218,9 +268,13 @@ fn failing_fix(check: &DoctorCheck) -> Option<String> {
             "Add a GitHub remote such as `git remote add origin git@github.com:<owner>/<repo>.git`."
                 .to_string(),
         ),
+        DoctorCheckId::FeatureBindingResolved => Some(
+            "Ensure this worktree is on a feature branch with an open GitHub pull request."
+                .to_string(),
+        ),
         DoctorCheckId::RequiredWorkflowFilesPresent => Some(format!(
             "Add the missing workflow files under .github/workflows: {}",
-            check.detail.as_deref().unwrap_or("unknown")
+            detail.unwrap_or("unknown")
         )),
     }
 }

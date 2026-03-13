@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use calypso_cli::doctor::{
-    DoctorCheckId, DoctorEnvironment, DoctorStatus, collect_doctor_report,
+    DoctorCheckId, DoctorCheckScope, DoctorEnvironment, DoctorStatus, collect_doctor_report,
     git_remote_output_has_github_remote,
 };
 
@@ -11,6 +11,8 @@ struct FakeEnvironment {
     commands: BTreeSet<String>,
     gh_authenticated: bool,
     github_remote_roots: BTreeSet<PathBuf>,
+    feature_binding_roots: BTreeSet<PathBuf>,
+    feature_binding_errors: BTreeMap<PathBuf, String>,
     missing_workflow_files: BTreeMap<PathBuf, Vec<String>>,
 }
 
@@ -27,6 +29,17 @@ impl FakeEnvironment {
 
     fn with_github_remote_root(mut self, root: &Path) -> Self {
         self.github_remote_roots.insert(root.to_path_buf());
+        self
+    }
+
+    fn with_feature_binding_root(mut self, root: &Path) -> Self {
+        self.feature_binding_roots.insert(root.to_path_buf());
+        self
+    }
+
+    fn with_feature_binding_error(mut self, root: &Path, detail: &str) -> Self {
+        self.feature_binding_errors
+            .insert(root.to_path_buf(), detail.to_string());
         self
     }
 
@@ -52,6 +65,18 @@ impl DoctorEnvironment for FakeEnvironment {
         self.github_remote_roots.contains(repo_root)
     }
 
+    fn feature_binding_status(&self, repo_root: &Path) -> Result<(), String> {
+        if self.feature_binding_roots.contains(repo_root) {
+            return Ok(());
+        }
+
+        Err(self
+            .feature_binding_errors
+            .get(repo_root)
+            .cloned()
+            .unwrap_or_else(|| "branch is not mapped to an open pull request".to_string()))
+    }
+
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String> {
         self.missing_workflow_files
             .get(repo_root)
@@ -68,6 +93,17 @@ fn status_map(report: &calypso_cli::doctor::DoctorReport) -> BTreeMap<DoctorChec
         .collect()
 }
 
+fn check_for<'a>(
+    report: &'a calypso_cli::doctor::DoctorReport,
+    id: DoctorCheckId,
+) -> &'a calypso_cli::doctor::DoctorCheck {
+    report
+        .checks
+        .iter()
+        .find(|check| check.id == id)
+        .expect("check should exist")
+}
+
 #[test]
 fn doctor_report_collects_expected_check_results() {
     let repo_root = Path::new("/tmp/calypso");
@@ -76,7 +112,8 @@ fn doctor_report_collects_expected_check_results() {
             .with_command("gh")
             .with_command("codex")
             .with_gh_authenticated(true)
-            .with_github_remote_root(repo_root),
+            .with_github_remote_root(repo_root)
+            .with_feature_binding_root(repo_root),
         repo_root,
     );
 
@@ -93,6 +130,10 @@ fn doctor_report_collects_expected_check_results() {
     );
     assert_eq!(
         statuses[&DoctorCheckId::GithubRemoteConfigured],
+        DoctorStatus::Passing
+    );
+    assert_eq!(
+        statuses[&DoctorCheckId::FeatureBindingResolved],
         DoctorStatus::Passing
     );
     assert_eq!(
@@ -120,6 +161,10 @@ fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
         DoctorStatus::Failing
     );
     assert_eq!(
+        statuses[&DoctorCheckId::FeatureBindingResolved],
+        DoctorStatus::Failing
+    );
+    assert_eq!(
         statuses[&DoctorCheckId::RequiredWorkflowFilesPresent],
         DoctorStatus::Passing
     );
@@ -132,7 +177,8 @@ fn doctor_report_converts_check_results_into_builtin_evidence() {
         &FakeEnvironment::default()
             .with_command("gh")
             .with_gh_authenticated(true)
-            .with_github_remote_root(repo_root),
+            .with_github_remote_root(repo_root)
+            .with_feature_binding_root(repo_root),
         repo_root,
     );
 
@@ -155,8 +201,71 @@ fn doctor_report_converts_check_results_into_builtin_evidence() {
         Some(true)
     );
     assert_eq!(
+        evidence.result_for("builtin.doctor.feature_binding_resolved"),
+        Some(true)
+    );
+    assert_eq!(
         evidence.result_for("builtin.doctor.required_workflows_present"),
         Some(true)
+    );
+}
+
+#[test]
+fn doctor_report_marks_missing_feature_binding_as_failing() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default().with_feature_binding_error(
+            repo_root,
+            "current branch is not mapped to an open pull request",
+        ),
+        repo_root,
+    );
+    let statuses = status_map(&report);
+
+    assert_eq!(
+        statuses[&DoctorCheckId::FeatureBindingResolved],
+        DoctorStatus::Failing
+    );
+}
+
+#[test]
+fn doctor_report_labels_external_auth_failures_separately_from_local_setup_failures() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_command("gh")
+            .with_command("codex")
+            .with_github_remote_root(repo_root)
+            .with_feature_binding_root(repo_root),
+        repo_root,
+    );
+
+    assert_eq!(
+        check_for(&report, DoctorCheckId::GhAuthenticated).scope,
+        DoctorCheckScope::ExternalAuth
+    );
+    assert_eq!(
+        check_for(&report, DoctorCheckId::FeatureBindingResolved).scope,
+        DoctorCheckScope::LocalConfiguration
+    );
+}
+
+#[test]
+fn doctor_report_exposes_actionable_remediation_in_the_result_model() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default().with_feature_binding_error(
+            repo_root,
+            "current branch is not mapped to an open pull request",
+        ),
+        repo_root,
+    );
+
+    assert_eq!(
+        check_for(&report, DoctorCheckId::FeatureBindingResolved)
+            .remediation
+            .as_deref(),
+        Some("Ensure this worktree is on a feature branch with an open GitHub pull request.")
     );
 }
 
@@ -191,6 +300,28 @@ fn doctor_report_render_includes_actionable_fix_for_missing_workflows() {
     assert!(rendered.contains(
         "Add the missing workflow files under .github/workflows: release-cli.yml, rust-quality.yml"
     ));
+}
+
+#[test]
+fn doctor_report_render_includes_actionable_fix_for_missing_feature_binding() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default().with_feature_binding_error(
+            repo_root,
+            "current branch is not mapped to an open pull request",
+        ),
+        repo_root,
+    );
+
+    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+
+    assert!(rendered.contains("feature-binding-resolved"));
+    assert!(
+        rendered.contains(
+            "Ensure this worktree is on a feature branch with an open GitHub pull request."
+        )
+    );
+    assert!(rendered.contains("current branch is not mapped to an open pull request"));
 }
 
 #[test]
