@@ -26,6 +26,8 @@ fn sample_state() -> RepositoryState {
                 number: 22,
                 url: "https://github.com/org/repo/pull/22".to_string(),
             },
+            github_snapshot: None,
+            github_error: None,
             workflow_state: WorkflowState::Implementation,
             gate_groups: vec![GateGroup {
                 id: "validation".to_string(),

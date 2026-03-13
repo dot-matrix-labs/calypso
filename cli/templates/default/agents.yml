@@ -14,21 +14,18 @@ tasks:
   - name: feature-pr-exists
     kind: builtin
     builtin: builtin.github.pr_exists
+  - name: feature-pr-ready-for-review
+    kind: builtin
+    builtin: builtin.github.pr_ready_for_review
   - name: feature-pr-checks-green
     kind: builtin
     builtin: builtin.github.pr_checks_green
-  - name: implementation-plan-present
+  - name: feature-pr-reviewed
     kind: builtin
-    builtin: builtin.policy.implementation_plan_present
-  - name: implementation-plan-fresh
+    builtin: builtin.github.pr_review_approved
+  - name: feature-pr-mergeable
     kind: builtin
-    builtin: builtin.policy.implementation_plan_fresh
-  - name: next-prompt-present
-    kind: builtin
-    builtin: builtin.policy.next_prompt_present
-  - name: required-workflows-present
-    kind: builtin
-    builtin: builtin.policy.required_workflows_present
+    builtin: builtin.github.pr_mergeable
   - name: pr-editor
     kind: agent
     role: pr-editor

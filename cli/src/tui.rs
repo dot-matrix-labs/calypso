@@ -17,7 +17,10 @@ use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
 
-use crate::state::{AgentSessionStatus, FeatureState, GateStatus, WorkflowState};
+use crate::state::{
+    AgentSessionStatus, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
+    GithubReviewStatus, WorkflowState,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct InputBuffer {
@@ -53,6 +56,8 @@ pub struct OperatorSurface {
     branch: String,
     workflow: String,
     pull_request_number: u64,
+    github: Option<GithubView>,
+    github_error: Option<String>,
     blocking_gate_ids: Vec<String>,
     gate_groups: Vec<GateGroupView>,
     sessions: Vec<SessionView>,
@@ -68,6 +73,17 @@ impl OperatorSurface {
             branch: feature.branch.clone(),
             workflow: workflow_label(feature.workflow_state.clone()),
             pull_request_number: feature.pull_request.number,
+            github: feature.github_snapshot.as_ref().map(|snapshot| GithubView {
+                pr_state: if snapshot.is_draft {
+                    "draft".to_string()
+                } else {
+                    "ready-for-review".to_string()
+                },
+                review: github_review_label(&snapshot.review_status).to_string(),
+                checks: evidence_status_label(&snapshot.checks).to_string(),
+                mergeability: github_mergeability_label(&snapshot.mergeability).to_string(),
+            }),
+            github_error: feature.github_error.clone(),
             blocking_gate_ids: feature.blocking_gate_ids(),
             gate_groups: feature
                 .gate_groups
@@ -133,6 +149,19 @@ impl OperatorSurface {
             "Gate Groups".to_string(),
         ];
 
+        if let Some(github) = &self.github {
+            lines.push(String::new());
+            lines.push("GitHub".to_string());
+            lines.push(format!("PR state: {}", github.pr_state));
+            lines.push(format!("Review: {}", github.review));
+            lines.push(format!("Checks: {}", github.checks));
+            lines.push(format!("Mergeability: {}", github.mergeability));
+        } else if let Some(error) = &self.github_error {
+            lines.push(String::new());
+            lines.push("GitHub".to_string());
+            lines.push(format!("Error: {error}"));
+        }
+
         for group in &self.gate_groups {
             lines.push(format!("{}:", group.label));
             for gate in &group.gates {
@@ -195,6 +224,14 @@ pub enum SurfaceEvent {
     Continue,
     Submitted(String),
     Quit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GithubView {
+    pr_state: String,
+    review: String,
+    checks: String,
+    mergeability: String,
 }
 
 #[cfg(not(coverage))]
@@ -373,5 +410,31 @@ fn session_status_label(status: AgentSessionStatus) -> &'static str {
         AgentSessionStatus::Completed => "completed",
         AgentSessionStatus::Failed => "failed",
         AgentSessionStatus::Aborted => "aborted",
+    }
+}
+
+fn github_review_label(status: &GithubReviewStatus) -> &'static str {
+    match status {
+        GithubReviewStatus::Approved => "approved",
+        GithubReviewStatus::ReviewRequired => "review-required",
+        GithubReviewStatus::ChangesRequested => "changes-requested",
+    }
+}
+
+fn github_mergeability_label(status: &GithubMergeability) -> &'static str {
+    match status {
+        GithubMergeability::Mergeable => "mergeable",
+        GithubMergeability::Conflicting => "conflicting",
+        GithubMergeability::Blocked => "blocked",
+        GithubMergeability::Unknown => "unknown",
+    }
+}
+
+fn evidence_status_label(status: &EvidenceStatus) -> &'static str {
+    match status {
+        EvidenceStatus::Passing => "passing",
+        EvidenceStatus::Failing => "failing",
+        EvidenceStatus::Pending => "pending",
+        EvidenceStatus::Manual => "manual",
     }
 }

@@ -7,7 +7,8 @@ use crate::doctor::{HostDoctorEnvironment, collect_doctor_report, render_doctor_
 use crate::github::{HostGithubEnvironment, collect_github_report};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::state::{
-    BuiltinEvidence, FeatureState, GateStatus, PullRequestChecklistItem, PullRequestRef,
+    BuiltinEvidence, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
+    GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
 };
 use crate::template::load_embedded_template_set;
 
@@ -24,7 +25,11 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
     let branch = resolve_current_branch(&repo_root)
         .expect("git repositories should report the current branch");
     let template = load_embedded_template_set().expect("embedded templates should remain valid");
-    let pull_request = resolve_current_pull_request(&repo_root);
+    let pull_request_lookup = resolve_current_pull_request(&repo_root);
+    let pull_request = match &pull_request_lookup {
+        Ok(pull_request) => pull_request.clone(),
+        Err(_) => None,
+    };
     let mut feature = FeatureState::from_template(
         branch.as_str(),
         branch.as_str(),
@@ -38,14 +43,29 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
 
     let doctor_evidence =
         collect_doctor_report(&HostDoctorEnvironment, &repo_root).to_builtin_evidence();
-    let github_evidence = pull_request
+    let github_report = pull_request
         .as_ref()
-        .map(|pr| collect_github_report(&HostGithubEnvironment, pr).to_builtin_evidence())
+        .map(|pr| collect_github_report(&HostGithubEnvironment, pr));
+    let github_evidence = github_report
+        .as_ref()
+        .map(|report| report.to_builtin_evidence())
         .unwrap_or_else(missing_pull_request_evidence);
     let policy_evidence = collect_policy_evidence(&HostPolicyEnvironment, &repo_root, &template);
     let evidence = doctor_evidence
         .merge(&github_evidence)
         .merge(&policy_evidence);
+    feature.github_snapshot = github_report
+        .as_ref()
+        .and_then(|report| report.snapshot.clone());
+    feature.github_error = match &pull_request_lookup {
+        Err(error) => Some(error.clone()),
+        Ok(_) => None,
+    }
+    .or_else(|| {
+        github_report
+            .as_ref()
+            .and_then(|report| report.error.clone())
+    });
 
     feature
         .evaluate_gates(&template, &evidence)
@@ -98,6 +118,35 @@ pub fn render_feature_status(
 
     let blocking = feature.blocking_gate_ids();
     lines.push(String::new());
+    if let Some(snapshot) = &feature.github_snapshot {
+        lines.push("GitHub".to_string());
+        lines.push(format!(
+            "- PR state: {}",
+            if snapshot.is_draft {
+                "draft"
+            } else {
+                "ready-for-review"
+            }
+        ));
+        lines.push(format!(
+            "- Review: {}",
+            github_review_label(&snapshot.review_status)
+        ));
+        lines.push(format!(
+            "- Checks: {}",
+            evidence_status_label(&snapshot.checks)
+        ));
+        lines.push(format!(
+            "- Mergeability: {}",
+            github_mergeability_label(&snapshot.mergeability)
+        ));
+        lines.push(String::new());
+    } else if let Some(error) = &feature.github_error {
+        lines.push("GitHub".to_string());
+        lines.push(format!("- Error: {error}"));
+        lines.push(String::new());
+    }
+
     if blocking.is_empty() {
         lines.push("Blocking gates: none".to_string());
     } else {
@@ -121,23 +170,40 @@ pub fn gate_status_label(status: &GateStatus) -> &'static str {
 }
 
 pub fn resolve_repo_root(cwd: &Path) -> Option<PathBuf> {
-    run_command(cwd, "git", &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
+    match run_command(cwd, "git", &["rev-parse", "--show-toplevel"]) {
+        Ok(CommandOutput::Success(output)) => Some(PathBuf::from(output)),
+        Ok(CommandOutput::Failure(_)) | Err(_) => None,
+    }
 }
 
 pub fn resolve_current_branch(repo_root: &Path) -> Option<String> {
-    run_command(repo_root, "git", &["branch", "--show-current"])
+    match run_command(repo_root, "git", &["branch", "--show-current"]) {
+        Ok(CommandOutput::Success(output)) => Some(output),
+        Ok(CommandOutput::Failure(_)) | Err(_) => None,
+    }
 }
 
-pub fn resolve_current_pull_request(repo_root: &Path) -> Option<PullRequestRef> {
+pub fn resolve_current_pull_request(repo_root: &Path) -> Result<Option<PullRequestRef>, String> {
     resolve_current_pull_request_with_program(repo_root, "gh")
 }
 
 pub fn resolve_current_pull_request_with_program(
     repo_root: &Path,
     program: &str,
-) -> Option<PullRequestRef> {
+) -> Result<Option<PullRequestRef>, String> {
     let output = run_command(repo_root, program, &["pr", "view", "--json", "number,url"])?;
-    parse_pull_request_ref(&output)
+    match output {
+        CommandOutput::Success(output) => parse_pull_request_ref(&output)
+            .map(Some)
+            .ok_or_else(|| "gh returned malformed pull request JSON".to_string()),
+        CommandOutput::Failure(error) => {
+            if error.contains("no pull requests found") {
+                Ok(None)
+            } else {
+                Err(error)
+            }
+        }
+    }
 }
 
 pub fn missing_pull_request_ref() -> PullRequestRef {
@@ -148,10 +214,7 @@ pub fn missing_pull_request_ref() -> PullRequestRef {
 }
 
 pub fn missing_pull_request_evidence() -> BuiltinEvidence {
-    BuiltinEvidence::new()
-        .with_result("builtin.github.pr_exists", false)
-        .with_result("builtin.github.pr_merged", false)
-        .with_result("builtin.github.pr_checks_green", false)
+    BuiltinEvidence::new().with_result("builtin.github.pr_exists", false)
 }
 
 pub fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
@@ -169,18 +232,56 @@ pub fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
     })
 }
 
-pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Option<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommandOutput {
+    Success(String),
+    Failure(String),
+}
+
+pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOutput, String> {
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
         .output()
-        .ok()?;
+        .map_err(|error| format!("failed to spawn `{program}`: {error}"))?;
 
     if !output.status.success() {
-        return None;
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let message = if stderr.is_empty() {
+            format!("`{program}` exited with status {}", output.status)
+        } else {
+            stderr
+        };
+        return Ok(CommandOutput::Failure(message));
     }
 
     String::from_utf8(output.stdout)
-        .ok()
-        .map(|stdout| stdout.trim().to_string())
+        .map(|stdout| CommandOutput::Success(stdout.trim().to_string()))
+        .map_err(|error| format!("`{program}` produced invalid UTF-8: {error}"))
+}
+
+fn github_review_label(status: &GithubReviewStatus) -> &'static str {
+    match status {
+        GithubReviewStatus::Approved => "approved",
+        GithubReviewStatus::ReviewRequired => "review-required",
+        GithubReviewStatus::ChangesRequested => "changes-requested",
+    }
+}
+
+fn github_mergeability_label(status: &GithubMergeability) -> &'static str {
+    match status {
+        GithubMergeability::Mergeable => "mergeable",
+        GithubMergeability::Conflicting => "conflicting",
+        GithubMergeability::Blocked => "blocked",
+        GithubMergeability::Unknown => "unknown",
+    }
+}
+
+fn evidence_status_label(status: &EvidenceStatus) -> &'static str {
+    match status {
+        EvidenceStatus::Passing => "passing",
+        EvidenceStatus::Failing => "failing",
+        EvidenceStatus::Pending => "pending",
+        EvidenceStatus::Manual => "manual",
+    }
 }

@@ -5,12 +5,13 @@ use std::sync::{LazyLock, Mutex};
 static EXEC_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 use calypso_cli::app::{
-    gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
+    CommandOutput, gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
     parse_pull_request_ref, render_feature_status, resolve_current_branch,
     resolve_current_pull_request_with_program, resolve_repo_root, run_command, run_doctor,
 };
 use calypso_cli::state::{
-    FeatureState, Gate, GateGroup, GateStatus, PullRequestRef, WorkflowState,
+    EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus, GithubMergeability,
+    GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, WorkflowState,
 };
 
 fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
@@ -22,6 +23,8 @@ fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
             number: 7,
             url: "https://github.com/dot-matrix-labs/calypso/pull/7".to_string(),
         },
+        github_snapshot: None,
+        github_error: None,
         workflow_state: WorkflowState::Implementation,
         gate_groups: vec![GateGroup {
             id: "validation".to_string(),
@@ -125,26 +128,51 @@ fn missing_pull_request_defaults_are_failing() {
 
     let evidence = missing_pull_request_evidence();
     assert_eq!(evidence.result_for("builtin.github.pr_exists"), Some(false));
-    assert_eq!(evidence.result_for("builtin.github.pr_merged"), Some(false));
     assert_eq!(
-        evidence.result_for("builtin.github.pr_checks_green"),
-        Some(false)
+        evidence.result_for("builtin.github.pr_ready_for_review"),
+        None
     );
+    assert_eq!(evidence.result_for("builtin.github.pr_checks_green"), None);
+}
+
+#[test]
+fn render_feature_status_includes_normalized_github_snapshot() {
+    let mut feature = feature_with_gate_statuses(&[GateStatus::Passing]);
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Passing,
+        mergeability: GithubMergeability::Mergeable,
+    });
+
+    let rendered = render_feature_status(
+        Path::new("/tmp/feature"),
+        "feature",
+        Some(&feature.pull_request),
+        &feature,
+    );
+
+    assert!(rendered.contains("GitHub"));
+    assert!(rendered.contains("- PR state: ready-for-review"));
+    assert!(rendered.contains("- Review: approved"));
+    assert!(rendered.contains("- Checks: passing"));
+    assert!(rendered.contains("- Mergeability: mergeable"));
 }
 
 #[test]
 fn run_command_returns_none_for_non_zero_exit() {
-    assert_eq!(
-        run_command(Path::new("."), "/bin/sh", &["-c", "exit 1"]),
-        None
-    );
+    assert!(matches!(
+        run_command(Path::new("."), "/bin/sh", &["-c", "echo boom >&2; exit 1"]),
+        Ok(CommandOutput::Failure(error)) if error == "boom"
+    ));
 }
 
 #[test]
 fn run_command_returns_none_when_process_cannot_spawn() {
-    assert_eq!(
-        run_command(Path::new("."), "/definitely/missing-binary", &[]),
-        None
+    assert!(
+        run_command(Path::new("."), "/definitely/missing-binary", &[])
+            .expect_err("missing binary should return an error")
+            .contains("failed to spawn")
     );
 }
 
@@ -152,7 +180,7 @@ fn run_command_returns_none_when_process_cannot_spawn() {
 fn run_command_returns_trimmed_stdout_for_successful_process() {
     assert_eq!(
         run_command(Path::new("."), "/bin/sh", &["-c", "printf ' hello\\n'"]),
-        Some("hello".to_string())
+        Ok(CommandOutput::Success("hello".to_string()))
     );
 }
 
@@ -177,9 +205,10 @@ fn parse_pull_request_ref_accepts_valid_json() {
 
 #[test]
 fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
-    assert_eq!(
-        resolve_current_pull_request_with_program(Path::new("."), "/definitely/missing-binary"),
-        None
+    assert!(
+        resolve_current_pull_request_with_program(Path::new("."), "/definitely/missing-binary")
+            .expect_err("missing gh should return an error")
+            .contains("failed to spawn")
     );
 }
 
@@ -208,6 +237,7 @@ fn resolve_current_pull_request_parses_successful_output() {
         &temp_dir,
         gh_path.to_str().expect("path should be valid utf-8"),
     )
+    .expect("pull request lookup should succeed")
     .expect("pull request should resolve");
 
     assert_eq!(pull_request.number, 7);
@@ -217,4 +247,20 @@ fn resolve_current_pull_request_parses_successful_output() {
     );
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn render_feature_status_includes_github_error_when_snapshot_is_unavailable() {
+    let mut feature = feature_with_gate_statuses(&[GateStatus::Failing]);
+    feature.github_error = Some("Run `gh auth login`.".to_string());
+
+    let rendered = render_feature_status(
+        Path::new("/tmp/feature"),
+        "feature",
+        Some(&feature.pull_request),
+        &feature,
+    );
+
+    assert!(rendered.contains("GitHub"));
+    assert!(rendered.contains("- Error: Run `gh auth login`."));
 }
