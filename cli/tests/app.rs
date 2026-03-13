@@ -2,8 +2,8 @@ use std::path::Path;
 
 use calypso_cli::app::{
     gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
-    parse_pull_request_ref, render_feature_status, resolve_current_pull_request_with_program,
-    run_command, run_doctor,
+    parse_pull_request_ref, render_feature_status, resolve_current_branch,
+    resolve_current_pull_request_with_program, resolve_repo_root, run_command, run_doctor,
 };
 use calypso_cli::state::{
     FeatureState, Gate, GateGroup, GateStatus, PullRequestRef, WorkflowState,
@@ -37,6 +37,31 @@ fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
     }
 }
 
+fn make_temp_dir(name: &str) -> std::path::PathBuf {
+    let unique = format!(
+        "{name}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos()
+    );
+    let path = std::env::temp_dir().join(unique);
+    std::fs::create_dir_all(&path).expect("temp dir should be created");
+    path
+}
+
+fn init_git_repo(branch: &str) -> std::path::PathBuf {
+    let repo_root = make_temp_dir("calypso-cli-app-tests");
+    std::process::Command::new("git")
+        .args(["init", "-b", branch])
+        .current_dir(&repo_root)
+        .output()
+        .expect("git init should run successfully");
+
+    repo_root
+}
+
 #[test]
 fn render_feature_status_reports_missing_pr_and_no_blocking_gates() {
     let feature = feature_with_gate_statuses(&[GateStatus::Passing, GateStatus::Passing]);
@@ -48,14 +73,29 @@ fn render_feature_status_reports_missing_pr_and_no_blocking_gates() {
 
 #[test]
 fn run_doctor_falls_back_to_current_directory_outside_git_repo() {
-    let temp_dir = std::env::temp_dir().join("calypso-cli-run-doctor-no-git");
-    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let temp_dir = make_temp_dir("calypso-cli-run-doctor-no-git");
 
     let rendered = run_doctor(&temp_dir);
 
     assert!(rendered.contains("Doctor checks"));
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn resolve_repo_root_and_branch_report_git_context() {
+    let repo_root = init_git_repo("feature/test-app-runtime");
+    let nested_dir = repo_root.join("nested");
+    std::fs::create_dir_all(&nested_dir).expect("nested dir should be created");
+    let canonical_repo_root = std::fs::canonicalize(&repo_root).expect("repo root should resolve");
+
+    assert_eq!(resolve_repo_root(&nested_dir), Some(canonical_repo_root));
+    assert_eq!(
+        resolve_current_branch(&repo_root),
+        Some("feature/test-app-runtime".to_string())
+    );
+
+    std::fs::remove_dir_all(repo_root).expect("temp repo should be removed");
 }
 
 #[test]
@@ -91,6 +131,14 @@ fn run_command_returns_none_when_process_cannot_spawn() {
     assert_eq!(
         run_command(Path::new("."), "/definitely/missing-binary", &[]),
         None
+    );
+}
+
+#[test]
+fn run_command_returns_trimmed_stdout_for_successful_process() {
+    assert_eq!(
+        run_command(Path::new("."), "/bin/sh", &["-c", "printf ' hello\\n'"]),
+        Some("hello".to_string())
     );
 }
 
