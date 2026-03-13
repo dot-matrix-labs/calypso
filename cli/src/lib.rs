@@ -1,5 +1,6 @@
 pub mod doctor;
 pub mod github;
+pub mod runtime;
 pub mod state;
 pub mod template;
 
