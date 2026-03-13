@@ -1,0 +1,43 @@
+name: Rust quality — cli
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "cli/**"
+      - ".github/workflows/rust-quality.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - ".github/workflows/rust-quality.yml"
+  workflow_dispatch:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            cli -> target
+
+      - name: Check formatting
+        working-directory: cli
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        working-directory: cli
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        working-directory: cli
+        run: cargo build --all-targets

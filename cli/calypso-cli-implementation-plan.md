@@ -198,15 +198,21 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 
 ## Phase 0: Reset and scaffold
 
-- [ ] Create a Rust crate layout for `calypso-cli`.
-- [ ] Choose a minimal crate structure: executable plus small core library.
-- [ ] Set up formatting, linting, and test commands.
-- [ ] Define build-time version metadata injection for semantic version, 6-character Git hash, build time, and Git tag information.
-- [ ] Define the baseline GitHub workflow set for the repository:
+- [x] Create a Rust crate layout for `calypso-cli`.
+- [x] Choose a minimal crate structure: executable plus small core library.
+- [x] Set up formatting, linting, and test commands.
+- [x] Define build-time version metadata injection for semantic version, 6-character Git hash, build time, and Git tag information.
+- [x] Define the baseline GitHub workflow set for the repository:
   - Rust lint, format, and build
   - unit, integration, and end-to-end tests
   - release and executable publishing
 - [ ] Add a short architecture note explaining why each dependency exists.
+
+Completed scaffold notes:
+
+- Initial Cargo project exists with `build.rs`, library crate, and binary entrypoint.
+- Version and help output are implemented via test-first development.
+- Current verified behavior includes semantic version plus 6-character Git hash, build time, and Git tag output.
 
 ## Phase 1: Core domain model
 
@@ -216,6 +222,10 @@ The TUI layer should remain a thin presentation boundary so the prototype can mo
 - [ ] Define deterministic transition checks.
 - [ ] Define basic scheduling metadata for safe agent concurrency.
 - [ ] Add tests for state transitions and gate grouping logic.
+
+Immediate next step:
+
+- Write failing tests for the first JSON-backed orchestration state types and persistence boundaries before implementing them.
 
 ## Phase 1.5: YAML methodology template
 
