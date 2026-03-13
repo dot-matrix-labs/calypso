@@ -1,5 +1,7 @@
 prompts:
   pr-editor: |
     Keep the pull request description aligned with the current feature state and gate checklist.
+  documentation-merge: |
+    Reconcile product and implementation documents semantically so the current scope, plan, and constraints stay aligned.
   blueprint-review: |
     Review current transcripts and planned work for drift from the documented blueprint and process rules.

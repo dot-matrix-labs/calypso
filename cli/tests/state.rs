@@ -173,7 +173,13 @@ fn feature_state_initializes_gate_groups_from_template() {
         feature.gate_groups.len(),
         template.state_machine.gate_groups.len()
     );
-    assert_eq!(feature.gate_groups[0].gates[0].task, "pr-editor");
+    assert!(
+        feature
+            .gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .any(|gate| gate.task == "pr-editor")
+    );
     assert!(
         feature
             .gate_groups

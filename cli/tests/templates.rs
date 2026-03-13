@@ -126,6 +126,44 @@ fn embedded_default_template_set_loads_and_validates() {
 }
 
 #[test]
+fn embedded_default_template_set_reflects_first_draft_feature_workflow() {
+    let template = load_embedded_template_set().expect("embedded defaults should load");
+
+    assert!(
+        template
+            .state_machine
+            .states
+            .contains(&"prd-review".to_string())
+    );
+    assert!(
+        template
+            .state_machine
+            .states
+            .contains(&"qa-validation".to_string())
+    );
+    assert!(
+        template
+            .state_machine
+            .states
+            .contains(&"done".to_string())
+    );
+
+    let gate_ids: Vec<&str> = template
+        .state_machine
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .map(|gate| gate.id.as_str())
+        .collect();
+
+    assert!(gate_ids.contains(&"doctor-clean"));
+    assert!(gate_ids.contains(&"feature-unit-bound"));
+    assert!(gate_ids.contains(&"workflow-files-present"));
+    assert!(gate_ids.contains(&"prd-impl-plan-reconciled"));
+    assert!(gate_ids.contains(&"test-matrix-green"));
+}
+
+#[test]
 fn template_validation_requires_at_least_one_state() {
     let invalid_state_machine = VALID_STATE_MACHINE.replace(
         "states:\n  - new\n  - implementation\n  - ready-for-review\n",

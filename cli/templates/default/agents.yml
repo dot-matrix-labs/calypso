@@ -1,13 +1,32 @@
 tasks:
+  - name: doctor-clean
+    kind: builtin
+    builtin: builtin.doctor.all_checks_passing
+  - name: feature-unit-bound
+    kind: builtin
+    builtin: builtin.feature.branch_worktree_pr_bound
+  - name: workflow-files-present
+    kind: builtin
+    builtin: builtin.github.workflow_files_present
   - name: pr-editor
     kind: agent
     role: pr-editor
+  - name: documentation-merge
+    kind: agent
+    role: documentation-merge
   - name: blueprint-review
     kind: agent
     role: blueprint
+  - name: human-clarification
+    kind: human
   - name: rust-quality
     kind: builtin
     builtin: builtin.ci.rust_quality_green
+  - name: test-matrix
+    kind: builtin
+    builtin: builtin.ci.test_matrix_green
   - name: main-compatibility
     kind: builtin
     builtin: builtin.git.is_main_compatible
+  - name: human-review-approval
+    kind: human

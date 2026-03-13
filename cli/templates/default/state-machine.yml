@@ -1,32 +1,284 @@
+version: 1
+name: calypso-default-feature-workflow
 initial_state: new
 states:
   - new
+  - prd-review
+  - architecture-plan
+  - scaffold-tdd
+  - architecture-review
   - implementation
   - waiting-for-human
+  - qa-validation
   - ready-for-review
+  - release-ready
+  - done
   - blocked
+  - aborted
+
+feature_unit:
+  invariant: feature-equals-branch-equals-worktree-equals-pr
+  branch_required: true
+  worktree_required: true
+  pull_request_required: true
+  early_pull_request: draft-preferred
+
+transitions:
+  - from: new
+    to: prd-review
+    trigger: feature-started
+    actor: orchestrator
+    evidence:
+      - feature-unit-bound
+      - pr-canonicalized
+  - from: prd-review
+    to: architecture-plan
+    trigger: scope-confirmed
+    actor: human-or-product
+    approvals:
+      - human-clarification-resolved
+  - from: architecture-plan
+    to: scaffold-tdd
+    trigger: implementation-plan-ready
+    actor: architect
+    evidence:
+      - prd-impl-plan-reconciled
+  - from: scaffold-tdd
+    to: architecture-review
+    trigger: initial-scaffold-prepared
+    actor: engineer
+  - from: architecture-review
+    to: implementation
+    trigger: plan-approved
+    actor: human-or-architect
+  - from: implementation
+    to: waiting-for-human
+    trigger: clarification-required
+    actor: agent
+  - from: waiting-for-human
+    to: implementation
+    trigger: clarification-answered
+    actor: human
+  - from: implementation
+    to: qa-validation
+    trigger: implementation-complete
+    actor: engineer
+    evidence:
+      - blueprint-policy-clean
+      - rust-quality-green
+  - from: qa-validation
+    to: ready-for-review
+    trigger: validation-passing
+    actor: orchestrator
+    evidence:
+      - test-matrix-green
+  - from: ready-for-review
+    to: release-ready
+    trigger: merge-readiness-confirmed
+    actor: orchestrator
+    evidence:
+      - merge-drift-reviewed
+  - from: release-ready
+    to: done
+    trigger: merged
+    actor: github
+  - from: "*"
+    to: blocked
+    trigger: blocking-gate-failed
+    actor: orchestrator
+  - from: blocked
+    to: implementation
+    trigger: blocking-issue-cleared
+    actor: human-or-orchestrator
+  - from: "*"
+    to: aborted
+    trigger: explicit-override
+    actor: human
+
 gate_groups:
   - id: specification
     label: Specification
+    description: The feature unit exists, the PR is the canonical spec surface, and required planning docs are reconciled.
     gates:
+      - id: doctor-clean
+        label: Doctor clean
+        description: Required local executables, GitHub auth, and repository remote assumptions are all valid.
+        required: true
+        kind: builtin
+        task: doctor-clean
+        evidence:
+          - builtin.doctor.gh_installed
+          - builtin.doctor.codex_installed
+          - builtin.doctor.gh_authenticated
+          - builtin.doctor.github_remote_configured
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: doctor
+        status_source: local-doctor
+        recheck_trigger: doctor-run
+        pr_checklist_label: Doctor clean
+      - id: feature-unit-bound
+        label: Feature unit bound
+        description: The current feature is bound to one branch, one worktree, and one pull request.
+        required: true
+        kind: builtin
+        task: feature-unit-bound
+        evidence:
+          - builtin.feature.branch_worktree_pr_bound
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: orchestrator
+        status_source: repository-state
+        pr_checklist_label: Feature unit bound
+      - id: workflow-files-present
+        label: Workflow files present
+        description: Required GitHub workflow files for Rust quality, tests, coverage, and release exist.
+        required: true
+        kind: builtin
+        task: workflow-files-present
+        evidence:
+          - builtin.github.workflow_files_present
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: github-workflows-doctor
+        status_source: repository-files
+        pr_checklist_label: Workflow files present
       - id: pr-canonicalized
         label: PR canonicalized
+        description: The pull request description mirrors the current scope, gate checklist, and next blocking issue.
+        required: true
+        kind: agent
         task: pr-editor
+        block_on_fail: true
+        role_owner: pr-editor
+        status_source: pull-request-metadata
+        pr_checklist_label: PR canonicalized
+      - id: prd-impl-plan-reconciled
+        label: PRD and implementation plan reconciled
+        description: Product and implementation docs are semantically aligned before broad code changes continue.
+        required: true
+        kind: agent
+        task: documentation-merge
+        block_on_fail: true
+        role_owner: documentation-merge
+        status_source: repository-documents
+        auto_open_task_on_fail: reconcile-docs
+        pr_checklist_label: PRD and implementation plan reconciled
   - id: implementation
     label: Implementation
+    description: Active coding work remains aligned with the blueprint and process contract.
     gates:
       - id: blueprint-policy-clean
         label: Blueprint policy clean
+        description: Agent behavior and proposed implementation remain consistent with blueprint docs and command policy.
+        required: true
+        kind: agent
         task: blueprint-review
+        block_on_fail: true
+        role_owner: blueprint
+        status_source: transcript-review
+        pr_checklist_label: Blueprint policy clean
+      - id: human-clarification-resolved
+        label: Human clarification resolved
+        description: Any open clarification blocking work has been answered explicitly by the operator.
+        required: false
+        kind: human
+        task: human-clarification
+        block_on_fail: false
+        role_owner: human
+        blocking_scope: current-thread
+        pr_checklist_label: Human clarification resolved
   - id: validation
     label: Validation
+    description: Deterministic repository checks pass before the feature moves into review.
     gates:
       - id: rust-quality-green
         label: Rust quality green
+        description: Formatting, linting, and build checks are green.
+        required: true
+        kind: builtin
         task: rust-quality
+        evidence:
+          - builtin.ci.rust_quality_green
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: github
+        status_source: ci
+        pr_checklist_label: Rust quality green
+      - id: test-matrix-green
+        label: Test matrix green
+        description: Unit, integration, and end-to-end test workflows are green for the active pull request.
+        required: true
+        kind: builtin
+        task: test-matrix
+        evidence:
+          - builtin.ci.test_matrix_green
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: github
+        status_source: ci
+        pr_checklist_label: Test matrix green
   - id: merge-readiness
     label: Merge Readiness
+    description: The branch is compatible with main and any remaining human approval is explicit.
     gates:
       - id: merge-drift-reviewed
         label: Merge drift reviewed
+        description: Compatibility with main has been checked and any drift has been reconciled or surfaced.
+        required: true
+        kind: builtin
         task: main-compatibility
+        evidence:
+          - builtin.git.is_main_compatible
+        pass_condition: all-evidence-passing
+        block_on_fail: true
+        role_owner: merge-readiness
+        status_source: git
+        auto_open_task_on_fail: reconcile-main
+        pr_checklist_label: Merge drift reviewed
+      - id: review-approved
+        label: Review approved
+        description: A human reviewer has approved the feature for merge.
+        required: false
+        kind: human
+        task: human-review-approval
+        block_on_fail: false
+        role_owner: human
+        approval_requirements:
+          - reviewer-approval
+        pr_checklist_label: Review approved
+
+doctor_checks:
+  - builtin.doctor.gh_installed
+  - builtin.doctor.codex_installed
+  - builtin.doctor.gh_authenticated
+  - builtin.doctor.github_remote_configured
+
+hook_rules:
+  - id: push-main-compatibility-check
+    trigger: pre-push
+    blocking: false
+    effect_on_fail: promote-merge-reconciliation
+    builtin: builtin.git.is_main_compatible
+  - id: prd-update-requires-plan-sync
+    trigger: changed-path
+    when_paths:
+      - spec.md
+      - "**/prd*.md"
+    effect_on_fail: open-doc-reconciliation-task
+
+workflow_requirements:
+  - id: rust-quality
+    description: Lint, format, and build workflow required on pull requests to main.
+  - id: test-matrix
+    description: Unit, integration, and end-to-end tests required on pull requests to main.
+  - id: coverage
+    description: Coverage workflow should report against the repository target.
+  - id: release
+    description: Release workflow should build and publish the CLI artifact.
+
+artifact_policies:
+  - id: pr-is-canonical-spec
+    description: The pull request body is the primary live spec surface for the active feature.
+  - id: transcripts-required
+    description: Agent transcripts and structured outcomes remain available for review and recovery.
