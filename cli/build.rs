@@ -4,7 +4,8 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/HEAD");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
 
-    let git_hash = run_git(["rev-parse", "--short=6", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
+    let git_hash =
+        run_git(["rev-parse", "--short=6", "HEAD"]).unwrap_or_else(|| "unknown".to_string());
     let git_tags = run_git(["tag", "--points-at", "HEAD"])
         .map(|tags| {
             let trimmed = tags
