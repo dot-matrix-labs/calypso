@@ -6,16 +6,6 @@ use calypso_cli::state::{
     RepositoryState, SessionOutput, SessionOutputStream, WorkflowState,
 };
 
-fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after unix epoch")
-        .as_nanos();
-    let path = std::env::temp_dir().join(format!("calypso-cli-{label}-{nanos}"));
-    std::fs::create_dir_all(&path).expect("temp dir should be created");
-    path
-}
-
 fn temp_state_path() -> std::path::PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -181,10 +171,18 @@ fn interactive_status_command_persists_state_file_updates() {
 
 #[test]
 fn status_command_reports_errors_outside_git_repository() {
-    let temp_dir = unique_temp_dir("status-no-git");
+    let path = std::env::temp_dir().join(format!(
+        "calypso-cli-status-no-git-{}",
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&path).expect("temp dir should be created");
+
     let output = Command::new(env!("CARGO_BIN_EXE_calypso-cli"))
         .arg("status")
-        .current_dir(&temp_dir)
+        .current_dir(&path)
         .output()
         .expect("failed to run calypso-cli status");
 
@@ -193,5 +191,5 @@ fn status_command_reports_errors_outside_git_repository() {
     let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
     assert!(stderr.contains("status error: not inside a git repository"));
 
-    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+    std::fs::remove_dir_all(path).expect("temp dir should be removed");
 }

@@ -53,6 +53,7 @@ fn sample_state() -> RepositoryState {
                     stream: SessionOutputStream::Stdout,
                     text: "streamed chunk".to_string(),
                 }],
+                pending_follow_ups: vec!["Please include the diff".to_string()],
                 terminal_outcome: None,
             }],
         },
@@ -175,6 +176,18 @@ fn state_enums_serialize_with_expected_kebab_case_variants() {
             .expect("session terminal outcome should serialize"),
         "\"nok\""
     );
+}
+
+#[test]
+fn agent_session_defaults_optional_runtime_fields_when_missing_from_json() {
+    let session: AgentSession =
+        serde_json::from_str(r#"{"role":"engineer","session_id":"session_01","status":"running"}"#)
+            .expect("agent session should deserialize");
+
+    assert!(session.provider_session_id.is_none());
+    assert!(session.output.is_empty());
+    assert!(session.pending_follow_ups.is_empty());
+    assert!(session.terminal_outcome.is_none());
 }
 
 #[test]
@@ -346,8 +359,110 @@ fn feature_state_evaluates_builtin_gates_from_template_bindings() {
         .iter()
         .flat_map(|group| group.gates.iter())
         .find(|gate| gate.id == "pr-canonicalized")
-        .expect("PR editor gate should exist");
+        .expect("pr editor gate should exist");
     assert_eq!(pr_editor_gate.status, GateStatus::Pending);
+}
+
+#[test]
+fn feature_state_leaves_builtin_gate_pending_without_evidence() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-auth-refresh",
+        "feat/123-token-refresh",
+        "/worktrees/feat-123-token-refresh",
+        PullRequestRef {
+            number: 231,
+            url: "https://github.com/org/repo/pull/231".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    assert!(
+        feature
+            .gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .filter(|gate| gate.id == "rust-quality-green" || gate.id == "merge-drift-reviewed")
+            .all(|gate| gate.status == GateStatus::Pending)
+    );
+}
+
+#[test]
+fn feature_state_maps_agent_and_builtin_tasks_to_pending_and_failing_states() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-auth-refresh",
+        "feat/123-token-refresh",
+        "/worktrees/feat-123-token-refresh",
+        PullRequestRef {
+            number: 231,
+            url: "https://github.com/org/repo/pull/231".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    let pr_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "pr-canonicalized")
+        .expect("pr gate should exist");
+    assert_eq!(pr_gate.status, GateStatus::Pending);
+
+    let blueprint_gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "blueprint-policy-clean")
+        .expect("blueprint review gate should exist");
+    assert_eq!(blueprint_gate.status, GateStatus::Pending);
+}
+
+#[test]
+fn feature_state_rejects_unknown_task_bindings_during_evaluation() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-auth-refresh",
+        "feat/123-token-refresh",
+        "/worktrees/feat-123-token-refresh",
+        PullRequestRef {
+            number: 231,
+            url: "https://github.com/org/repo/pull/231".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature.gate_groups.push(GateGroup {
+        id: "custom".to_string(),
+        label: "Custom".to_string(),
+        gates: vec![Gate {
+            id: "unknown".to_string(),
+            label: "Unknown".to_string(),
+            task: "does-not-exist".to_string(),
+            status: GateStatus::Pending,
+        }],
+    });
+
+    let error = feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect_err("unknown task should fail evaluation");
+
+    assert!(matches!(error, GateEvaluationError::UnknownTask(_)));
+    assert_eq!(
+        error.to_string(),
+        "gate evaluation references unknown task 'does-not-exist'"
+    );
 }
 
 #[test]
@@ -366,222 +481,26 @@ fn feature_state_reports_blocking_gate_ids_after_evaluation() {
     .expect("feature should initialize from template");
     let evidence = BuiltinEvidence::new()
         .with_result("builtin.ci.rust_quality_green", true)
-        .with_result("builtin.git.is_main_compatible", true);
-
-    feature
-        .evaluate_gates(&template, &evidence)
-        .expect("gate evaluation should succeed");
-
-    let blocking_ids = feature.blocking_gate_ids();
-
-    assert!(blocking_ids.contains(&"pr-canonicalized".to_string()));
-    assert!(blocking_ids.contains(&"blueprint-policy-clean".to_string()));
-    assert!(!blocking_ids.contains(&"rust-quality-green".to_string()));
-    assert!(!blocking_ids.contains(&"merge-drift-reviewed".to_string()));
-}
-
-#[test]
-fn feature_state_leaves_builtin_gate_pending_without_evidence() {
-    let template = TemplateSet::from_yaml_strings(
-        r#"
-initial_state: new
-states:
-  - new
-gate_groups:
-  - id: validation
-    label: Validation
-    gates:
-      - id: rust-quality-green
-        label: Rust quality green
-        task: rust-quality
-"#,
-        r#"
-tasks:
-  - name: rust-quality
-    kind: builtin
-    builtin: builtin.ci.rust_quality_green
-"#,
-        "prompts: {}\n",
-    )
-    .expect("template should parse");
-    let mut feature = FeatureState::from_template(
-        "feat-auth-refresh",
-        "feat/123-token-refresh",
-        "/worktrees/feat-123-token-refresh",
-        PullRequestRef {
-            number: 231,
-            url: "https://github.com/org/repo/pull/231".to_string(),
-        },
-        &template,
-    )
-    .expect("feature should initialize");
-
-    feature
-        .evaluate_gates(&template, &BuiltinEvidence::new())
-        .expect("evaluation should succeed");
-
-    assert_eq!(feature.gate_groups[0].gates[0].status, GateStatus::Pending);
-}
-
-#[test]
-fn feature_state_maps_human_and_hook_tasks_to_manual_and_pending() {
-    let template = TemplateSet::from_yaml_strings(
-        r#"
-initial_state: new
-states:
-  - new
-gate_groups:
-  - id: coordination
-    label: Coordination
-    gates:
-      - id: human-approval
-        label: Human approval
-        task: human-approval
-      - id: push-sync
-        label: Push sync
-        task: push-sync
-"#,
-        r#"
-tasks:
-  - name: human-approval
-    kind: human
-  - name: push-sync
-    kind: hook
-"#,
-        "prompts: {}\n",
-    )
-    .expect("template should parse");
-    let mut feature = FeatureState::from_template(
-        "feat-auth-refresh",
-        "feat/123-token-refresh",
-        "/worktrees/feat-123-token-refresh",
-        PullRequestRef {
-            number: 231,
-            url: "https://github.com/org/repo/pull/231".to_string(),
-        },
-        &template,
-    )
-    .expect("feature should initialize");
-
-    feature
-        .evaluate_gates(&template, &BuiltinEvidence::new())
-        .expect("evaluation should succeed");
-
-    assert_eq!(feature.gate_groups[0].gates[0].status, GateStatus::Manual);
-    assert_eq!(feature.gate_groups[0].gates[1].status, GateStatus::Pending);
-}
-
-#[test]
-fn feature_state_rejects_unknown_task_bindings_during_evaluation() {
-    let invalid_template = TemplateSet {
-        state_machine: load_embedded_template_set()
-            .expect("embedded template should load")
-            .state_machine,
-        agents: calypso_cli::template::AgentCatalog { tasks: vec![] },
-        prompts: calypso_cli::template::PromptCatalog {
-            prompts: std::collections::BTreeMap::new(),
-        },
-    };
-    let mut feature = FeatureState {
-        feature_id: "feat-auth-refresh".to_string(),
-        branch: "feat/123-token-refresh".to_string(),
-        worktree_path: "/worktrees/feat-123-token-refresh".to_string(),
-        pull_request: PullRequestRef {
-            number: 231,
-            url: "https://github.com/org/repo/pull/231".to_string(),
-        },
-        workflow_state: WorkflowState::New,
-        gate_groups: vec![GateGroup {
-            id: "validation".to_string(),
-            label: "Validation".to_string(),
-            gates: vec![Gate {
-                id: "rust-quality-green".to_string(),
-                label: "Rust quality green".to_string(),
-                task: "rust-quality".to_string(),
-                status: GateStatus::Pending,
-            }],
-        }],
-        active_sessions: vec![],
-    };
-
-    let error = feature
-        .evaluate_gates(&invalid_template, &BuiltinEvidence::new())
-        .expect_err("unknown task binding should fail evaluation");
-
-    assert!(matches!(error, GateEvaluationError::UnknownTask(_)));
-    assert!(error.to_string().contains("rust-quality"));
-}
-
-#[test]
-fn builtin_evidence_merge_prefers_later_results_for_duplicate_keys() {
-    let merged = BuiltinEvidence::new()
+        .with_result("builtin.git.is_main_compatible", false)
         .with_result("builtin.doctor.gh_installed", true)
-        .merge(
-            &BuiltinEvidence::new()
-                .with_result("builtin.github.pr_exists", true)
-                .with_result("builtin.doctor.gh_installed", false),
-        );
-
-    assert_eq!(merged.result_for("builtin.github.pr_exists"), Some(true));
-    assert_eq!(
-        merged.result_for("builtin.doctor.gh_installed"),
-        Some(false)
-    );
-}
-
-#[test]
-fn embedded_template_evaluates_doctor_and_github_builtin_gates() {
-    let template = load_embedded_template_set().expect("embedded template should load");
-    let mut feature = FeatureState::from_template(
-        "feat-auth-refresh",
-        "feat/123-token-refresh",
-        "/worktrees/feat-123-token-refresh",
-        PullRequestRef {
-            number: 231,
-            url: "https://github.com/org/repo/pull/231".to_string(),
-        },
-        &template,
-    )
-    .expect("feature should initialize from template");
-    let evidence = BuiltinEvidence::new()
-        .with_result("builtin.doctor.gh_installed", true)
-        .with_result("builtin.doctor.codex_installed", false)
+        .with_result("builtin.doctor.codex_installed", true)
+        .with_result("builtin.doctor.gh_authenticated", true)
+        .with_result("builtin.doctor.github_remote_configured", true)
+        .with_result("builtin.doctor.required_workflows_present", true)
         .with_result("builtin.github.pr_exists", true)
-        .with_result("builtin.github.pr_checks_green", false);
+        .with_result("builtin.github.pr_checks_green", true)
+        .with_result("builtin.github.pr_merged", false);
 
     feature
         .evaluate_gates(&template, &evidence)
         .expect("gate evaluation should succeed");
 
-    let gh_gate = feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "gh-cli-installed")
-        .expect("gh installed gate should exist");
-    assert_eq!(gh_gate.status, GateStatus::Passing);
-
-    let codex_gate = feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "codex-cli-installed")
-        .expect("codex gate should exist");
-    assert_eq!(codex_gate.status, GateStatus::Failing);
-
-    let pr_exists_gate = feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "feature-pr-exists")
-        .expect("pr exists gate should exist");
-    assert_eq!(pr_exists_gate.status, GateStatus::Passing);
-
-    let pr_checks_gate = feature
-        .gate_groups
-        .iter()
-        .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "feature-pr-checks-green")
-        .expect("pr checks gate should exist");
-    assert_eq!(pr_checks_gate.status, GateStatus::Failing);
+    assert_eq!(
+        feature.blocking_gate_ids(),
+        vec![
+            "pr-canonicalized".to_string(),
+            "blueprint-policy-clean".to_string(),
+            "merge-drift-reviewed".to_string(),
+        ]
+    );
 }

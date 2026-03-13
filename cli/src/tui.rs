@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::time::Duration;
 
@@ -55,12 +54,7 @@ pub struct OperatorSurface {
 }
 
 impl OperatorSurface {
-    pub fn from_feature_state(
-        feature: &FeatureState,
-        session_output: Vec<(String, Vec<String>)>,
-    ) -> Self {
-        let output_by_session: BTreeMap<String, Vec<String>> = session_output.into_iter().collect();
-
+    pub fn from_feature_state(feature: &FeatureState) -> Self {
         Self {
             feature_id: feature.feature_id.clone(),
             branch: feature.branch.clone(),
@@ -89,14 +83,19 @@ impl OperatorSurface {
                     role: session.role.clone(),
                     session_id: session.session_id.clone(),
                     status: session_status_label(session.status.clone()).to_string(),
-                    output: output_by_session
-                        .get(session.session_id.as_str())
-                        .cloned()
-                        .unwrap_or_else(|| vec!["No streamed output yet.".to_string()]),
+                    output: if session.recent_output.is_empty() {
+                        vec!["No streamed output yet.".to_string()]
+                    } else {
+                        session.recent_output.clone()
+                    },
                 })
                 .collect(),
             input: InputBuffer::default(),
-            queued_follow_ups: Vec::new(),
+            queued_follow_ups: feature
+                .active_sessions
+                .iter()
+                .flat_map(|session| session.pending_follow_ups.iter().cloned())
+                .collect(),
             last_event: "idle".to_string(),
         }
     }
@@ -165,8 +164,6 @@ impl OperatorSurface {
             }
             KeyCode::Enter => match self.input.submit() {
                 Some(follow_up) => {
-                    self.queued_follow_ups.push(follow_up.clone());
-                    self.last_event = "queued follow-up".to_string();
                     SurfaceEvent::Submitted(follow_up)
                 }
                 None => {
@@ -191,23 +188,26 @@ pub enum SurfaceEvent {
 }
 
 pub fn run_terminal_surface(
-    feature: &FeatureState,
-    session_output: Vec<(String, Vec<String>)>,
+    feature: &mut FeatureState,
 ) -> io::Result<()> {
     let mut stdout = io::stdout();
-    let mut surface = OperatorSurface::from_feature_state(feature, session_output);
+    let mut surface = OperatorSurface::from_feature_state(feature);
 
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, Hide)?;
 
-    let result = run_terminal_loop(&mut stdout, &mut surface);
+    let result = run_terminal_loop(&mut stdout, feature, &mut surface);
 
     execute!(stdout, Show, LeaveAlternateScreen)?;
     disable_raw_mode()?;
     result
 }
 
-fn run_terminal_loop(stdout: &mut impl Write, surface: &mut OperatorSurface) -> io::Result<()> {
+fn run_terminal_loop(
+    stdout: &mut impl Write,
+    feature: &mut FeatureState,
+    surface: &mut OperatorSurface,
+) -> io::Result<()> {
     loop {
         queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
         write!(stdout, "{}", surface.render())?;
@@ -215,11 +215,35 @@ fn run_terminal_loop(stdout: &mut impl Write, surface: &mut OperatorSurface) -> 
 
         if event::poll(Duration::from_millis(250))? {
             if let Event::Key(key_event) = event::read()? {
-                if surface.handle_key_event(key_event) == SurfaceEvent::Quit {
-                    return Ok(());
+                match surface.handle_key_event(key_event) {
+                    SurfaceEvent::Continue => {}
+                    SurfaceEvent::Submitted(follow_up) => {
+                        let queued = queue_follow_up(feature, follow_up);
+                        *surface = OperatorSurface::from_feature_state(feature);
+                        surface.last_event = if queued {
+                            "queued follow-up".to_string()
+                        } else {
+                            "no active session for follow-up".to_string()
+                        };
+                    }
+                    SurfaceEvent::Quit => return Ok(()),
                 }
             }
         }
+    }
+}
+
+pub fn queue_follow_up(feature: &mut FeatureState, follow_up: String) -> bool {
+    if let Some(active_session) = feature.active_sessions.iter_mut().find(|session| {
+        matches!(
+            session.status,
+            AgentSessionStatus::Running | AgentSessionStatus::WaitingForHuman
+        )
+    }) {
+        active_session.pending_follow_ups.push(follow_up);
+        true
+    } else {
+        false
     }
 }
 

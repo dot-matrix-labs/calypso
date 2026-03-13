@@ -4,7 +4,7 @@ use calypso_cli::state::{
     AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
     WorkflowState,
 };
-use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent};
+use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent, queue_follow_up};
 
 fn sample_feature() -> FeatureState {
     FeatureState {
@@ -42,6 +42,11 @@ fn sample_feature() -> FeatureState {
             role: "engineer".to_string(),
             session_id: "session_01".to_string(),
             status: AgentSessionStatus::Running,
+            recent_output: vec![
+                "Inspecting branch state".to_string(),
+                "Waiting on operator guidance".to_string(),
+            ],
+            pending_follow_ups: Vec::new(),
         }],
     }
 }
@@ -49,16 +54,7 @@ fn sample_feature() -> FeatureState {
 #[test]
 fn operator_surface_render_includes_feature_context_gates_and_sessions() {
     let feature = sample_feature();
-    let surface = OperatorSurface::from_feature_state(
-        &feature,
-        vec![(
-            "session_01".to_string(),
-            vec![
-                "Inspecting branch state".to_string(),
-                "Waiting on operator guidance".to_string(),
-            ],
-        )],
-    );
+    let surface = OperatorSurface::from_feature_state(&feature);
 
     let rendered = surface.render();
 
@@ -95,7 +91,7 @@ fn input_buffer_supports_editing_and_submit() {
 #[test]
 fn operator_surface_handles_follow_up_submission_and_quit() {
     let feature = sample_feature();
-    let mut surface = OperatorSurface::from_feature_state(&feature, Vec::new());
+    let mut surface = OperatorSurface::from_feature_state(&feature);
 
     assert_eq!(
         surface.handle_key_event(KeyEvent::from(KeyCode::Char('o'))),
@@ -109,10 +105,19 @@ fn operator_surface_handles_follow_up_submission_and_quit() {
         surface.handle_key_event(KeyEvent::from(KeyCode::Enter)),
         SurfaceEvent::Submitted("ok".to_string())
     );
-    assert!(surface.render().contains("Queued follow-ups: 1"));
-    assert!(surface.render().contains("Last event: queued follow-up"));
     assert_eq!(
         surface.handle_key_event(KeyEvent::from(KeyCode::Esc)),
         SurfaceEvent::Quit
+    );
+}
+
+#[test]
+fn queue_follow_up_routes_message_to_active_session() {
+    let mut feature = sample_feature();
+
+    assert!(queue_follow_up(&mut feature, "Please include the CI logs".to_string()));
+    assert_eq!(
+        feature.active_sessions[0].pending_follow_ups,
+        vec!["Please include the CI logs".to_string()]
     );
 }

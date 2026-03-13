@@ -314,15 +314,15 @@ Completed Codex adapter notes:
 
 Current progress notes:
 
-- A testable operator-surface view module now renders feature context, grouped gates, blocking gates, active sessions, and follow-up input state from persisted workflow data.
+- A testable operator-surface view module now renders feature context, grouped gates, blocking gates, active sessions, persisted session output, and follow-up input state from workflow data.
 - `calypso-cli status --state <path> --headless` renders the current surface snapshot without coupling tests to terminal control.
 - `calypso-cli status --state <path>` now runs an interactive `crossterm` surface with refresh, typing, submit, and quit handling.
-- Follow-up submission is currently queued locally inside the TUI layer; runtime-backed session submission remains incomplete.
+- Follow-up submission now queues onto the active session in persisted state so the runtime boundary can consume it later.
 
 - [x] Build a terminal interface for agent supervision.
-- [ ] Show the current feature unit and active sessions, including session IDs and streamed output.
+- [x] Show the current feature unit and active sessions, including session IDs and streamed output.
 - [x] Show grouped gates for the current feature branch.
-- [ ] Allow the user to add content or answer an active session.
+- [x] Allow the user to add content or answer an active session.
 - [x] Show the current blocking gate or merge issue clearly.
 
 ## Phase 7: End-to-end prototype loop
