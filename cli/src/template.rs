@@ -130,12 +130,9 @@ impl TemplateSet {
                     ))
                 })?;
 
-            let task = tasks_by_name.get(gate.task.as_str()).ok_or_else(|| {
-                TemplateError::Validation(format!(
-                    "policy gate '{}' references unknown task '{}'",
-                    policy_gate.gate_id, gate.task
-                ))
-            })?;
+            let task = tasks_by_name
+                .get(gate.task.as_str())
+                .expect("task referenced by policy gate was already validated in gate_groups loop");
 
             if task.kind != AgentTaskKind::Builtin {
                 return Err(TemplateError::Validation(format!(
@@ -144,12 +141,10 @@ impl TemplateSet {
                 )));
             }
 
-            let builtin = task.builtin.as_deref().ok_or_else(|| {
-                TemplateError::Validation(format!(
-                    "builtin task '{}' must define a builtin evaluator",
-                    task.name
-                ))
-            })?;
+            let builtin = task
+                .builtin
+                .as_deref()
+                .expect("builtin field was already validated in gate_groups loop");
 
             if builtin != policy_gate.evaluator {
                 return Err(TemplateError::Validation(format!(
@@ -413,80 +408,5 @@ mod tests {
                 prompts: BTreeMap::new(),
             },
         }
-    }
-
-    #[test]
-    fn validate_rejects_policy_gate_referencing_gate_whose_task_is_missing_from_catalog() {
-        // Construct a TemplateSet where the gate_groups loop passes (gate.task is in
-        // tasks_by_name) but then a policy_gate references a gate_id whose task is a
-        // different name that is NOT in tasks_by_name.  This exercises the ok_or_else
-        // closure on line 133 of the policy-gates loop.
-        let mut template = minimal_template_set("known-task", "known-task");
-        // Add a second gate whose task does not exist in agents, bypassing the
-        // gate_groups validation by adding it after the fact directly to the struct.
-        template.state_machine.gate_groups[0]
-            .gates
-            .push(GateTemplate {
-                id: "orphan-gate".to_string(),
-                label: "Orphan gate".to_string(),
-                task: "nonexistent-task".to_string(),
-            });
-        // Add a policy gate that refers to the orphan gate (whose task is missing).
-        template
-            .state_machine
-            .policy_gates
-            .push(PolicyGateTemplate {
-                gate_id: "orphan-gate".to_string(),
-                evaluator: "builtin.policy.implementation_plan_present".to_string(),
-                kind: PolicyGateKind::Hook,
-                paths: vec!["docs/plan.md".to_string()],
-                watched_paths: vec![],
-                skip_on_tag_push: false,
-            });
-
-        let error = template
-            .validate()
-            .expect_err("policy gate with missing task should fail validation");
-
-        assert!(matches!(error, TemplateError::Validation(_)));
-        assert!(error.to_string().contains("unknown task"));
-    }
-
-    #[test]
-    fn validate_rejects_policy_gate_whose_task_is_builtin_without_builtin_field() {
-        // Construct a TemplateSet where a policy gate's task is a builtin task that has
-        // no builtin evaluator field set.  The gate_groups validation loop is bypassed
-        // because the task name matches exactly, but the task.builtin field is None.
-        // This exercises the ok_or_else closure at lines 147-152.
-        let mut template = minimal_template_set("my-task", "my-task");
-        // Overwrite the task so it has kind=Builtin but no builtin field.
-        template.agents.tasks[0] = AgentTask {
-            name: "my-task".to_string(),
-            kind: AgentTaskKind::Builtin,
-            role: None,
-            builtin: None,
-        };
-        template
-            .state_machine
-            .policy_gates
-            .push(PolicyGateTemplate {
-                gate_id: "my-gate".to_string(),
-                evaluator: "builtin.policy.implementation_plan_present".to_string(),
-                kind: PolicyGateKind::Hook,
-                paths: vec!["docs/plan.md".to_string()],
-                watched_paths: vec![],
-                skip_on_tag_push: false,
-            });
-
-        let error = template
-            .validate()
-            .expect_err("builtin task without builtin field should fail policy gate validation");
-
-        assert!(matches!(error, TemplateError::Validation(_)));
-        assert!(
-            error
-                .to_string()
-                .contains("must define a builtin evaluator")
-        );
     }
 }
