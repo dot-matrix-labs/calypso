@@ -1,0 +1,26 @@
+name: PR checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  checklist:
+    name: checklist
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require all task items to be checked
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.pull_request.body || '';
+            const incomplete = (body.match(/- \[ \]/g) || []).length;
+            if (incomplete > 0) {
+              core.setFailed(
+                `${incomplete} unchecked task item${incomplete === 1 ? '' : 's'} in PR description. ` +
+                `Complete all checklist items before merging.`
+              );
+            } else {
+              core.info('All checklist items are checked.');
+            }
