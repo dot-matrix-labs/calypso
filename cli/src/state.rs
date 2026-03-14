@@ -130,6 +130,18 @@ impl FeatureState {
         self.gate_groups.iter().map(GateGroup::rollup).collect()
     }
 
+    pub fn pull_request_checklist(&self) -> Vec<PullRequestChecklistItem> {
+        self.gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .map(|gate| PullRequestChecklistItem {
+                gate_id: gate.id.clone(),
+                label: gate.label.clone(),
+                checked: gate.status == GateStatus::Passing,
+            })
+            .collect()
+    }
+
     pub fn available_transitions(&self, facts: &TransitionFacts) -> Vec<WorkflowState> {
         self.workflow_state.available_transitions(facts)
     }
@@ -150,6 +162,13 @@ impl FeatureState {
 pub struct PullRequestRef {
     pub number: u64,
     pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullRequestChecklistItem {
+    pub gate_id: String,
+    pub label: String,
+    pub checked: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
