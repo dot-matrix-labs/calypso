@@ -11,6 +11,9 @@ const DEFAULT_PROMPTS_YAML: &str = include_str!("../templates/default/prompts.ym
 const LOCAL_STATE_MACHINE_FILE: &str = "calypso-state-machine.yml";
 const LOCAL_AGENTS_FILE: &str = "calypso-agents.yml";
 const LOCAL_PROMPTS_FILE: &str = "calypso-prompts.yml";
+const DOT_CALYPSO_STATE_MACHINE_FILE: &str = ".calypso/state-machine.yml";
+const DOT_CALYPSO_AGENTS_FILE: &str = ".calypso/agents.yml";
+const DOT_CALYPSO_PROMPTS_FILE: &str = ".calypso/prompts.yml";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TemplateSet {
@@ -33,6 +36,40 @@ impl TemplateSet {
 
         template.validate()?;
         Ok(template)
+    }
+
+    /// Load template from a project directory, merging `.calypso/` overrides over defaults.
+    ///
+    /// For each of `state-machine.yml`, `agents.yml`, and `prompts.yml`, if a local file exists
+    /// under `.calypso/`, its top-level keys override the corresponding defaults. Missing local
+    /// files simply use the default entirely. After merging, the combined result is validated.
+    pub fn load_from_directory(path: &Path) -> Result<Self, TemplateError> {
+        let sm_path = path.join(DOT_CALYPSO_STATE_MACHINE_FILE);
+        let agents_path = path.join(DOT_CALYPSO_AGENTS_FILE);
+        let prompts_path = path.join(DOT_CALYPSO_PROMPTS_FILE);
+
+        let state_machine_yaml = if sm_path.exists() {
+            let local = fs::read_to_string(&sm_path).map_err(TemplateError::Io)?;
+            merge_yaml_strings(DEFAULT_STATE_MACHINE_YAML, &local)?
+        } else {
+            DEFAULT_STATE_MACHINE_YAML.to_string()
+        };
+
+        let agents_yaml = if agents_path.exists() {
+            let local = fs::read_to_string(&agents_path).map_err(TemplateError::Io)?;
+            merge_yaml_strings(DEFAULT_AGENTS_YAML, &local)?
+        } else {
+            DEFAULT_AGENTS_YAML.to_string()
+        };
+
+        let prompts_yaml = if prompts_path.exists() {
+            let local = fs::read_to_string(&prompts_path).map_err(TemplateError::Io)?;
+            merge_yaml_strings(DEFAULT_PROMPTS_YAML, &local)?
+        } else {
+            DEFAULT_PROMPTS_YAML.to_string()
+        };
+
+        Self::from_yaml_strings(&state_machine_yaml, &agents_yaml, &prompts_yaml)
     }
 
     fn validate(&self) -> Result<(), TemplateError> {
@@ -175,9 +212,129 @@ impl TemplateSet {
         Ok(())
     }
 
+    /// Check coherence of cross-references within the template set.
+    ///
+    /// Returns a list of human-readable error strings. An empty list means the template is
+    /// coherent. This is a softer check than `validate` — it does not parse YAML but instead
+    /// inspects the already-parsed structures for logical consistency.
+    pub fn validate_coherence(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+
+        let known_task_names: BTreeSet<&str> = self
+            .agents
+            .tasks
+            .iter()
+            .map(|task| task.name.as_str())
+            .collect();
+
+        let known_states: BTreeSet<&str> = self
+            .state_machine
+            .states
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+
+        // Known builtin prefixes accepted by the system
+        const KNOWN_BUILTIN_PREFIXES: &[&str] = &[
+            "builtin.doctor.",
+            "builtin.github.",
+            "builtin.policy.",
+            "builtin.git.",
+            "builtin.ci.",
+        ];
+
+        // Check gate task references and builtin keyword validity
+        for group in &self.state_machine.gate_groups {
+            for gate in &group.gates {
+                if !known_task_names.contains(gate.task.as_str()) {
+                    errors.push(format!(
+                        "gate '{}' references non-existent task '{}'",
+                        gate.id, gate.task
+                    ));
+                }
+
+                // Check applies_to states exist
+                if let Some(applies_to) = &gate.applies_to {
+                    for state in applies_to {
+                        if !known_states.contains(state.as_str()) {
+                            errors.push(format!(
+                                "gate '{}' applies_to references non-existent state '{}'",
+                                gate.id, state
+                            ));
+                        }
+                    }
+                }
+
+                // Check blocking_scope references a known state if set
+                if let Some(scope) = &gate.blocking_scope
+                    && !known_states.contains(scope.as_str())
+                {
+                    errors.push(format!(
+                        "gate '{}' blocking_scope references non-existent state '{}'",
+                        gate.id, scope
+                    ));
+                }
+            }
+        }
+
+        // Check builtin keyword references
+        for task in &self.agents.tasks {
+            if task.kind == AgentTaskKind::Builtin
+                && let Some(builtin) = &task.builtin
+            {
+                let recognized = KNOWN_BUILTIN_PREFIXES
+                    .iter()
+                    .any(|prefix| builtin.starts_with(prefix));
+                if !recognized {
+                    errors.push(format!(
+                        "task '{}' uses unrecognized builtin keyword '{}'",
+                        task.name, builtin
+                    ));
+                }
+            }
+        }
+
+        // Check that transition target states exist (if state_machine has transitions)
+        for transition in &self.state_machine.transitions {
+            if !known_states.contains(transition.from.as_str()) {
+                errors.push(format!(
+                    "transition from '{}' references non-existent state",
+                    transition.from
+                ));
+            }
+            if !known_states.contains(transition.to.as_str()) {
+                errors.push(format!(
+                    "transition to '{}' references non-existent state",
+                    transition.to
+                ));
+            }
+        }
+
+        errors
+    }
+
     pub fn task_by_name(&self, task_name: &str) -> Option<&AgentTask> {
         self.agents.tasks.iter().find(|task| task.name == task_name)
     }
+}
+
+/// Merge two YAML documents, with keys from `override_yaml` taking precedence over `base_yaml`.
+/// Both documents must be YAML mappings at the top level.
+fn merge_yaml_strings(base_yaml: &str, override_yaml: &str) -> Result<String, TemplateError> {
+    let mut base: serde_yaml::Value =
+        serde_yaml::from_str(base_yaml).map_err(TemplateError::Yaml)?;
+    let overlay: serde_yaml::Value =
+        serde_yaml::from_str(override_yaml).map_err(TemplateError::Yaml)?;
+
+    if let (serde_yaml::Value::Mapping(base_map), serde_yaml::Value::Mapping(overlay_map)) =
+        (&mut base, overlay)
+    {
+        for (k, v) in overlay_map {
+            base_map.insert(k, v);
+        }
+    }
+
+    serde_yaml::to_string(&base).map_err(TemplateError::Yaml)
 }
 
 pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
@@ -234,6 +391,31 @@ pub struct StateMachineTemplate {
     pub gate_groups: Vec<GateGroupTemplate>,
     #[serde(default)]
     pub policy_gates: Vec<PolicyGateTemplate>,
+    #[serde(default)]
+    pub transitions: Vec<TransitionTemplate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feature_unit: Option<FeatureUnitConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub artifact_policies: Option<ArtifactPolicies>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransitionTemplate {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeatureUnitConfig {
+    pub branch_prefix: Option<String>,
+    pub worktree_base: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactPolicies {
+    /// Map from state name to list of required artifact paths/patterns
+    #[serde(default)]
+    pub required_per_state: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -248,6 +430,45 @@ pub struct GateTemplate {
     pub id: String,
     pub label: String,
     pub task: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recheck_trigger: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_policy: Option<TimeoutPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub waiver_policy: Option<WaiverPolicy>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_open_task_on_fail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pr_checklist_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub allow_parallel_with: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocking_scope: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applies_to: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_source: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TimeoutPolicy {
+    pub duration_secs: u64,
+    pub on_timeout: GateStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GateStatus {
+    Open,
+    Closed,
+    Skipped,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WaiverPolicy {
+    pub requires_role: String,
+    pub recorded_in_state: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +494,17 @@ pub enum PolicyGateKind {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentCatalog {
     pub tasks: Vec<AgentTask>,
+    #[serde(default)]
+    pub doctor_checks: Vec<DoctorCheckConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DoctorCheckConfig {
+    pub id: String,
+    pub label: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
