@@ -863,3 +863,49 @@ tasks:
         .expect("human signoff gate should exist");
     assert_eq!(gate.status, GateStatus::Manual);
 }
+
+#[test]
+fn feature_state_sets_human_task_gate_to_manual_status() {
+    use calypso_cli::template::TemplateSet;
+
+    let template = TemplateSet::from_yaml_strings(
+        r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: coordination
+    label: Coordination
+    gates:
+      - id: human-approval
+        label: Human approval
+        task: human-approval
+"#,
+        r#"
+tasks:
+  - name: human-approval
+    kind: human
+"#,
+        "prompts: {}\n",
+    )
+    .expect("template should validate");
+
+    let mut feature = FeatureState::from_template(
+        "feat-human",
+        "feat/human-test",
+        "/worktrees/feat-human",
+        PullRequestRef {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    let gate = feature.gate_groups[0].gates[0].clone();
+    assert_eq!(gate.status, GateStatus::Manual);
+}

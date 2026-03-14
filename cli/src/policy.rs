@@ -259,6 +259,24 @@ tasks:
     }
 
     #[test]
+    fn implementation_plan_fresh_returns_false_when_primary_has_no_modification_time() {
+        let repo_root = Path::new("/tmp/calypso-policy");
+        // watched_paths file exists with a time, but the primary (implementation-plan.md)
+        // has no recorded modification time — file_modified returns None for it
+        let environment = FakePolicyEnvironment::default().with_file(
+            &repo_root.join("docs/prd.md"),
+            UNIX_EPOCH + Duration::from_secs(10),
+        );
+
+        let evidence = collect_policy_evidence(&environment, repo_root, &sample_template());
+
+        assert_eq!(
+            evidence.result_for("builtin.policy.implementation_plan_fresh"),
+            Some(false)
+        );
+    }
+
+    #[test]
     fn policy_evidence_fails_when_plan_or_workflows_are_missing_or_stale() {
         let repo_root = Path::new("/tmp/calypso-policy");
         let environment = FakePolicyEnvironment::default()
