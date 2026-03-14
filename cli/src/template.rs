@@ -321,6 +321,66 @@ impl fmt::Display for TemplateError {
 
 impl std::error::Error for TemplateError {}
 
+fn validate_policy_gate(policy_gate: &PolicyGateTemplate) -> Result<(), TemplateError> {
+    match policy_gate.evaluator.as_str() {
+        "builtin.policy.implementation_plan_present"
+        | "builtin.policy.next_prompt_present"
+        | "builtin.policy.required_workflows_present" => {
+            if policy_gate.paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define at least one path",
+                    policy_gate.gate_id
+                )));
+            }
+
+            if !policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' does not allow watched_paths",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        "builtin.policy.implementation_plan_fresh" => {
+            if policy_gate.paths.len() != 1 {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define exactly one primary path",
+                    policy_gate.gate_id
+                )));
+            }
+
+            if policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define at least one watched path",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        "builtin.git.is_main_compatible" => {
+            if !policy_gate.paths.is_empty() || !policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' does not accept file paths",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        _ => {
+            return Err(TemplateError::Validation(format!(
+                "policy gate '{}' uses unsupported evaluator '{}'",
+                policy_gate.gate_id, policy_gate.evaluator
+            )));
+        }
+    }
+
+    if policy_gate.kind == PolicyGateKind::Workflow && policy_gate.skip_on_tag_push {
+        return Err(TemplateError::Validation(format!(
+            "workflow policy gate '{}' cannot be tag-push exempt",
+            policy_gate.gate_id
+        )));
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,64 +489,4 @@ mod tests {
                 .contains("must define a builtin evaluator")
         );
     }
-}
-
-fn validate_policy_gate(policy_gate: &PolicyGateTemplate) -> Result<(), TemplateError> {
-    match policy_gate.evaluator.as_str() {
-        "builtin.policy.implementation_plan_present"
-        | "builtin.policy.next_prompt_present"
-        | "builtin.policy.required_workflows_present" => {
-            if policy_gate.paths.is_empty() {
-                return Err(TemplateError::Validation(format!(
-                    "policy gate '{}' must define at least one path",
-                    policy_gate.gate_id
-                )));
-            }
-
-            if !policy_gate.watched_paths.is_empty() {
-                return Err(TemplateError::Validation(format!(
-                    "policy gate '{}' does not allow watched_paths",
-                    policy_gate.gate_id
-                )));
-            }
-        }
-        "builtin.policy.implementation_plan_fresh" => {
-            if policy_gate.paths.len() != 1 {
-                return Err(TemplateError::Validation(format!(
-                    "policy gate '{}' must define exactly one primary path",
-                    policy_gate.gate_id
-                )));
-            }
-
-            if policy_gate.watched_paths.is_empty() {
-                return Err(TemplateError::Validation(format!(
-                    "policy gate '{}' must define at least one watched path",
-                    policy_gate.gate_id
-                )));
-            }
-        }
-        "builtin.git.is_main_compatible" => {
-            if !policy_gate.paths.is_empty() || !policy_gate.watched_paths.is_empty() {
-                return Err(TemplateError::Validation(format!(
-                    "policy gate '{}' does not accept file paths",
-                    policy_gate.gate_id
-                )));
-            }
-        }
-        _ => {
-            return Err(TemplateError::Validation(format!(
-                "policy gate '{}' uses unsupported evaluator '{}'",
-                policy_gate.gate_id, policy_gate.evaluator
-            )));
-        }
-    }
-
-    if policy_gate.kind == PolicyGateKind::Workflow && policy_gate.skip_on_tag_push {
-        return Err(TemplateError::Validation(format!(
-            "workflow policy gate '{}' cannot be tag-push exempt",
-            policy_gate.gate_id
-        )));
-    }
-
-    Ok(())
 }
