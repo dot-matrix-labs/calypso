@@ -19,6 +19,11 @@ path = "src/lib.rs"
 name = "calypso-cli"
 path = "src/main.rs"
 
+# coverage-driver is disabled for releases (test-only utility)
 [[bin]]
 name = "coverage-driver"
 path = "src/bin/coverage_driver.rs"
+required-features = ["__dev_only"]
+
+[features]
+__dev_only = []

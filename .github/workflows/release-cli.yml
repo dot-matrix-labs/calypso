@@ -3,7 +3,7 @@ name: Release — cli
 on:
   push:
     tags:
-      - "v*"
+      - "[0-9]+.[0-9]+.[0-9]+*"
   workflow_dispatch:
 
 jobs:
@@ -13,9 +13,17 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
             artifact_name: calypso-cli-linux-x86_64
             binary_name: calypso-cli
+          # TODO: aarch64-unknown-linux-gnu cross-compilation requires toolchain fixes
+          # See: https://github.com/dot-matrix-labs/calypso/issues/XX
           - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: calypso-cli-macos-x86_64
+            binary_name: calypso-cli
+          - os: macos-latest
+            target: aarch64-apple-darwin
             artifact_name: calypso-cli-macos-aarch64
             binary_name: calypso-cli
 
@@ -23,9 +31,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -33,22 +45,44 @@ jobs:
           workspaces: |
             cli -> target
 
+      - name: Install aarch64 Linux toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
       - name: Build release binary
         working-directory: cli
-        run: cargo build --release
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Verify binary
+        working-directory: cli
+        run: |
+          binary_path="target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
+          echo "Verifying binary: $binary_path"
+          "$binary_path" --version
+          echo "✓ Binary verified and executable"
 
       - name: Package release artifact
         shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
-          cp cli/target/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
-          tar -czf dist/${{ matrix.artifact_name }}.tar.gz -C dist ${{ matrix.binary_name }}
+          cp cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
+          tar -czf dist/${{ matrix.artifact_name }}-${VERSION}.tar.gz -C dist ${{ matrix.binary_name }}
+          # Generate SHA256 checksum for this artifact
+          cd dist
+          sha256sum ${{ matrix.artifact_name }}-${VERSION}.tar.gz > ${{ matrix.artifact_name }}-${VERSION}.tar.gz.sha256
+          cd -
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.artifact_name }}.tar.gz
+          path: |
+            dist/${{ matrix.artifact_name }}-${{ github.ref_name }}.tar.gz
+            dist/${{ matrix.artifact_name }}-${{ github.ref_name }}.tar.gz.sha256
 
   publish:
     if: startsWith(github.ref, 'refs/tags/')
@@ -58,18 +92,45 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           path: dist
+
+      - name: Prepare release assets
+        shell: bash
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          mkdir -p release-assets
+          # Flatten artifact structure and move to release-assets
+          find dist -name "*.tar.gz" -o -name "*.sha256" | while read file; do
+            cp "$file" release-assets/
+          done
+          # Create combined checksums file
+          cat release-assets/*.sha256 > release-assets/CHECKSUMS.txt
+          # Include install script
+          cp cli/scripts/install.sh release-assets/install.sh || true
 
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          shopt -s globstar
-          gh release create "${GITHUB_REF_NAME}" \
-            --title "${GITHUB_REF_NAME}" \
-            --notes "Automated CLI release for ${GITHUB_REF_NAME}" \
-            dist/**/*.tar.gz
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes "Automated CLI release for ${{ github.ref_name }}" \
+            release-assets/*
+
+          echo "✓ Release published with:"
+          echo "  - 3 platform binaries"
+          echo "  - SHA256 checksums"
+          echo "  - CHECKSUMS.txt"
+          echo "  - install.sh script"
+          echo ""
+          echo "Note: Cargo.toml version bump should be done manually or via PR"
