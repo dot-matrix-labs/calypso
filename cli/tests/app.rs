@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{LazyLock, Mutex, RwLock};
 
 use calypso_cli::app::{
     CommandOutput, gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
@@ -8,7 +8,15 @@ use calypso_cli::app::{
     run_status,
 };
 
+// Tests that write a script file and then exec it must hold EXEC_LOCK as a
+// write (exclusive) guard while the fd is open for writing.  Any test that
+// forks a child process (which would otherwise inherit that fd and cause
+// ETXTBSY) must hold EXEC_LOCK as a read (shared) guard.  This ensures the
+// write-fd is never inherited by a concurrently-forked child.
+static EXEC_LOCK: LazyLock<RwLock<()>> = LazyLock::new(|| RwLock::new(()));
+
 static PATH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
 use calypso_cli::state::{
     EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus, GithubMergeability,
     GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, WorkflowState,
@@ -90,6 +98,7 @@ fn render_feature_status_reports_missing_pr_and_no_blocking_gates() {
 
 #[test]
 fn run_doctor_falls_back_to_current_directory_outside_git_repo() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-run-doctor-no-git");
 
     let rendered = run_doctor(&temp_dir);
@@ -101,6 +110,7 @@ fn run_doctor_falls_back_to_current_directory_outside_git_repo() {
 
 #[test]
 fn resolve_repo_root_and_branch_report_git_context() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let repo_root = init_git_repo("feature/test-app-runtime");
     let nested_dir = repo_root.join("nested");
     std::fs::create_dir_all(&nested_dir).expect("nested dir should be created");
@@ -161,6 +171,7 @@ fn render_feature_status_includes_normalized_github_snapshot() {
 
 #[test]
 fn run_command_returns_none_for_non_zero_exit() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     assert!(matches!(
         run_command(Path::new("."), "/bin/sh", &["-c", "echo boom >&2; exit 1"]),
         Ok(CommandOutput::Failure(error)) if error == "boom"
@@ -169,6 +180,7 @@ fn run_command_returns_none_for_non_zero_exit() {
 
 #[test]
 fn run_command_returns_none_when_process_cannot_spawn() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     assert!(
         run_command(Path::new("."), "/definitely/missing-binary", &[])
             .expect_err("missing binary should return an error")
@@ -178,6 +190,7 @@ fn run_command_returns_none_when_process_cannot_spawn() {
 
 #[test]
 fn run_command_returns_trimmed_stdout_for_successful_process() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     assert_eq!(
         run_command(Path::new("."), "/bin/sh", &["-c", "printf ' hello\\n'"]),
         Ok(CommandOutput::Success("hello".to_string()))
@@ -205,6 +218,7 @@ fn parse_pull_request_ref_accepts_valid_json() {
 
 #[test]
 fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     assert!(
         resolve_current_pull_request_with_program(Path::new("."), "/definitely/missing-binary")
             .expect_err("missing gh should return an error")
@@ -214,6 +228,7 @@ fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
 
 #[test]
 fn resolve_current_pull_request_parses_successful_output() {
+    let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-resolve-pr");
     let gh_path = temp_dir.join("fake-gh.sh");
     {
@@ -324,6 +339,7 @@ fn render_feature_status_labels_all_github_review_and_mergeability_variants() {
 
 #[test]
 fn resolve_repo_root_returns_none_outside_a_git_repo() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-no-git-root");
 
     assert_eq!(resolve_repo_root(&temp_dir), None);
@@ -333,6 +349,7 @@ fn resolve_repo_root_returns_none_outside_a_git_repo() {
 
 #[test]
 fn resolve_current_branch_returns_none_for_non_git_directory() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     // Running git branch --show-current outside a git repo exits non-zero.
     let temp_dir = make_temp_dir("calypso-cli-no-git-branch");
 
@@ -343,6 +360,7 @@ fn resolve_current_branch_returns_none_for_non_git_directory() {
 
 #[test]
 fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
+    let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-error");
     let gh_path = temp_dir.join("fake-gh.sh");
     {
@@ -375,6 +393,7 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
 
 #[test]
 fn run_command_uses_status_message_when_stderr_is_empty() {
+    let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     // Exit non-zero with no stderr — the error should mention the exit status.
     let result = run_command(Path::new("."), "/bin/sh", &["-c", "exit 2"]);
 
@@ -383,6 +402,7 @@ fn run_command_uses_status_message_when_stderr_is_empty() {
 
 #[test]
 fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
+    let _exec_guard = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let _guard = PATH_LOCK.lock().expect("path lock should be available");
 
     let repo_root = init_git_repo("feat/run-status-gh-error");
@@ -451,6 +471,7 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
 
 #[test]
 fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_json() {
+    let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-malformed");
     let gh_path = temp_dir.join("fake-gh.sh");
     {
