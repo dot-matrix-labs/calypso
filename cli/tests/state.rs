@@ -568,6 +568,56 @@ tasks:
 }
 
 #[test]
+fn feature_state_maps_human_task_to_manual_status() {
+    let state_machine_yaml = "\
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: approval
+    label: Approval
+    gates:
+      - id: human-sign-off
+        label: Human sign-off
+        task: human-reviewer
+";
+    let agents_yaml = "\
+tasks:
+  - name: human-reviewer
+    kind: human
+";
+    let prompts_yaml = "prompts: {}";
+
+    let template = TemplateSet::from_yaml_strings(state_machine_yaml, agents_yaml, prompts_yaml)
+        .expect("custom template should parse");
+
+    let mut feature = FeatureState::from_template(
+        "feat-approval",
+        "feat/approval",
+        "/worktrees/feat-approval",
+        PullRequestRef {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    let gate = feature
+        .gate_groups
+        .iter()
+        .flat_map(|group| group.gates.iter())
+        .find(|gate| gate.id == "human-sign-off")
+        .expect("human-sign-off gate should exist");
+
+    assert_eq!(gate.status, GateStatus::Manual);
+}
+
+#[test]
 fn feature_state_maps_human_task_to_manual_gate_status() {
     let template = TemplateSet::from_yaml_strings(
         r#"
@@ -622,8 +672,8 @@ fn feature_state_maps_manual_builtin_evidence_to_manual_gate_status() {
         "feat/123-token-refresh",
         "/worktrees/feat-123-token-refresh",
         PullRequestRef {
-            number: 231,
-            url: "https://github.com/org/repo/pull/231".to_string(),
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
         },
         &template,
     )

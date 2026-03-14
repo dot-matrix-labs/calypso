@@ -1,6 +1,7 @@
 pub mod app;
 pub mod codex;
 pub mod doctor;
+pub mod feature_start;
 pub mod github;
 pub mod policy;
 pub mod runtime;
@@ -25,7 +26,7 @@ pub fn render_version(info: BuildInfo<'_>) -> String {
 
 pub fn render_help(info: BuildInfo<'_>) -> String {
     format!(
-        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor      Check local Calypso prerequisites\n  status      Render the operator surface from a state file\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
+        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor                                      Check local Calypso prerequisites\n  status                                      Render the operator surface from a state file\n  feature-start <feature-id> --worktree-base <path>\n                                              Create a feature branch, worktree, draft PR, and seeded state\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
         info.version, info.git_hash, info.build_time, info.git_tags
     )
 }

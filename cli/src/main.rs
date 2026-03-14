@@ -1,4 +1,5 @@
 use calypso_cli::app::{run_doctor, run_status};
+use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
 use calypso_cli::{BuildInfo, render_help, render_version};
@@ -44,6 +45,36 @@ fn main() {
             render_status(path)
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
+        [command, feature_id, flag, worktree_base]
+            if command == "feature-start" && flag == "--worktree-base" =>
+        {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            let request = FeatureStartRequest {
+                feature_id: feature_id.to_string(),
+                worktree_base: std::path::PathBuf::from(worktree_base),
+                title: None,
+                body: None,
+                allow_dirty: false,
+                allow_non_main: false,
+            };
+
+            match run_feature_start(&cwd, &request) {
+                Ok(result) => {
+                    println!("Feature started");
+                    println!("Branch: {}", result.branch);
+                    println!("Worktree: {}", result.worktree_path.display());
+                    println!(
+                        "Pull request: #{} {}",
+                        result.pull_request.number, result.pull_request.url
+                    );
+                    println!("State: {}", result.state_path.display());
+                }
+                Err(error) => {
+                    eprintln!("feature-start error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         _ => println!("{}", render_help(info)),
     }
 }

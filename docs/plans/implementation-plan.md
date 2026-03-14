@@ -1,12 +1,19 @@
 # Worktree Implementation Plan
 
-## PR: `feat: build CLI GitHub gate evaluators`
+## PR: `feat: implement cli feature-start workflow`
 
-- [x] Read the current PR body for [PR #28](https://github.com/dot-matrix-labs/calypso/pull/28), the feature PRD in [docs/plans/cli-github-gate-evaluators-feature.md](/tmp/calypso-worktrees/feat-cli-github-gate-evaluators/docs/plans/cli-github-gate-evaluators-feature.md), and the CLI prototype plan in [cli/calypso-cli-implementation-plan.md](/tmp/calypso-worktrees/feat-cli-github-gate-evaluators/cli/calypso-cli-implementation-plan.md).
-- [x] Confirm the live PR has no current review comments or status checks, and that `mergeStateStatus` is currently `BLOCKED` on Friday, March 13, 2026.
-- [x] Add a normalized GitHub pull request snapshot model covering draft state, review status, check status, and mergeability.
-- [x] Extend built-in evidence from boolean-only results to status-aware evidence (`passing`, `failing`, `pending`, `manual`) so manual review gates can be represented deterministically.
-- [x] Map normalized GitHub snapshot facts into grouped default-template gates for PR existence, ready-for-review state, CI checks, review approval, and mergeability.
-- [x] Expose normalized GitHub evidence through the status renderer and TUI operator surface, and persist the snapshot shape in repository state.
-- [x] Add or update tests for snapshot parsing, grouped gate evaluation, manual review states, and operator-surface/status rendering.
-- [x] Run `cargo test -p calypso-cli --test github`, `cargo test -p calypso-cli --test state`, `cargo test -p calypso-cli --test app`, and `cargo test -p calypso-cli --test tui` — all pass (12, 15, 14, 7).
+- [x] Read PR #27, the feature proposal in [docs/plans/cli-feature-start-workflow-feature.md](/tmp/calypso-worktrees/feat-cli-feature-start/docs/plans/cli-feature-start-workflow-feature.md), [cli/spec.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/spec.md), and [cli/calypso-cli-implementation-plan.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/calypso-cli-implementation-plan.md).
+- [x] Add a first-class `feature-start` command surface to `calypso-cli`.
+- [x] Implement deterministic semantic branch derivation from a user-provided feature identifier.
+- [x] Enforce clean-`main` base-state validation before mutating git state by default.
+- [x] Create the new branch from `main`, create a dedicated worktree under a caller-provided base path, push the branch, create a draft pull request, and seed `.calypso/repository-state.json` in the new worktree.
+- [x] Roll back local branch/worktree state on worktree, push, PR-create, or state-bootstrap failures, and return explicit recovery guidance when remote PR state may remain.
+- [x] Cover the slice with unit tests for branch naming, base-state rejection, rollback behavior, partial-failure reporting, and success-path state seeding.
+- [x] Add an integration test that exercises real git branch/worktree creation with a fake `gh` boundary and validates the seeded repository state.
+- [ ] Run `cargo fmt --check` and `cargo test -p calypso-cli`.
+
+## Remaining Work
+
+- [ ] Resolve the sandbox-specific Rust compiler `Invalid cross-device link (os error 18)` failure that occurs while writing `.rmeta` artifacts during `cargo test -p calypso-cli --offline`.
+- [ ] Re-run `cargo test -p calypso-cli` once artifact writes succeed and fix any code or test failures surfaced by a full run.
+- [ ] Update PR #27 body/checklist to reflect the implemented feature slice after tests pass.

@@ -1,16 +1,19 @@
-Continue the `feat/cli-github-gate-evaluators` worktree from the current state.
+Continue PR #27 on branch `feat/cli-feature-start`.
 
-Start with validation. Run:
+Current state:
+- `calypso-cli` now has a `feature-start <feature-id> --worktree-base <path>` command wired in [cli/src/main.rs](/tmp/calypso-worktrees/feat-cli-feature-start/cli/src/main.rs).
+- The orchestration lives in [cli/src/feature_start.rs](/tmp/calypso-worktrees/feat-cli-feature-start/cli/src/feature_start.rs) and covers branch naming, clean-`main` validation, branch/worktree creation, branch push, draft PR creation, state bootstrap, and rollback/recovery handling.
+- New tests live in [cli/tests/feature_start.rs](/tmp/calypso-worktrees/feat-cli-feature-start/cli/tests/feature_start.rs), plus the CLI help assertion in [cli/tests/cli.rs](/tmp/calypso-worktrees/feat-cli-feature-start/cli/tests/cli.rs).
+- [cli/Cargo.lock](/tmp/calypso-worktrees/feat-cli-feature-start/cli/Cargo.lock) was reconciled to offline-cached crate versions (`zmij 1.0.19`, `ryu 1.0.22`, `libc 0.2.180`, `syn 2.0.114`, `unicode-ident 1.0.22`, `quote 1.0.44`, `bitflags 2.10.0`, `memchr 2.7.6`) so Cargo can resolve dependencies without network access.
 
-- `RUSTC_WRAPPER= cargo test -p calypso-cli --test github -- --nocapture`
-- `RUSTC_WRAPPER= cargo test -p calypso-cli --test state -- --nocapture`
-- `RUSTC_WRAPPER= cargo test -p calypso-cli --test app -- --nocapture`
-- `RUSTC_WRAPPER= cargo test -p calypso-cli --test tui -- --nocapture`
+Blocking issue:
+- `RUSTC_WRAPPER= cargo test -p calypso-cli --offline` now resolves and starts compiling, but Rust fails while writing artifacts with `Invalid cross-device link (os error 18)`, e.g. `failed to write .../liblibc-*.rmeta`.
+- This still happens with:
+  - `TMPDIR=/tmp/calypso-cli-target/tmp CARGO_TARGET_DIR=/tmp/calypso-cli-target`
+  - `TMPDIR=$(pwd)/target/tmp CARGO_TARGET_DIR=$(pwd)/target`
+  - `-j1`
 
-If `cargo` still fails before compilation, resolve the dependency-cache mismatch called out in [docs/plans/implementation-plan.md](/tmp/calypso-worktrees/feat-cli-github-gate-evaluators/docs/plans/implementation-plan.md) without undoing the GitHub gate evaluator changes.
-
-Once validation is green:
-
-1. Re-read the live PR body and update it with a checklist that reflects the implemented GitHub evaluator behavior.
-2. Verify the default template gate layout and operator-surface output still match [docs/plans/cli-github-gate-evaluators-feature.md](/tmp/calypso-worktrees/feat-cli-github-gate-evaluators/docs/plans/cli-github-gate-evaluators-feature.md).
-3. Commit the finished increment(s) in small units.
+Next steps:
+1. Solve the compiler artifact-write `EXDEV` issue in this sandbox so `cargo test -p calypso-cli --offline` can complete.
+2. Re-run `RUSTC_WRAPPER= cargo fmt --check` and `RUSTC_WRAPPER= cargo test -p calypso-cli --offline`.
+3. If tests pass, update PR #27 body with a checklist showing implemented items and remaining validation status.

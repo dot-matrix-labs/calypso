@@ -85,6 +85,7 @@ fn help_flag_exposes_version_information() {
     assert!(stdout.contains("Version: "));
     assert!(stdout.contains("Git hash: "));
     assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("feature-start <feature-id> --worktree-base <path>"));
 }
 
 #[test]
