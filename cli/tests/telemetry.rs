@@ -509,4 +509,3 @@ fn logger_with_writer_falls_back_to_info_for_unknown_calypso_log_value() {
     unsafe { std::env::remove_var("CALYPSO_LOG") };
     assert_eq!(logger.min_level(), LogLevel::Info);
 }
-
