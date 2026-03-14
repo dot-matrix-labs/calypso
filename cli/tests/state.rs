@@ -494,6 +494,10 @@ fn feature_state_reports_blocking_gate_ids_after_evaluation() {
         .with_result("builtin.doctor.gh_authenticated", true)
         .with_result("builtin.doctor.github_remote_configured", true)
         .with_result("builtin.doctor.required_workflows_present", true)
+        .with_result("builtin.policy.implementation_plan_present", true)
+        .with_result("builtin.policy.implementation_plan_fresh", true)
+        .with_result("builtin.policy.next_prompt_present", true)
+        .with_result("builtin.policy.required_workflows_present", true)
         .with_result("builtin.github.pr_exists", true)
         .with_result("builtin.github.pr_checks_green", true)
         .with_result("builtin.github.pr_merged", false);
@@ -861,5 +865,51 @@ tasks:
         .flat_map(|group| group.gates.iter())
         .find(|gate| gate.id == "human-signoff")
         .expect("human signoff gate should exist");
+    assert_eq!(gate.status, GateStatus::Manual);
+}
+
+#[test]
+fn feature_state_sets_human_task_gate_to_manual_status() {
+    use calypso_cli::template::TemplateSet;
+
+    let template = TemplateSet::from_yaml_strings(
+        r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: coordination
+    label: Coordination
+    gates:
+      - id: human-approval
+        label: Human approval
+        task: human-approval
+"#,
+        r#"
+tasks:
+  - name: human-approval
+    kind: human
+"#,
+        "prompts: {}\n",
+    )
+    .expect("template should validate");
+
+    let mut feature = FeatureState::from_template(
+        "feat-human",
+        "feat/human-test",
+        "/worktrees/feat-human",
+        PullRequestRef {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    let gate = feature.gate_groups[0].gates[0].clone();
     assert_eq!(gate.status, GateStatus::Manual);
 }

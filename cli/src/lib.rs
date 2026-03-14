@@ -2,6 +2,7 @@ pub mod app;
 pub mod codex;
 pub mod doctor;
 pub mod github;
+pub mod policy;
 pub mod runtime;
 pub mod state;
 pub mod template;

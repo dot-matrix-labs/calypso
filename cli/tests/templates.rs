@@ -122,7 +122,15 @@ fn embedded_default_template_set_loads_and_validates() {
 
     assert!(!template.state_machine.states.is_empty());
     assert!(!template.state_machine.gate_groups.is_empty());
+    assert!(!template.state_machine.policy_gates.is_empty());
     assert!(!template.agents.tasks.is_empty());
+    assert!(
+        template
+            .state_machine
+            .gate_groups
+            .iter()
+            .any(|group| group.id == "policy")
+    );
 }
 
 #[test]
@@ -247,6 +255,93 @@ tasks:
 }
 
 #[test]
+fn template_validation_rejects_policy_gate_with_unknown_gate_reference() {
+    let state_machine = format!(
+        "{}\npolicy_gates:\n  - gate_id: missing-gate\n    evaluator: builtin.policy.next_prompt_present\n    kind: hook\n    paths:\n      - docs/plans/next-prompt.md\n",
+        VALID_STATE_MACHINE
+    );
+    let agents = format!(
+        "{}  - name: next-prompt-present\n    kind: builtin\n    builtin: builtin.policy.next_prompt_present\n",
+        VALID_AGENTS
+    );
+
+    let error = TemplateSet::from_yaml_strings(&state_machine, &agents, VALID_PROMPTS)
+        .expect_err("unknown policy gate should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("unknown gate"));
+}
+
+#[test]
+fn template_validation_rejects_workflow_policy_gate_marked_tag_push_exempt() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: required-workflows-present
+        label: Required workflows present
+        task: required-workflows-present
+policy_gates:
+  - gate_id: required-workflows-present
+    evaluator: builtin.policy.required_workflows_present
+    kind: workflow
+    skip_on_tag_push: true
+    paths:
+      - .github/workflows/rust-quality.yml
+"#;
+    let agents = r#"
+tasks:
+  - name: required-workflows-present
+    kind: builtin
+    builtin: builtin.policy.required_workflows_present
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("tag-push-exempt workflow rule should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("tag-push exempt"));
+}
+
+#[test]
+fn template_validation_rejects_stale_plan_rule_without_watched_paths() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: implementation-plan-fresh
+        label: Implementation plan fresh
+        task: implementation-plan-fresh
+policy_gates:
+  - gate_id: implementation-plan-fresh
+    evaluator: builtin.policy.implementation_plan_fresh
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+"#;
+    let agents = r#"
+tasks:
+  - name: implementation-plan-fresh
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_fresh
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("stale-plan rule without watched paths should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("watched path"));
+}
+
+#[test]
 fn template_error_formats_yaml_failures() {
     let error = TemplateSet::from_yaml_strings(":", VALID_AGENTS, VALID_PROMPTS)
         .expect_err("invalid YAML should fail parsing");
@@ -328,4 +423,288 @@ fn template_resolution_reports_local_io_failures() {
     assert!(error.to_string().contains("template I/O error"));
 
     fs::remove_dir_all(temp_dir).expect("temp template directory should be removed");
+}
+
+#[test]
+fn template_validation_rejects_policy_gate_referencing_gate_with_unknown_task() {
+    // Gate exists in gate_groups but its `task` field has no matching agent task.
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: impl-plan-present
+        label: Implementation plan present
+        task: no-such-task
+policy_gates:
+  - gate_id: impl-plan-present
+    evaluator: builtin.policy.implementation_plan_present
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+"#;
+    let agents = r#"
+tasks:
+  - name: impl-plan-present
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_present
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("policy gate referencing gate with unknown task should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("unknown task"));
+}
+
+#[test]
+fn template_validation_rejects_policy_gate_bound_to_non_builtin_task() {
+    // The gate's task exists but is an agent task, not a builtin.
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: impl-plan-present
+        label: Implementation plan present
+        task: impl-plan-agent
+policy_gates:
+  - gate_id: impl-plan-present
+    evaluator: builtin.policy.implementation_plan_present
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+"#;
+    let agents = r#"
+tasks:
+  - name: impl-plan-agent
+    kind: agent
+    role: impl-plan-agent
+"#;
+    let prompts = r#"
+prompts:
+  impl-plan-agent: |
+    Write the implementation plan.
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, prompts)
+        .expect_err("policy gate bound to non-builtin task should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("must bind to a builtin task"));
+}
+
+#[test]
+fn template_validation_rejects_policy_gate_with_evaluator_mismatch() {
+    // The gate task has a different builtin evaluator than what the policy gate declares.
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: impl-plan-present
+        label: Implementation plan present
+        task: impl-plan-present
+policy_gates:
+  - gate_id: impl-plan-present
+    evaluator: builtin.policy.next_prompt_present
+    kind: hook
+    paths:
+      - docs/plans/next-prompt.md
+"#;
+    let agents = r#"
+tasks:
+  - name: impl-plan-present
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_present
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("policy gate evaluator mismatch should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("does not match task builtin"));
+}
+
+#[test]
+fn template_validation_rejects_present_evaluator_with_empty_paths() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: impl-plan-present
+        label: Implementation plan present
+        task: impl-plan-present
+policy_gates:
+  - gate_id: impl-plan-present
+    evaluator: builtin.policy.implementation_plan_present
+    kind: hook
+    paths: []
+"#;
+    let agents = r#"
+tasks:
+  - name: impl-plan-present
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_present
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("present evaluator with empty paths should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("at least one path"));
+}
+
+#[test]
+fn template_validation_rejects_present_evaluator_with_watched_paths() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: impl-plan-present
+        label: Implementation plan present
+        task: impl-plan-present
+policy_gates:
+  - gate_id: impl-plan-present
+    evaluator: builtin.policy.implementation_plan_present
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+    watched_paths:
+      - docs/prd.md
+"#;
+    let agents = r#"
+tasks:
+  - name: impl-plan-present
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_present
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("present evaluator with watched_paths should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("does not allow watched_paths"));
+}
+
+#[test]
+fn template_validation_rejects_fresh_evaluator_without_exactly_one_primary_path() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: implementation-plan-fresh
+        label: Implementation plan fresh
+        task: implementation-plan-fresh
+policy_gates:
+  - gate_id: implementation-plan-fresh
+    evaluator: builtin.policy.implementation_plan_fresh
+    kind: hook
+    paths: []
+    watched_paths:
+      - docs/prd.md
+"#;
+    let agents = r#"
+tasks:
+  - name: implementation-plan-fresh
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_fresh
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("fresh evaluator with zero paths should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("exactly one primary path"));
+}
+
+#[test]
+fn template_validation_rejects_main_compatible_evaluator_with_file_paths() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: merge-drift-reviewed
+        label: Merge drift reviewed
+        task: merge-drift-reviewed
+policy_gates:
+  - gate_id: merge-drift-reviewed
+    evaluator: builtin.git.is_main_compatible
+    kind: hook
+    paths:
+      - some/file.txt
+"#;
+    let agents = r#"
+tasks:
+  - name: merge-drift-reviewed
+    kind: builtin
+    builtin: builtin.git.is_main_compatible
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("is_main_compatible with file paths should fail");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("does not accept file paths"));
+}
+
+#[test]
+fn template_validation_rejects_policy_gate_with_unknown_evaluator() {
+    // Evaluator matches the task's builtin field (passes mismatch check) but is not
+    // one of the recognised evaluator strings in validate_policy_gate.
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: policy
+    label: Policy
+    gates:
+      - id: custom-gate
+        label: Custom gate
+        task: custom-task
+policy_gates:
+  - gate_id: custom-gate
+    evaluator: builtin.custom.unknown_evaluator
+    kind: hook
+    paths:
+      - some/path.md
+"#;
+    let agents = r#"
+tasks:
+  - name: custom-task
+    kind: builtin
+    builtin: builtin.custom.unknown_evaluator
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, agents, "prompts: {}\n")
+        .expect_err("unknown evaluator should fail validate_policy_gate");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("unsupported evaluator"));
 }

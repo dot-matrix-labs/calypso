@@ -50,7 +50,15 @@ fn make_temp_dir(name: &str) -> std::path::PathBuf {
             .expect("system clock should be after epoch")
             .as_nanos()
     );
-    let path = std::env::temp_dir().join(unique);
+    // Use /var/tmp (persistent, non-tmpfs on Linux) instead of /tmp (tmpfs) to
+    // avoid ETXTBSY when executing scripts written to the same tmpfs that the
+    // instrumented test binary itself runs from under cargo-llvm-cov.
+    let base = if std::path::Path::new("/var/tmp").exists() {
+        std::path::PathBuf::from("/var/tmp")
+    } else {
+        std::env::temp_dir()
+    };
+    let path = base.join(unique);
     std::fs::create_dir_all(&path).expect("temp dir should be created");
     path
 }
@@ -72,6 +80,8 @@ fn render_feature_status_reports_missing_pr_and_no_blocking_gates() {
     let rendered = render_feature_status(Path::new("/tmp/feature"), "feature", None, &feature);
 
     assert!(rendered.contains("Pull request: missing"));
+    assert!(rendered.contains("PR checklist"));
+    assert!(rendered.contains("- [x] Gate 0"));
     assert!(rendered.contains("Blocking gates: none"));
 }
 

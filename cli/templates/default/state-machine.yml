@@ -12,6 +12,21 @@ gate_groups:
       - id: pr-canonicalized
         label: PR canonicalized
         task: pr-editor
+  - id: policy
+    label: Policy
+    gates:
+      - id: implementation-plan-present
+        label: Implementation plan present
+        task: implementation-plan-present
+      - id: implementation-plan-fresh
+        label: Implementation plan fresh
+        task: implementation-plan-fresh
+      - id: next-prompt-present
+        label: Next prompt present
+        task: next-prompt-present
+      - id: required-workflows-present
+        label: Required workflows present
+        task: required-workflows-present
   - id: implementation
     label: Implementation
     gates:
@@ -48,3 +63,35 @@ gate_groups:
       - id: merge-drift-reviewed
         label: Merge drift reviewed
         task: main-compatibility
+policy_gates:
+  - gate_id: implementation-plan-present
+    evaluator: builtin.policy.implementation_plan_present
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+  - gate_id: implementation-plan-fresh
+    evaluator: builtin.policy.implementation_plan_fresh
+    kind: hook
+    paths:
+      - docs/plans/implementation-plan.md
+    watched_paths:
+      - docs/prd.md
+  - gate_id: next-prompt-present
+    evaluator: builtin.policy.next_prompt_present
+    kind: hook
+    paths:
+      - docs/plans/next-prompt.md
+  - gate_id: required-workflows-present
+    evaluator: builtin.policy.required_workflows_present
+    kind: workflow
+    paths:
+      - .github/workflows/rust-quality.yml
+      - .github/workflows/rust-unit.yml
+      - .github/workflows/rust-integration.yml
+      - .github/workflows/rust-e2e.yml
+      - .github/workflows/rust-coverage.yml
+      - .github/workflows/release-cli.yml
+  - gate_id: merge-drift-reviewed
+    evaluator: builtin.git.is_main_compatible
+    kind: hook
+    skip_on_tag_push: true

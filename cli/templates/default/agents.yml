@@ -17,6 +17,18 @@ tasks:
   - name: feature-pr-checks-green
     kind: builtin
     builtin: builtin.github.pr_checks_green
+  - name: implementation-plan-present
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_present
+  - name: implementation-plan-fresh
+    kind: builtin
+    builtin: builtin.policy.implementation_plan_fresh
+  - name: next-prompt-present
+    kind: builtin
+    builtin: builtin.policy.next_prompt_present
+  - name: required-workflows-present
+    kind: builtin
+    builtin: builtin.policy.required_workflows_present
   - name: pr-editor
     kind: agent
     role: pr-editor

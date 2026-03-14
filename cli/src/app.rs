@@ -5,7 +5,10 @@ use serde::Deserialize;
 
 use crate::doctor::{HostDoctorEnvironment, collect_doctor_report, render_doctor_report};
 use crate::github::{HostGithubEnvironment, collect_github_report};
-use crate::state::{BuiltinEvidence, FeatureState, GateStatus, PullRequestRef};
+use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
+use crate::state::{
+    BuiltinEvidence, FeatureState, GateStatus, PullRequestChecklistItem, PullRequestRef,
+};
 use crate::template::load_embedded_template_set;
 
 pub fn run_doctor(cwd: &Path) -> String {
@@ -39,7 +42,10 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
         .as_ref()
         .map(|pr| collect_github_report(&HostGithubEnvironment, pr).to_builtin_evidence())
         .unwrap_or_else(missing_pull_request_evidence);
-    let evidence = doctor_evidence.merge(&github_evidence);
+    let policy_evidence = collect_policy_evidence(&HostPolicyEnvironment, &repo_root, &template);
+    let evidence = doctor_evidence
+        .merge(&github_evidence)
+        .merge(&policy_evidence);
 
     feature
         .evaluate_gates(&template, &evidence)
@@ -84,6 +90,12 @@ pub fn render_feature_status(
         }
     }
 
+    lines.push(String::new());
+    lines.push("PR checklist".to_string());
+    for item in feature.pull_request_checklist() {
+        lines.push(format!("- [{}] {}", checklist_marker(&item), item.label));
+    }
+
     let blocking = feature.blocking_gate_ids();
     lines.push(String::new());
     if blocking.is_empty() {
@@ -93,6 +105,10 @@ pub fn render_feature_status(
     }
 
     lines.join("\n")
+}
+
+fn checklist_marker(item: &PullRequestChecklistItem) -> &'static str {
+    if item.checked { "x" } else { " " }
 }
 
 pub fn gate_status_label(status: &GateStatus) -> &'static str {

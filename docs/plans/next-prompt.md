@@ -1,3 +1,3 @@
-No further feature work remains in this worktree.
+Resume the CLI hook policy enforcement PR by unblocking Cargo dependency resolution in this worktree, then run `cargo test -p calypso-cli` from `cli/`.
 
-If review feedback arrives on PR #21, inspect the current PR body and checklist, reread [cli/spec.md](/Users/lucas/code/ts/calypso-worktrees/cli-codex-session-runtime/cli/spec.md) and [cli/calypso-cli-implementation-plan.md](/Users/lucas/code/ts/calypso-worktrees/cli-codex-session-runtime/cli/calypso-cli-implementation-plan.md), then address exactly one review item with a failing test first before changing code.
+If the suite fails, fix exactly one failing test-first issue in the new policy-gate code before changing anything else. If the suite passes, update the PR body/checklist to reflect the completed policy-gate work, then commit the current slice with the synchronized planning docs.

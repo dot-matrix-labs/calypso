@@ -112,6 +112,50 @@ impl TemplateSet {
             }
         }
 
+        let gates_by_id: BTreeMap<&str, &GateTemplate> = self
+            .state_machine
+            .gate_groups
+            .iter()
+            .flat_map(|group| group.gates.iter())
+            .map(|gate| (gate.id.as_str(), gate))
+            .collect();
+
+        for policy_gate in &self.state_machine.policy_gates {
+            let gate = gates_by_id
+                .get(policy_gate.gate_id.as_str())
+                .ok_or_else(|| {
+                    TemplateError::Validation(format!(
+                        "policy gate '{}' references unknown gate '{}'",
+                        policy_gate.evaluator, policy_gate.gate_id
+                    ))
+                })?;
+
+            let task = tasks_by_name
+                .get(gate.task.as_str())
+                .expect("task referenced by policy gate was already validated in gate_groups loop");
+
+            if task.kind != AgentTaskKind::Builtin {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must bind to a builtin task",
+                    policy_gate.gate_id
+                )));
+            }
+
+            let builtin = task
+                .builtin
+                .as_deref()
+                .expect("builtin field was already validated in gate_groups loop");
+
+            if builtin != policy_gate.evaluator {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' evaluator '{}' does not match task builtin '{}'",
+                    policy_gate.gate_id, policy_gate.evaluator, builtin
+                )));
+            }
+
+            validate_policy_gate(policy_gate)?;
+        }
+
         let known_task_names: BTreeSet<&str> = self
             .agents
             .tasks
@@ -188,6 +232,8 @@ pub struct StateMachineTemplate {
     pub initial_state: String,
     pub states: Vec<String>,
     pub gate_groups: Vec<GateGroupTemplate>,
+    #[serde(default)]
+    pub policy_gates: Vec<PolicyGateTemplate>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -202,6 +248,26 @@ pub struct GateTemplate {
     pub id: String,
     pub label: String,
     pub task: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyGateTemplate {
+    pub gate_id: String,
+    pub evaluator: String,
+    pub kind: PolicyGateKind,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    #[serde(default)]
+    pub watched_paths: Vec<String>,
+    #[serde(default)]
+    pub skip_on_tag_push: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum PolicyGateKind {
+    Hook,
+    Workflow,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -249,3 +315,63 @@ impl fmt::Display for TemplateError {
 }
 
 impl std::error::Error for TemplateError {}
+
+fn validate_policy_gate(policy_gate: &PolicyGateTemplate) -> Result<(), TemplateError> {
+    match policy_gate.evaluator.as_str() {
+        "builtin.policy.implementation_plan_present"
+        | "builtin.policy.next_prompt_present"
+        | "builtin.policy.required_workflows_present" => {
+            if policy_gate.paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define at least one path",
+                    policy_gate.gate_id
+                )));
+            }
+
+            if !policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' does not allow watched_paths",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        "builtin.policy.implementation_plan_fresh" => {
+            if policy_gate.paths.len() != 1 {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define exactly one primary path",
+                    policy_gate.gate_id
+                )));
+            }
+
+            if policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' must define at least one watched path",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        "builtin.git.is_main_compatible" => {
+            if !policy_gate.paths.is_empty() || !policy_gate.watched_paths.is_empty() {
+                return Err(TemplateError::Validation(format!(
+                    "policy gate '{}' does not accept file paths",
+                    policy_gate.gate_id
+                )));
+            }
+        }
+        _ => {
+            return Err(TemplateError::Validation(format!(
+                "policy gate '{}' uses unsupported evaluator '{}'",
+                policy_gate.gate_id, policy_gate.evaluator
+            )));
+        }
+    }
+
+    if policy_gate.kind == PolicyGateKind::Workflow && policy_gate.skip_on_tag_push {
+        return Err(TemplateError::Validation(format!(
+            "workflow policy gate '{}' cannot be tag-push exempt",
+            policy_gate.gate_id
+        )));
+    }
+
+    Ok(())
+}
