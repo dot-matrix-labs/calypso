@@ -376,11 +376,7 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
 #[test]
 fn run_command_uses_status_message_when_stderr_is_empty() {
     // Exit non-zero with no stderr — the error should mention the exit status.
-    let result = run_command(
-        Path::new("."),
-        "/bin/sh",
-        &["-c", "exit 2"],
-    );
+    let result = run_command(Path::new("."), "/bin/sh", &["-c", "exit 2"]);
 
     assert!(matches!(result, Ok(CommandOutput::Failure(ref msg)) if msg.contains("exit")));
 }
@@ -399,9 +395,13 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
         .expect("git add should run");
     std::process::Command::new("git")
         .args([
-            "-c", "user.email=test@test.com",
-            "-c", "user.name=Test",
-            "commit", "-m", "init",
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-m",
+            "init",
         ])
         .current_dir(&repo_root)
         .output()

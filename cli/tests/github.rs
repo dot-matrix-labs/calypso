@@ -325,14 +325,14 @@ fn gh_pr_view_parser_rejects_missing_check_conclusion() {
 
 #[test]
 fn github_snapshot_error_missing_field_formats_message() {
-    let error = calypso_cli::github::GithubSnapshotError::MissingField("gh command failed to spawn");
+    let error =
+        calypso_cli::github::GithubSnapshotError::MissingField("gh command failed to spawn");
     assert_eq!(error.to_string(), "gh command failed to spawn");
 }
 
 #[test]
 fn github_snapshot_error_json_formats_message() {
-    let error = parse_pull_request_view_json("not-json")
-        .expect_err("invalid json should fail");
+    let error = parse_pull_request_view_json("not-json").expect_err("invalid json should fail");
 
     assert!(error.to_string().contains("invalid GitHub JSON:"));
 }

@@ -559,7 +559,10 @@ tasks:
         )
         .expect("gate evaluation should succeed");
 
-    let gate = feature.gate_groups[0].gates.first().expect("gate should exist");
+    let gate = feature.gate_groups[0]
+        .gates
+        .first()
+        .expect("gate should exist");
     assert_eq!(gate.status, GateStatus::Pending);
 }
 
@@ -603,7 +606,10 @@ tasks:
         .evaluate_gates(&template, &BuiltinEvidence::new())
         .expect("gate evaluation should succeed");
 
-    let gate = feature.gate_groups[0].gates.first().expect("gate should exist");
+    let gate = feature.gate_groups[0]
+        .gates
+        .first()
+        .expect("gate should exist");
     assert_eq!(gate.status, GateStatus::Manual);
 }
 
