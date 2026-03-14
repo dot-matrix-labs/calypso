@@ -77,6 +77,8 @@ fn full_repository_state() -> RepositoryState {
             branch: "feat/auth".to_string(),
             feature_id: Some("feat-auth".to_string()),
         }],
+        releases: Vec::new(),
+        deployments: Vec::new(),
         current_feature: minimal_feature_state("feat-auth"),
     }
 }

@@ -70,6 +70,12 @@ pub struct RepositoryState {
     /// All known worktrees for this repository.
     #[serde(default)]
     pub known_worktrees: Vec<WorktreeSummary>,
+    /// Release records for this repository.
+    #[serde(default)]
+    pub releases: Vec<ReleaseRecord>,
+    /// Deployment records, one per environment.
+    #[serde(default)]
+    pub deployments: Vec<DeploymentRecord>,
 }
 
 fn default_schema_version() -> u32 {
@@ -732,3 +738,232 @@ impl fmt::Display for GateEvaluationError {
 }
 
 impl std::error::Error for GateEvaluationError {}
+
+// ---------------------------------------------------------------------------
+// Release state machine
+// ---------------------------------------------------------------------------
+
+/// The lifecycle state of a software release.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ReleaseState {
+    Planned,
+    InProgress,
+    Candidate,
+    Validated,
+    Approved,
+    Deployed,
+    RolledBack,
+    Aborted,
+}
+
+impl ReleaseState {
+    /// Returns the set of states that are valid next states from `self`.
+    pub fn valid_next_states(&self) -> Vec<Self> {
+        match self {
+            Self::Planned => vec![Self::InProgress, Self::Aborted],
+            Self::InProgress => vec![Self::Candidate],
+            Self::Candidate => vec![Self::Validated, Self::InProgress],
+            Self::Validated => vec![Self::Approved, Self::Candidate],
+            Self::Approved => vec![Self::Deployed],
+            Self::Deployed => vec![Self::RolledBack],
+            Self::RolledBack | Self::Aborted => vec![],
+        }
+    }
+
+    /// Validates that transitioning from `self` to `target` is permitted.
+    pub fn validate_transition(&self, target: &Self) -> Result<(), ReleaseTransitionError> {
+        if self.valid_next_states().contains(target) {
+            return Ok(());
+        }
+        Err(ReleaseTransitionError::Rejected {
+            from: self.clone(),
+            to: target.clone(),
+            reason: self.rejection_reason(target).to_string(),
+        })
+    }
+
+    fn rejection_reason(&self, target: &Self) -> &'static str {
+        match (self, target) {
+            (Self::RolledBack, _) | (Self::Aborted, _) => "state is terminal",
+            _ => "transition is not permitted by the release state machine",
+        }
+    }
+
+    /// Returns `true` if this state is terminal (no further transitions allowed).
+    pub fn is_terminal(&self) -> bool {
+        self.valid_next_states().is_empty()
+    }
+}
+
+impl fmt::Display for ReleaseState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Planned => "planned",
+            Self::InProgress => "in-progress",
+            Self::Candidate => "candidate",
+            Self::Validated => "validated",
+            Self::Approved => "approved",
+            Self::Deployed => "deployed",
+            Self::RolledBack => "rolled-back",
+            Self::Aborted => "aborted",
+        };
+        f.write_str(s)
+    }
+}
+
+/// A release lifecycle record.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReleaseRecord {
+    pub release_id: String,
+    pub candidate_version: String,
+    pub state: ReleaseState,
+    /// Session or gate ref that validated this release.
+    #[serde(default)]
+    pub validation_ref: Option<String>,
+    /// Human sign-off reference.
+    #[serde(default)]
+    pub approval_ref: Option<String>,
+    /// Deployment record ID associated with this release.
+    #[serde(default)]
+    pub deployment_ref: Option<String>,
+    /// ID of the deployment that was rolled back.
+    #[serde(default)]
+    pub rollback_state: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Error type for release state transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReleaseTransitionError {
+    Rejected {
+        from: ReleaseState,
+        to: ReleaseState,
+        reason: String,
+    },
+}
+
+impl fmt::Display for ReleaseTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected { from, to, reason } => {
+                write!(
+                    f,
+                    "cannot transition release from '{from}' to '{to}': {reason}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for ReleaseTransitionError {}
+
+// ---------------------------------------------------------------------------
+// Deployment state machine
+// ---------------------------------------------------------------------------
+
+/// The lifecycle state of a deployment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeploymentState {
+    Idle,
+    Pending,
+    Deploying,
+    Deployed,
+    Failed,
+    RollingBack,
+    RolledBack,
+}
+
+impl DeploymentState {
+    /// Returns the set of states that are valid next states from `self`.
+    pub fn valid_next_states(&self) -> Vec<Self> {
+        match self {
+            Self::Idle => vec![Self::Pending],
+            Self::Pending => vec![Self::Deploying, Self::Idle],
+            Self::Deploying => vec![Self::Deployed, Self::Failed],
+            Self::Deployed => vec![Self::RollingBack, Self::Idle],
+            Self::Failed => vec![Self::RollingBack, Self::Idle],
+            Self::RollingBack => vec![Self::RolledBack, Self::Failed],
+            Self::RolledBack => vec![Self::Idle],
+        }
+    }
+
+    /// Validates that transitioning from `self` to `target` is permitted.
+    pub fn validate_transition(&self, target: &Self) -> Result<(), DeploymentTransitionError> {
+        if self.valid_next_states().contains(target) {
+            return Ok(());
+        }
+        Err(DeploymentTransitionError::Rejected {
+            from: self.clone(),
+            to: target.clone(),
+            reason: "transition is not permitted by the deployment state machine".to_string(),
+        })
+    }
+}
+
+impl fmt::Display for DeploymentState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Self::Idle => "idle",
+            Self::Pending => "pending",
+            Self::Deploying => "deploying",
+            Self::Deployed => "deployed",
+            Self::Failed => "failed",
+            Self::RollingBack => "rolling-back",
+            Self::RolledBack => "rolled-back",
+        };
+        f.write_str(s)
+    }
+}
+
+/// A deployment record tracking the state of a deployment to a specific environment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeploymentRecord {
+    pub deployment_id: String,
+    /// Target environment, e.g. "prod", "staging", "demo".
+    pub environment: String,
+    pub desired_code_version: String,
+    #[serde(default)]
+    pub deployed_code_version: Option<String>,
+    #[serde(default)]
+    pub desired_migration_version: Option<String>,
+    #[serde(default)]
+    pub deployed_migration_version: Option<String>,
+    pub state: DeploymentState,
+    #[serde(default)]
+    pub last_result: Option<String>,
+    /// deployment_id to roll back to.
+    #[serde(default)]
+    pub rollback_target: Option<String>,
+    #[serde(default)]
+    pub actor: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Error type for deployment state transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeploymentTransitionError {
+    Rejected {
+        from: DeploymentState,
+        to: DeploymentState,
+        reason: String,
+    },
+}
+
+impl fmt::Display for DeploymentTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected { from, to, reason } => {
+                write!(
+                    f,
+                    "cannot transition deployment from '{from}' to '{to}': {reason}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for DeploymentTransitionError {}

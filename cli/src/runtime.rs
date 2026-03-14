@@ -190,6 +190,8 @@ pub fn load_or_initialize_runtime(
             secure_key_refs: Vec::new(),
             active_features: Vec::new(),
             known_worktrees: Vec::new(),
+            releases: Vec::new(),
+            deployments: Vec::new(),
         };
 
         let runtime = RuntimeState {

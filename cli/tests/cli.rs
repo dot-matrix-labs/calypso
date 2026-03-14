@@ -26,6 +26,8 @@ fn sample_state() -> RepositoryState {
         secure_key_refs: Vec::new(),
         active_features: Vec::new(),
         known_worktrees: Vec::new(),
+        releases: Vec::new(),
+        deployments: Vec::new(),
         current_feature: FeatureState {
             feature_id: "feat-tui-surface".to_string(),
             branch: "feat/cli-tui-operator-surface".to_string(),
