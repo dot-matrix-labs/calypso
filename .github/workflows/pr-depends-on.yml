@@ -16,7 +16,7 @@ jobs:
         with:
           script: |
             if (!context.payload.pull_request) { core.info('merge_group context — skipping depends-on check.'); return; }
-const body = context.payload.pull_request.body || '';
+            const body = context.payload.pull_request.body || '';
             const match = body.match(/^Depends-on:\s*#(\d+)/im);
             if (!match) {
               core.info('No Depends-on declaration — skipping.');
