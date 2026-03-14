@@ -7,6 +7,7 @@ pub mod feature_start;
 pub mod github;
 pub mod init;
 pub mod policy;
+pub mod pr_checklist;
 pub mod runtime;
 pub mod state;
 pub mod telemetry;

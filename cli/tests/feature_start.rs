@@ -174,6 +174,18 @@ impl FeatureStartEnvironment for FakeEnvironment {
             .push(format!("remove-branch:{branch}"));
         Ok(())
     }
+
+    fn update_pull_request_body(
+        &self,
+        _worktree_path: &Path,
+        pr_number: u64,
+        _body: &str,
+    ) -> Result<(), FeatureStartError> {
+        self.actions
+            .borrow_mut()
+            .push(format!("update-pr-body:{pr_number}"));
+        Ok(())
+    }
 }
 
 fn sample_request() -> FeatureStartRequest {
@@ -421,6 +433,7 @@ fn start_feature_returns_branch_worktree_pull_request_and_state_path_on_success(
             "create-pr:feat/cli-feature-start:CLI Feature Start:/worktrees/feat-cli-feature-start"
                 .to_string(),
             "bootstrap-state:/worktrees/feat-cli-feature-start".to_string(),
+            "update-pr-body:27".to_string(),
         ]
     );
 }
