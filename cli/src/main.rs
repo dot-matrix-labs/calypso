@@ -5,7 +5,7 @@ use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::init::{HostInitEnvironment, run_init_interactive};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
-use calypso_cli::tui::{OperatorSurface, run_terminal_surface, run_watch};
+use calypso_cli::tui::{OperatorSurface, run_doctor_surface, run_terminal_surface, run_watch};
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -133,9 +133,9 @@ fn main() {
             let project_dir = std::path::Path::new(path);
             let state_path = project_dir.join(".calypso").join("state.json");
             if state_path.exists() {
-                run_watch(&state_path.to_string_lossy());
+                run_state_machine_auto(&state_path);
             } else {
-                println!("{}", render_help(info));
+                run_doctor_surface(project_dir).unwrap_or_else(|e| eprintln!("tui error: {e}"));
             }
         }
         // calypso --step — step mode: one step per Enter keypress
@@ -145,17 +145,17 @@ fn main() {
             if state_path.exists() {
                 run_state_machine_step(&state_path);
             } else {
-                println!("{}", render_help(info));
+                run_doctor_surface(&cwd).unwrap_or_else(|e| eprintln!("tui error: {e}"));
             }
         }
-        // calypso — no args, drive the state machine automatically
+        // calypso — no args: drive state machine if initialized, else show doctor TUI
         [] => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
             } else {
-                println!("{}", render_help(info));
+                run_doctor_surface(&cwd).unwrap_or_else(|e| eprintln!("tui error: {e}"));
             }
         }
         _ => println!("{}", render_help(info)),
