@@ -1,3 +1,6 @@
+// FUTURE: #48 — Codex provider tests; re-enable when multi-vendor registry is implemented (#48)
+#![cfg(any())]
+
 use std::thread;
 use std::time::{Duration, Instant};
 
