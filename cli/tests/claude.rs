@@ -223,3 +223,21 @@ fn parse_outcome_ok_with_artifact_refs_and_suggested_next_state() {
         }
     );
 }
+
+#[test]
+fn invoke_with_working_directory_succeeds() {
+    let script = "#!/bin/sh\nprintf '[CALYPSO:OK]{\"summary\":\"cwd test\"}\\n'\nexit 0\n";
+
+    with_fake_claude(script, |config| {
+        let session = ClaudeSession::new(config);
+        let context = SessionContext {
+            working_directory: Some(std::env::temp_dir().to_string_lossy().into_owned()),
+        };
+
+        let outcome = session
+            .invoke("task", &context, None)
+            .expect("invocation with working_directory should succeed");
+
+        assert!(matches!(outcome, ClaudeOutcome::Ok { .. }));
+    });
+}
