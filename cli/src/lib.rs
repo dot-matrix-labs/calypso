@@ -8,6 +8,7 @@ pub mod github;
 pub mod policy;
 pub mod runtime;
 pub mod state;
+pub mod telemetry;
 pub mod template;
 pub mod tui;
 
