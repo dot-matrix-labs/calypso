@@ -2,8 +2,9 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
-    RepositoryState, SessionOutput, SessionOutputStream, WorkflowState,
+    AgentSession, AgentSessionStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus,
+    PullRequestRef, RepositoryIdentity, RepositoryState, SchedulingMeta, SessionOutput,
+    SessionOutputStream, WorkflowState,
 };
 
 fn temp_state_path() -> std::path::PathBuf {
@@ -17,7 +18,14 @@ fn temp_state_path() -> std::path::PathBuf {
 fn sample_state() -> RepositoryState {
     RepositoryState {
         version: 1,
+        schema_version: 1,
         repo_id: "acme-api".to_string(),
+        identity: RepositoryIdentity::default(),
+        providers: Vec::new(),
+        github_auth_ref: None,
+        secure_key_refs: Vec::new(),
+        active_features: Vec::new(),
+        known_worktrees: Vec::new(),
         current_feature: FeatureState {
             feature_id: "feat-tui-surface".to_string(),
             branch: "feat/cli-tui-operator-surface".to_string(),
@@ -51,6 +59,12 @@ fn sample_state() -> RepositoryState {
                 pending_follow_ups: Vec::new(),
                 terminal_outcome: None,
             }],
+            feature_type: FeatureType::Feat,
+            roles: Vec::new(),
+            scheduling: SchedulingMeta::default(),
+            artifact_refs: Vec::new(),
+            transcript_refs: Vec::new(),
+            clarification_history: Vec::new(),
         },
     }
 }

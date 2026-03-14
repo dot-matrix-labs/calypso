@@ -181,8 +181,15 @@ pub fn load_or_initialize_runtime(
 
         let state = RepositoryState {
             version: STATE_VERSION,
+            schema_version: 1,
             repo_id: context.repo_id.clone(),
             current_feature: feature,
+            identity: Default::default(),
+            providers: Vec::new(),
+            github_auth_ref: None,
+            secure_key_refs: Vec::new(),
+            active_features: Vec::new(),
+            known_worktrees: Vec::new(),
         };
 
         let runtime = RuntimeState {

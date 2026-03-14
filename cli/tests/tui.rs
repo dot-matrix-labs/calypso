@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus,
-    GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef,
-    SessionOutput, SessionOutputStream, WorkflowState,
+    AgentSession, AgentSessionStatus, EvidenceStatus, FeatureState, FeatureType, Gate, GateGroup,
+    GateStatus, GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef,
+    SchedulingMeta, SessionOutput, SessionOutputStream, WorkflowState,
 };
 use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent, queue_follow_up};
 
@@ -59,6 +59,12 @@ fn sample_feature() -> FeatureState {
             pending_follow_ups: Vec::new(),
             terminal_outcome: None,
         }],
+        feature_type: FeatureType::Feat,
+        roles: Vec::new(),
+        scheduling: SchedulingMeta::default(),
+        artifact_refs: Vec::new(),
+        transcript_refs: Vec::new(),
+        clarification_history: Vec::new(),
     }
 }
 

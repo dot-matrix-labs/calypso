@@ -18,8 +18,8 @@ static EXEC_LOCK: LazyLock<RwLock<()>> = LazyLock::new(|| RwLock::new(()));
 static PATH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 use calypso_cli::state::{
-    EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus, GithubMergeability,
-    GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, WorkflowState,
+    EvidenceStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus, GithubMergeability,
+    GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, SchedulingMeta, WorkflowState,
 };
 
 fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
@@ -49,6 +49,12 @@ fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
                 .collect(),
         }],
         active_sessions: Vec::new(),
+        feature_type: FeatureType::Feat,
+        roles: Vec::new(),
+        scheduling: SchedulingMeta::default(),
+        artifact_refs: Vec::new(),
+        transcript_refs: Vec::new(),
+        clarification_history: Vec::new(),
     }
 }
 

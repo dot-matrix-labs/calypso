@@ -7,11 +7,73 @@ use serde::{Deserialize, Serialize};
 
 use crate::template::{AgentTaskKind, TemplateSet};
 
+/// Identity metadata for the repository. Contains no secrets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct RepositoryIdentity {
+    pub name: String,
+    pub github_remote_url: String,
+    pub default_branch: String,
+}
+
+/// A reference to a secure credential. Contains only the reference identifier,
+/// never the raw secret value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecureKeyRef {
+    pub id: String,
+    pub name: String,
+    pub purpose: String,
+}
+
+/// A summary entry for an active feature, used in the repository-level index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FeatureSummary {
+    pub feature_id: String,
+    pub branch: String,
+    pub worktree_path: String,
+    #[serde(default)]
+    pub pr_number: Option<u64>,
+    pub state: WorkflowState,
+}
+
+/// A summary of a known git worktree.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeSummary {
+    pub path: String,
+    pub branch: String,
+    #[serde(default)]
+    pub feature_id: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RepositoryState {
     pub version: u32,
     pub repo_id: String,
     pub current_feature: FeatureState,
+    /// Schema version for forward-compatibility. Defaults to 1.
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+    /// Repository identity metadata.
+    #[serde(default)]
+    pub identity: RepositoryIdentity,
+    /// Names of configured providers (no secrets).
+    #[serde(default)]
+    pub providers: Vec<String>,
+    /// Token name or keychain reference for GitHub auth. Never the raw token.
+    #[serde(default)]
+    pub github_auth_ref: Option<String>,
+    /// References to secure keys. Contains only identifiers, never raw secrets.
+    #[serde(default)]
+    pub secure_key_refs: Vec<SecureKeyRef>,
+    /// Index of all active features.
+    #[serde(default)]
+    pub active_features: Vec<FeatureSummary>,
+    /// All known worktrees for this repository.
+    #[serde(default)]
+    pub known_worktrees: Vec<WorktreeSummary>,
+}
+
+fn default_schema_version() -> u32 {
+    1
 }
 
 impl RepositoryState {
@@ -23,15 +85,66 @@ impl RepositoryState {
         serde_json::from_str(json).map_err(StateError::Json)
     }
 
+    /// Atomically saves state by writing to a `.tmp` file then renaming into place.
     pub fn save_to_path(&self, path: &Path) -> Result<(), StateError> {
         let json = self.to_json_pretty()?;
-        fs::write(path, json).map_err(StateError::Io)
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, json).map_err(StateError::Io)?;
+        fs::rename(&tmp_path, path).map_err(StateError::Io)
     }
 
     pub fn load_from_path(path: &Path) -> Result<Self, StateError> {
         let json = fs::read_to_string(path).map_err(StateError::Io)?;
         Self::from_json(&json)
     }
+}
+
+/// The type/category of a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FeatureType {
+    Feat,
+    Fix,
+    Chore,
+}
+
+/// A record of a role and its most recent session within a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoleSession {
+    pub role: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub last_outcome: Option<String>,
+}
+
+/// Scheduling and timing metadata for a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct SchedulingMeta {
+    pub created_at: String,
+    #[serde(default)]
+    pub last_advanced_at: Option<String>,
+    #[serde(default)]
+    pub last_agent_run_at: Option<String>,
+}
+
+/// A reference to an artifact produced during feature work.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtifactRef {
+    pub kind: String,
+    pub path: String,
+    #[serde(default)]
+    pub session_id: Option<String>,
+}
+
+/// A single entry in the clarification history for a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClarificationEntry {
+    pub session_id: String,
+    pub question: String,
+    #[serde(default)]
+    pub answer: Option<String>,
+    pub timestamp: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +160,28 @@ pub struct FeatureState {
     pub workflow_state: WorkflowState,
     pub gate_groups: Vec<GateGroup>,
     pub active_sessions: Vec<AgentSession>,
+    /// The type/category of this feature.
+    #[serde(default = "default_feature_type")]
+    pub feature_type: FeatureType,
+    /// Role sessions associated with this feature.
+    #[serde(default)]
+    pub roles: Vec<RoleSession>,
+    /// Scheduling and timing metadata.
+    #[serde(default)]
+    pub scheduling: SchedulingMeta,
+    /// References to artifacts produced during this feature.
+    #[serde(default)]
+    pub artifact_refs: Vec<ArtifactRef>,
+    /// Paths to transcript files.
+    #[serde(default)]
+    pub transcript_refs: Vec<String>,
+    /// History of clarification Q&A for this feature.
+    #[serde(default)]
+    pub clarification_history: Vec<ClarificationEntry>,
+}
+
+fn default_feature_type() -> FeatureType {
+    FeatureType::Feat
 }
 
 impl FeatureState {
@@ -87,6 +222,12 @@ impl FeatureState {
                 })
                 .collect(),
             active_sessions: Vec::new(),
+            feature_type: FeatureType::Feat,
+            roles: Vec::new(),
+            scheduling: SchedulingMeta::default(),
+            artifact_refs: Vec::new(),
+            transcript_refs: Vec::new(),
+            clarification_history: Vec::new(),
         })
     }
 

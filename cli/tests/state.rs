@@ -4,16 +4,24 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, AgentTerminalOutcome, BuiltinEvidence, EvidenceStatus,
-    FeatureState, Gate, GateEvaluationError, GateGroup, GateGroupStatus, GateInitializationError,
-    GateStatus, PullRequestRef, RepositoryState, SessionOutput, SessionOutputStream, StateError,
-    TransitionError, TransitionFacts, WorkflowState,
+    FeatureState, FeatureType, Gate, GateEvaluationError, GateGroup, GateGroupStatus,
+    GateInitializationError, GateStatus, PullRequestRef, RepositoryIdentity, RepositoryState,
+    SchedulingMeta, SessionOutput, SessionOutputStream, StateError, TransitionError,
+    TransitionFacts, WorkflowState,
 };
 use calypso_cli::template::{TemplateSet, load_embedded_template_set};
 
 fn sample_state() -> RepositoryState {
     RepositoryState {
         version: 1,
+        schema_version: 1,
         repo_id: "acme-api".to_string(),
+        identity: RepositoryIdentity::default(),
+        providers: Vec::new(),
+        github_auth_ref: None,
+        secure_key_refs: Vec::new(),
+        active_features: Vec::new(),
+        known_worktrees: Vec::new(),
         current_feature: FeatureState {
             feature_id: "feat-auth-refresh".to_string(),
             branch: "feat/123-token-refresh".to_string(),
@@ -59,6 +67,12 @@ fn sample_state() -> RepositoryState {
                 pending_follow_ups: vec!["Please include the diff".to_string()],
                 terminal_outcome: None,
             }],
+            feature_type: FeatureType::Feat,
+            roles: Vec::new(),
+            scheduling: SchedulingMeta::default(),
+            artifact_refs: Vec::new(),
+            transcript_refs: Vec::new(),
+            clarification_history: Vec::new(),
         },
     }
 }
