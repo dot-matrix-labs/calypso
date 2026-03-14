@@ -1,9 +1,11 @@
 use calypso_cli::template::{
-    AgentTaskKind, TemplateError, TemplateSet, load_embedded_template_set,
-    resolve_template_set_for_path,
+    AgentCatalog, AgentTask, AgentTaskKind, GateGroupTemplate, GateTemplate, PromptCatalog,
+    StateMachineTemplate, TemplateError, TemplateSet, TransitionTemplate,
+    load_embedded_template_set, resolve_template_set_for_path,
 };
 #[allow(unused_imports)]
 use calypso_cli::template::{GateStatus, TimeoutPolicy};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -771,12 +773,6 @@ gate_groups:
 
 #[test]
 fn validate_coherence_returns_error_for_gate_referencing_nonexistent_task() {
-    use calypso_cli::template::{
-        AgentCatalog, AgentTask, GateGroupTemplate, GateTemplate, PromptCatalog,
-        StateMachineTemplate,
-    };
-    use std::collections::BTreeMap;
-
     // Build a TemplateSet directly, bypassing from_yaml_strings strict validation,
     // to test that validate_coherence catches the bad task reference.
     let template = TemplateSet {
@@ -914,4 +910,304 @@ fn template_validate_subcommand_exits_zero_for_valid_template() {
         }
         Err(e) => panic!("unexpected error spawning calypso binary: {e}"),
     }
+}
+
+// ── load_from_directory coverage ─────────────────────────────────────────────
+
+#[test]
+fn load_from_directory_falls_back_to_defaults_when_no_calypso_dir_exists() {
+    let temp_dir = temp_template_dir();
+    // No .calypso directory at all — every file is absent, all fallbacks exercised.
+    let template = TemplateSet::load_from_directory(&temp_dir)
+        .expect("load_from_directory should succeed with no overrides");
+
+    assert_eq!(template.state_machine.initial_state, "new");
+    assert!(!template.state_machine.gate_groups.is_empty());
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_merges_agents_override_without_sm_or_prompts() {
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    // Override only the doctor_checks key, leaving tasks unchanged so cross-references hold.
+    let agents_override = r#"
+doctor_checks:
+  - id: custom-check
+    label: Custom check
+    command: echo
+    args: ["ok"]
+"#;
+    fs::write(dot_calypso.join("agents.yml"), agents_override)
+        .expect("agents override should write");
+
+    let template =
+        TemplateSet::load_from_directory(&temp_dir).expect("load_from_directory should succeed");
+
+    // The merged agents catalog includes the custom doctor check from the override
+    assert!(
+        template
+            .agents
+            .doctor_checks
+            .iter()
+            .any(|c| c.id == "custom-check"),
+        "merged agent catalog should contain overridden doctor check"
+    );
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_merges_prompts_override_without_sm_or_agents() {
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    // Only provide a prompts override; state-machine and agents come from defaults.
+    // Use the real default prompt keys so validation doesn't fail.
+    let embedded = load_embedded_template_set().expect("embedded template should load");
+    let mut prompts_map = String::from("prompts:\n");
+    for (k, v) in &embedded.prompts.prompts {
+        let escaped = v.replace('\n', "\\n");
+        prompts_map.push_str(&format!("  {k}: |\n    {escaped}\n"));
+    }
+
+    fs::write(dot_calypso.join("prompts.yml"), &prompts_map)
+        .expect("prompts override should write");
+
+    let template = TemplateSet::load_from_directory(&temp_dir)
+        .expect("load_from_directory with prompts override should succeed");
+
+    assert!(!template.prompts.prompts.is_empty());
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_silently_ignores_non_mapping_override() {
+    // If the override YAML is not a mapping (e.g. a list), merge_yaml_strings skips the merge
+    // and returns the base unchanged. The resulting template must still validate.
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    // A YAML list is valid YAML but not a mapping — the merge is a no-op.
+    fs::write(dot_calypso.join("state-machine.yml"), "- item1\n- item2\n")
+        .expect("list override should write");
+
+    // The merge no-op falls through to the base (default), which is valid.
+    let template = TemplateSet::load_from_directory(&temp_dir)
+        .expect("non-mapping override should fall through to defaults and succeed");
+
+    assert_eq!(template.state_machine.initial_state, "new");
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_returns_yaml_error_for_malformed_sm_override() {
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    fs::write(dot_calypso.join("state-machine.yml"), ": bad yaml {{{")
+        .expect("malformed sm override should write");
+
+    let error =
+        TemplateSet::load_from_directory(&temp_dir).expect_err("malformed YAML should fail");
+
+    assert!(
+        matches!(error, TemplateError::Yaml(_)),
+        "expected Yaml error, got: {error}"
+    );
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_returns_io_error_for_unreadable_agents_file() {
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    // Create a directory where agents.yml should be — causes IsADirectory I/O error
+    fs::create_dir(dot_calypso.join("agents.yml")).expect("agents.yml directory should be created");
+
+    let error = TemplateSet::load_from_directory(&temp_dir)
+        .expect_err("unreadable agents file should fail");
+
+    assert!(
+        matches!(error, TemplateError::Io(_)),
+        "expected Io error, got: {error}"
+    );
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+#[test]
+fn load_from_directory_returns_io_error_for_unreadable_prompts_file() {
+    let temp_dir = temp_template_dir();
+    let dot_calypso = temp_dir.join(".calypso");
+    fs::create_dir_all(&dot_calypso).expect(".calypso dir should be created");
+
+    // Create a directory where prompts.yml should be — causes IsADirectory I/O error
+    fs::create_dir(dot_calypso.join("prompts.yml"))
+        .expect("prompts.yml directory should be created");
+
+    let error = TemplateSet::load_from_directory(&temp_dir)
+        .expect_err("unreadable prompts file should fail");
+
+    assert!(
+        matches!(error, TemplateError::Io(_)),
+        "expected Io error, got: {error}"
+    );
+
+    fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+// ── validate_coherence coverage ───────────────────────────────────────────────
+
+fn make_coherence_template() -> TemplateSet {
+    TemplateSet {
+        state_machine: StateMachineTemplate {
+            initial_state: "new".to_string(),
+            states: vec!["new".to_string(), "implementation".to_string()],
+            gate_groups: vec![GateGroupTemplate {
+                id: "coordination".to_string(),
+                label: "Coordination".to_string(),
+                gates: vec![GateTemplate {
+                    id: "some-gate".to_string(),
+                    label: "Some gate".to_string(),
+                    task: "human-approval".to_string(),
+                    recheck_trigger: None,
+                    timeout_policy: None,
+                    waiver_policy: None,
+                    auto_open_task_on_fail: None,
+                    pr_checklist_label: None,
+                    allow_parallel_with: None,
+                    blocking_scope: None,
+                    applies_to: None,
+                    status_source: None,
+                }],
+            }],
+            policy_gates: vec![],
+            transitions: vec![],
+            feature_unit: None,
+            artifact_policies: None,
+        },
+        agents: AgentCatalog {
+            tasks: vec![AgentTask {
+                name: "human-approval".to_string(),
+                kind: AgentTaskKind::Human,
+                role: None,
+                builtin: None,
+            }],
+            doctor_checks: vec![],
+        },
+        prompts: PromptCatalog {
+            prompts: BTreeMap::new(),
+        },
+    }
+}
+
+#[test]
+fn validate_coherence_reports_gate_applies_to_with_nonexistent_state() {
+    let mut template = make_coherence_template();
+    template.state_machine.gate_groups[0].gates[0].applies_to =
+        Some(vec!["nonexistent-state".to_string()]);
+
+    let errors = template.validate_coherence();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("nonexistent-state") && e.contains("applies_to")),
+        "expected applies_to error; got: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_coherence_reports_gate_blocking_scope_with_nonexistent_state() {
+    let mut template = make_coherence_template();
+    template.state_machine.gate_groups[0].gates[0].blocking_scope = Some("ghost-state".to_string());
+
+    let errors = template.validate_coherence();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("ghost-state") && e.contains("blocking_scope")),
+        "expected blocking_scope error; got: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_coherence_reports_unrecognized_builtin_keyword() {
+    let mut template = make_coherence_template();
+    template.agents.tasks.push(AgentTask {
+        name: "mystery-check".to_string(),
+        kind: AgentTaskKind::Builtin,
+        role: None,
+        builtin: Some("builtin.mystery.unknown".to_string()),
+    });
+    // Add a gate referencing it so the task is valid in gate_groups context
+    template.state_machine.gate_groups[0]
+        .gates
+        .push(GateTemplate {
+            id: "mystery-gate".to_string(),
+            label: "Mystery gate".to_string(),
+            task: "mystery-check".to_string(),
+            recheck_trigger: None,
+            timeout_policy: None,
+            waiver_policy: None,
+            auto_open_task_on_fail: None,
+            pr_checklist_label: None,
+            allow_parallel_with: None,
+            blocking_scope: None,
+            applies_to: None,
+            status_source: None,
+        });
+
+    let errors = template.validate_coherence();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("mystery-check") && e.contains("unrecognized builtin")),
+        "expected unrecognized builtin error; got: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_coherence_reports_transition_from_nonexistent_state() {
+    let mut template = make_coherence_template();
+    template.state_machine.transitions.push(TransitionTemplate {
+        from: "ghost".to_string(),
+        to: "new".to_string(),
+    });
+
+    let errors = template.validate_coherence();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("ghost") && e.contains("from")),
+        "expected transition-from error; got: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_coherence_reports_transition_to_nonexistent_state() {
+    let mut template = make_coherence_template();
+    template.state_machine.transitions.push(TransitionTemplate {
+        from: "new".to_string(),
+        to: "ghost".to_string(),
+    });
+
+    let errors = template.validate_coherence();
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.contains("ghost") && e.contains("to")),
+        "expected transition-to error; got: {errors:?}"
+    );
 }
