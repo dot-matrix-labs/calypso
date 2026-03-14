@@ -7,7 +7,7 @@ use crossterm::cursor::MoveTo;
 use crossterm::cursor::{Hide, Show};
 #[cfg(not(coverage))]
 use crossterm::event::{self};
-use crossterm::event::{Event, KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 #[cfg(not(coverage))]
 use crossterm::execute;
 use crossterm::queue;
@@ -18,9 +18,13 @@ use crossterm::terminal::{
 };
 
 use crate::state::{
-    AgentSessionStatus, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
-    GithubReviewStatus, WorkflowState,
+    AgentSessionStatus, AgentTerminalOutcome, EvidenceStatus, FeatureState, GateGroupStatus,
+    GateStatus, GithubMergeability, GithubReviewStatus, WorkflowState,
 };
+
+// TODO: browser view — serve operator surface as WASM inside the binary (no external bundle files).
+// Both surfaces must read from the same underlying state and event model. Deferred: WASM packaging
+// complexity is non-trivial; implement once the TUI surface is stable.
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct InputBuffer {
@@ -50,6 +54,13 @@ impl InputBuffer {
     }
 }
 
+/// A pending clarification question visible in the operator surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingClarification {
+    pub session_id: String,
+    pub question: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperatorSurface {
     feature_id: String,
@@ -61,13 +72,16 @@ pub struct OperatorSurface {
     blocking_gate_ids: Vec<String>,
     gate_groups: Vec<GateGroupView>,
     sessions: Vec<SessionView>,
+    pending_clarifications: Vec<PendingClarification>,
     input: InputBuffer,
     queued_follow_ups: Vec<String>,
-    last_event: String,
+    pub last_event: String,
 }
 
 impl OperatorSurface {
     pub fn from_feature_state(feature: &FeatureState) -> Self {
+        let pending_clarifications = pending_clarifications_from_feature(feature);
+
         Self {
             feature_id: feature.feature_id.clone(),
             branch: feature.branch.clone(),
@@ -88,16 +102,24 @@ impl OperatorSurface {
             gate_groups: feature
                 .gate_groups
                 .iter()
-                .map(|group| GateGroupView {
-                    label: group.label.clone(),
-                    gates: group
-                        .gates
-                        .iter()
-                        .map(|gate| GateView {
-                            label: gate.label.clone(),
-                            status: gate_status_label(gate.status.clone()).to_string(),
-                        })
-                        .collect(),
+                .map(|group| {
+                    let rollup_status = group.rollup_status();
+                    GateGroupView {
+                        label: group.label.clone(),
+                        group_status: gate_group_status_label(rollup_status).to_string(),
+                        gates: group
+                            .gates
+                            .iter()
+                            .map(|gate| {
+                                let is_blocking = gate.status != GateStatus::Passing;
+                                GateView {
+                                    label: gate.label.clone(),
+                                    status: gate_status_label(gate.status.clone()).to_string(),
+                                    is_blocking,
+                                }
+                            })
+                            .collect(),
+                    }
                 })
                 .collect(),
             sessions: feature
@@ -118,6 +140,7 @@ impl OperatorSurface {
                     },
                 })
                 .collect(),
+            pending_clarifications,
             input: InputBuffer::default(),
             queued_follow_ups: feature
                 .active_sessions
@@ -163,9 +186,25 @@ impl OperatorSurface {
         }
 
         for group in &self.gate_groups {
-            lines.push(format!("{}:", group.label));
+            lines.push(format!("  {} [{}]:", group.label, group.group_status));
             for gate in &group.gates {
-                lines.push(format!("  [{}] {}", gate.status, gate.label));
+                let blocking_marker = if gate.is_blocking { " !" } else { "" };
+                lines.push(format!(
+                    "    [{}] {}{}",
+                    gate.status, gate.label, blocking_marker
+                ));
+            }
+        }
+
+        // Pending clarifications
+        if !self.pending_clarifications.is_empty() {
+            lines.push(String::new());
+            lines.push("Pending Clarifications".to_string());
+            for clarification in &self.pending_clarifications {
+                lines.push(format!(
+                    "  [{}] {}",
+                    clarification.session_id, clarification.question
+                ));
             }
         }
 
@@ -187,11 +226,28 @@ impl OperatorSurface {
         }
 
         lines.push(String::new());
-        lines.push(format!("Follow-up input: {}", self.input.as_str()));
+
+        if !self.pending_clarifications.is_empty() {
+            lines.push(format!(
+                "Clarification answer (Enter to submit, Ctrl+C to abort): {}",
+                self.input.as_str()
+            ));
+        } else {
+            lines.push(format!("Follow-up input: {}", self.input.as_str()));
+        }
+
+        lines.push("  [Ctrl+C] Interrupt session  [Esc] Quit".to_string());
+
         lines.join("\n")
     }
 
     pub fn handle_key_event(&mut self, event: KeyEvent) -> SurfaceEvent {
+        // Ctrl+C triggers session interrupt (abort)
+        if event.code == KeyCode::Char('c') && event.modifiers.contains(KeyModifiers::CONTROL) {
+            self.last_event = "interrupt requested".to_string();
+            return SurfaceEvent::Interrupt;
+        }
+
         match event.code {
             KeyCode::Char(character) => {
                 self.input.push(character);
@@ -204,7 +260,17 @@ impl OperatorSurface {
                 SurfaceEvent::Continue
             }
             KeyCode::Enter => match self.input.submit() {
-                Some(follow_up) => SurfaceEvent::Submitted(follow_up),
+                Some(text) => {
+                    if !self.pending_clarifications.is_empty() {
+                        // Answer routes as a clarification reply
+                        SurfaceEvent::ClarificationAnswered {
+                            session_id: self.pending_clarifications[0].session_id.clone(),
+                            answer: text,
+                        }
+                    } else {
+                        SurfaceEvent::Submitted(text)
+                    }
+                }
                 None => {
                     self.last_event = "ignored empty follow-up".to_string();
                     SurfaceEvent::Continue
@@ -217,12 +283,24 @@ impl OperatorSurface {
             _ => SurfaceEvent::Continue,
         }
     }
+
+    /// Returns the number of pending clarifications visible in this surface snapshot.
+    pub fn pending_clarification_count(&self) -> usize {
+        self.pending_clarifications.len()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SurfaceEvent {
     Continue,
     Submitted(String),
+    /// Operator answered a pending clarification question.
+    ClarificationAnswered {
+        session_id: String,
+        answer: String,
+    },
+    /// Operator requested interruption of the active session (Ctrl+C).
+    Interrupt,
     Quit,
 }
 
@@ -262,6 +340,11 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
     let type_a = Some(Event::Key(KeyEvent::from(KeyCode::Char('a'))));
     let submit = Some(Event::Key(KeyEvent::from(KeyCode::Enter)));
     let type_b = Some(Event::Key(KeyEvent::from(KeyCode::Char('b'))));
+    let interrupt = Some(Event::Key(KeyEvent::new(
+        KeyCode::Char('c'),
+        KeyModifiers::CONTROL,
+    )));
+    let type_c = Some(Event::Key(KeyEvent::from(KeyCode::Char('c'))));
     let quit = Some(Event::Key(KeyEvent::from(KeyCode::Esc)));
 
     run_terminal_iteration(&mut stdout, feature, &mut surface, resize)?;
@@ -272,6 +355,9 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
     }
     run_terminal_iteration(&mut stdout, feature, &mut surface, type_b)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, submit)?;
+    // Exercise interrupt path — should NOT quit (just aborts active sessions)
+    run_terminal_iteration(&mut stdout, feature, &mut surface, interrupt)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, type_c)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, quit)?;
     Ok(())
 }
@@ -317,6 +403,16 @@ fn run_terminal_iteration(
                     "no active session for follow-up".to_string()
                 };
             }
+            SurfaceEvent::ClarificationAnswered { session_id, answer } => {
+                answer_clarification(feature, &session_id, answer);
+                *surface = OperatorSurface::from_feature_state(feature);
+                surface.last_event = "clarification answered".to_string();
+            }
+            SurfaceEvent::Interrupt => {
+                interrupt_active_sessions(feature);
+                *surface = OperatorSurface::from_feature_state(feature);
+                surface.last_event = "session interrupted".to_string();
+            }
             SurfaceEvent::Quit => return Ok(false),
         }
     }
@@ -350,6 +446,8 @@ where
     }
 }
 
+/// Queue a follow-up message for the first active (running or waiting) session.
+/// Returns true if the message was queued, false if no eligible session was found.
 pub fn queue_follow_up(feature: &mut FeatureState, follow_up: String) -> bool {
     if let Some(active_session) = feature.active_sessions.iter_mut().find(|session| {
         matches!(
@@ -364,9 +462,55 @@ pub fn queue_follow_up(feature: &mut FeatureState, follow_up: String) -> bool {
     }
 }
 
+/// Record an operator answer for a pending clarification.
+///
+/// Finds the clarification entry for `session_id` that has no answer yet and
+/// fills it in. The clarification history on the feature is the source of truth;
+/// this does not mutate the session output stream.
+pub fn answer_clarification(feature: &mut FeatureState, session_id: &str, answer: String) -> bool {
+    if let Some(entry) = feature
+        .clarification_history
+        .iter_mut()
+        .find(|e| e.session_id == session_id && e.answer.is_none())
+    {
+        entry.answer = Some(answer);
+        true
+    } else {
+        false
+    }
+}
+
+/// Abort all running or waiting sessions by setting their status to Aborted
+/// and recording an Aborted terminal outcome.
+pub fn interrupt_active_sessions(feature: &mut FeatureState) {
+    for session in feature.active_sessions.iter_mut() {
+        if matches!(
+            session.status,
+            AgentSessionStatus::Running | AgentSessionStatus::WaitingForHuman
+        ) {
+            session.status = AgentSessionStatus::Aborted;
+            session.terminal_outcome = Some(AgentTerminalOutcome::Aborted);
+        }
+    }
+}
+
+/// Extract pending (unanswered) clarifications from the feature's clarification history.
+fn pending_clarifications_from_feature(feature: &FeatureState) -> Vec<PendingClarification> {
+    feature
+        .clarification_history
+        .iter()
+        .filter(|e| e.answer.is_none())
+        .map(|e| PendingClarification {
+            session_id: e.session_id.clone(),
+            question: e.question.clone(),
+        })
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct GateGroupView {
     label: String,
+    group_status: String,
     gates: Vec<GateView>,
 }
 
@@ -374,6 +518,7 @@ struct GateGroupView {
 struct GateView {
     label: String,
     status: String,
+    is_blocking: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -394,6 +539,15 @@ fn gate_status_label(status: GateStatus) -> &'static str {
         GateStatus::Passing => "passing",
         GateStatus::Failing => "failing",
         GateStatus::Manual => "manual",
+    }
+}
+
+fn gate_group_status_label(status: GateGroupStatus) -> &'static str {
+    match status {
+        GateGroupStatus::Passing => "passing",
+        GateGroupStatus::Pending => "pending",
+        GateGroupStatus::Manual => "manual",
+        GateGroupStatus::Blocked => "blocked",
     }
 }
 
@@ -422,6 +576,30 @@ fn github_mergeability_label(status: &GithubMergeability) -> &'static str {
         GithubMergeability::Blocked => "blocked",
         GithubMergeability::Unknown => "unknown",
     }
+}
+
+/// Run the interactive operator surface, loading state from a file path.
+///
+/// This is the entry point for `calypso watch` and `calypso watch --state <path>`.
+/// State is persisted back to the file when the operator quits.
+pub fn run_watch(state_path: &str) {
+    run_watch_with(state_path, run_terminal_surface).unwrap_or_else(|error| {
+        eprintln!("watch error: {error}");
+        std::process::exit(1);
+    });
+}
+
+/// Testable inner implementation of `run_watch`.
+pub fn run_watch_with<Runner>(state_path: &str, runner: Runner) -> Result<(), String>
+where
+    Runner: FnOnce(&mut crate::state::FeatureState) -> io::Result<()>,
+{
+    let mut state = crate::state::RepositoryState::load_from_path(std::path::Path::new(state_path))
+        .map_err(|error| error.to_string())?;
+    runner(&mut state.current_feature).map_err(|error| error.to_string())?;
+    state
+        .save_to_path(std::path::Path::new(state_path))
+        .map_err(|error| error.to_string())
 }
 
 fn evidence_status_label(status: &EvidenceStatus) -> &'static str {

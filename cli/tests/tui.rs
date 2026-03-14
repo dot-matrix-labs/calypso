@@ -1,11 +1,15 @@
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, EvidenceStatus, FeatureState, FeatureType, Gate, GateGroup,
-    GateStatus, GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef,
-    SchedulingMeta, SessionOutput, SessionOutputStream, WorkflowState,
+    AgentSession, AgentSessionStatus, ClarificationEntry, EvidenceStatus, FeatureState,
+    FeatureType, Gate, GateGroup, GateStatus, GithubMergeability, GithubPullRequestSnapshot,
+    GithubReviewStatus, PullRequestRef, SchedulingMeta, SessionOutput, SessionOutputStream,
+    WorkflowState,
 };
-use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent, queue_follow_up};
+use calypso_cli::tui::{
+    InputBuffer, OperatorSurface, SurfaceEvent, answer_clarification, interrupt_active_sessions,
+    queue_follow_up,
+};
 
 fn sample_feature() -> FeatureState {
     FeatureState {
@@ -290,4 +294,231 @@ fn operator_surface_renders_empty_and_alternate_status_states() {
     feature.active_sessions[0].status = AgentSessionStatus::Aborted;
     let rendered = OperatorSurface::from_feature_state(&feature).render();
     assert!(rendered.contains("reviewer (session_02) [aborted]"));
+}
+
+#[test]
+fn operator_surface_renders_gate_group_rollup_status() {
+    let feature = sample_feature();
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+
+    // Specification group: all passing
+    assert!(rendered.contains("Specification [passing]"));
+    // Validation group: has a failing gate — shows blocked
+    assert!(rendered.contains("Validation [blocked]"));
+}
+
+#[test]
+fn operator_surface_highlights_blocking_gates() {
+    let feature = sample_feature();
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+
+    // Passing gate has no blocking marker
+    assert!(rendered.contains("[passing] PR canonicalized"));
+    assert!(!rendered.contains("[passing] PR canonicalized !"));
+
+    // Failing gate is marked as blocking with " !"
+    assert!(rendered.contains("[failing] Rust quality green !"));
+}
+
+#[test]
+fn operator_surface_renders_pending_clarifications() {
+    let mut feature = sample_feature();
+    feature.clarification_history = vec![
+        ClarificationEntry {
+            session_id: "session_01".to_string(),
+            question: "Which directory should I write tests to?".to_string(),
+            answer: None,
+            timestamp: "2026-03-14T10:00:00Z".to_string(),
+        },
+        ClarificationEntry {
+            session_id: "session_01".to_string(),
+            question: "Already answered question".to_string(),
+            answer: Some("tests/".to_string()),
+            timestamp: "2026-03-14T10:01:00Z".to_string(),
+        },
+    ];
+
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let rendered = surface.render();
+
+    assert!(rendered.contains("Pending Clarifications"));
+    assert!(rendered.contains("Which directory should I write tests to?"));
+    // Answered clarification should not appear in pending section
+    assert!(!rendered.contains("Already answered question"));
+    assert_eq!(surface.pending_clarification_count(), 1);
+
+    // When there are pending clarifications the input prompt changes
+    assert!(rendered.contains("Clarification answer"));
+}
+
+#[test]
+fn operator_surface_emits_clarification_answered_when_pending_clarification_present() {
+    let mut feature = sample_feature();
+    feature.clarification_history = vec![ClarificationEntry {
+        session_id: "session_01".to_string(),
+        question: "What branch should I target?".to_string(),
+        answer: None,
+        timestamp: "2026-03-14T10:00:00Z".to_string(),
+    }];
+
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    // Type an answer and submit
+    surface.handle_key_event(KeyEvent::from(KeyCode::Char('m')));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Char('a')));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Char('i')));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Char('n')));
+
+    let event = surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    assert_eq!(
+        event,
+        SurfaceEvent::ClarificationAnswered {
+            session_id: "session_01".to_string(),
+            answer: "main".to_string(),
+        }
+    );
+}
+
+#[test]
+fn operator_surface_emits_interrupt_on_ctrl_c() {
+    let feature = sample_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    let event = surface.handle_key_event(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert_eq!(event, SurfaceEvent::Interrupt);
+    assert!(surface.render().contains("Last event: interrupt requested"));
+}
+
+#[test]
+fn interrupt_active_sessions_sets_aborted_status_and_outcome() {
+    use calypso_cli::state::AgentTerminalOutcome;
+
+    let mut feature = sample_feature();
+    // Add a waiting-for-human session too
+    feature.active_sessions.push(AgentSession {
+        role: "reviewer".to_string(),
+        session_id: "session_02".to_string(),
+        provider_session_id: None,
+        status: AgentSessionStatus::WaitingForHuman,
+        output: Vec::new(),
+        pending_follow_ups: Vec::new(),
+        terminal_outcome: None,
+    });
+
+    interrupt_active_sessions(&mut feature);
+
+    assert_eq!(
+        feature.active_sessions[0].status,
+        AgentSessionStatus::Aborted
+    );
+    assert_eq!(
+        feature.active_sessions[0].terminal_outcome,
+        Some(AgentTerminalOutcome::Aborted)
+    );
+    assert_eq!(
+        feature.active_sessions[1].status,
+        AgentSessionStatus::Aborted
+    );
+    assert_eq!(
+        feature.active_sessions[1].terminal_outcome,
+        Some(AgentTerminalOutcome::Aborted)
+    );
+}
+
+#[test]
+fn interrupt_active_sessions_does_not_affect_completed_sessions() {
+    use calypso_cli::state::AgentTerminalOutcome;
+
+    let mut feature = sample_feature();
+    feature.active_sessions[0].status = AgentSessionStatus::Completed;
+    feature.active_sessions[0].terminal_outcome = Some(AgentTerminalOutcome::Ok);
+
+    interrupt_active_sessions(&mut feature);
+
+    // Completed session should be unchanged
+    assert_eq!(
+        feature.active_sessions[0].status,
+        AgentSessionStatus::Completed
+    );
+    assert_eq!(
+        feature.active_sessions[0].terminal_outcome,
+        Some(AgentTerminalOutcome::Ok)
+    );
+}
+
+#[test]
+fn answer_clarification_fills_first_unanswered_entry() {
+    let mut feature = sample_feature();
+    feature.clarification_history = vec![
+        ClarificationEntry {
+            session_id: "session_01".to_string(),
+            question: "First question".to_string(),
+            answer: None,
+            timestamp: "2026-03-14T10:00:00Z".to_string(),
+        },
+        ClarificationEntry {
+            session_id: "session_01".to_string(),
+            question: "Second question".to_string(),
+            answer: None,
+            timestamp: "2026-03-14T10:01:00Z".to_string(),
+        },
+    ];
+
+    let answered = answer_clarification(&mut feature, "session_01", "my answer".to_string());
+
+    assert!(answered);
+    assert_eq!(
+        feature.clarification_history[0].answer,
+        Some("my answer".to_string())
+    );
+    // Second question still unanswered
+    assert!(feature.clarification_history[1].answer.is_none());
+}
+
+#[test]
+fn answer_clarification_returns_false_when_no_unanswered_entry() {
+    let mut feature = sample_feature();
+
+    let answered = answer_clarification(&mut feature, "session_01", "should not store".to_string());
+
+    assert!(!answered);
+}
+
+#[test]
+fn operator_surface_renders_without_crashing_on_empty_session() {
+    let mut feature = sample_feature();
+    feature.active_sessions.clear();
+    feature.gate_groups.clear();
+
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let rendered = surface.render();
+
+    assert!(rendered.contains("Calypso Operator Surface"));
+    assert!(rendered.contains("No active sessions"));
+    assert!(rendered.contains("Blocking: none"));
+}
+
+#[test]
+fn operator_surface_renders_gate_group_status_all_variants() {
+    let mut feature = sample_feature();
+
+    // Pending gates
+    feature.gate_groups[0].gates[0].status = GateStatus::Pending;
+    feature.gate_groups[1].gates[0].status = GateStatus::Pending;
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+    assert!(rendered.contains("Specification [pending]"));
+
+    // Manual gate
+    feature.gate_groups[0].gates[0].status = GateStatus::Manual;
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+    assert!(rendered.contains("Specification [manual]"));
+
+    // All passing
+    feature.gate_groups[0].gates[0].status = GateStatus::Passing;
+    feature.gate_groups[1].gates[0].status = GateStatus::Passing;
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+    assert!(rendered.contains("Specification [passing]"));
+    assert!(rendered.contains("Validation [passing]"));
 }
