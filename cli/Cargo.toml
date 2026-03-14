@@ -3,6 +3,7 @@ name = "calypso-cli"
 version = "0.1.0"
 edition = "2024"
 build = "build.rs"
+default-run = "calypso-cli"
 
 [dependencies]
 crossterm = "0.26.1"
