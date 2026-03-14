@@ -2,6 +2,7 @@ pub mod app;
 pub mod claude;
 pub mod codex;
 pub mod doctor;
+pub mod error;
 pub mod feature_start;
 pub mod github;
 pub mod policy;
