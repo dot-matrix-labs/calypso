@@ -169,14 +169,35 @@ fn extract_repo_name(url: &str) -> Option<String> {
     } else if !after_colon.is_empty() {
         // git@github.com:org/repo — last component after last '/'
         let last = after_colon.split('/').next_back()?;
-        Some(last.trim_end_matches(".git").to_string())
+        let name = last.trim_end_matches(".git");
+        if name.is_empty() {
+            None
+        } else {
+            Some(name.to_string())
+        }
     } else {
         None
     }
 }
 
 fn is_github_url(url: &str) -> bool {
-    url.contains("github.com")
+    // Accepts:
+    //   https://github.com/...   — host must be exactly "github.com"
+    //   git@github.com:...       — SCP-style SSH remote
+    // Rejects subdomains-of-evil (evil-github.com), path components that happen
+    // to contain "github.com", and bare "github.com" strings with no scheme.
+    if let Some(rest) = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+    {
+        // rest starts with the host; verify it is exactly "github.com" (optionally
+        // followed by '/' or end-of-string, not more hostname characters).
+        rest.starts_with("github.com/") || rest == "github.com"
+    } else if let Some(rest) = url.strip_prefix("git@") {
+        rest.starts_with("github.com:")
+    } else {
+        false
+    }
 }
 
 const PRE_PUSH_HOOK: &str = "\
@@ -342,8 +363,63 @@ fn default_feature_state() -> crate::state::FeatureState {
 mod tests {
     use super::*;
 
+    // ── is_github_url ────────────────────────────────────────────────────────
+
     #[test]
-    fn extract_repo_name_https() {
+    fn is_github_url_recognizes_https() {
+        assert!(is_github_url("https://github.com/org/repo"));
+        assert!(is_github_url("https://github.com/org/repo.git"));
+    }
+
+    #[test]
+    fn is_github_url_recognizes_ssh() {
+        assert!(is_github_url("git@github.com:org/repo.git"));
+        assert!(is_github_url("git@github.com:org/repo"));
+    }
+
+    #[test]
+    fn is_github_url_rejects_lookalike_host() {
+        // "evil-github.com" contains the substring "github.com" but is not the host
+        assert!(!is_github_url("https://evil-github.com/org/repo"));
+        assert!(!is_github_url("https://notgithub.com/org/repo"));
+        assert!(!is_github_url("https://github.com.evil.org/org/repo"));
+    }
+
+    #[test]
+    fn is_github_url_rejects_github_com_as_path_component() {
+        // github.com appears in the path, not the host
+        assert!(!is_github_url(
+            "https://mirror.example.com/github.com/org/repo"
+        ));
+    }
+
+    #[test]
+    fn is_github_url_rejects_other_hosts() {
+        assert!(!is_github_url("https://gitlab.com/org/repo.git"));
+        assert!(!is_github_url("https://bitbucket.org/org/repo.git"));
+    }
+
+    #[test]
+    fn is_github_url_rejects_empty_string() {
+        assert!(!is_github_url(""));
+    }
+
+    #[test]
+    fn is_github_url_rejects_bare_host_without_scheme() {
+        // No scheme — not a valid remote URL we should accept
+        assert!(!is_github_url("github.com/org/repo"));
+    }
+
+    #[test]
+    fn is_github_url_rejects_http_github() {
+        // http:// is accepted as a scheme (uncommon but parseable)
+        assert!(is_github_url("http://github.com/org/repo"));
+    }
+
+    // ── extract_repo_name ────────────────────────────────────────────────────
+
+    #[test]
+    fn extract_repo_name_https_with_git_suffix() {
         assert_eq!(
             extract_repo_name("https://github.com/org/myrepo.git"),
             Some("myrepo".to_string())
@@ -351,15 +427,7 @@ mod tests {
     }
 
     #[test]
-    fn extract_repo_name_ssh() {
-        assert_eq!(
-            extract_repo_name("git@github.com:org/myrepo.git"),
-            Some("myrepo".to_string())
-        );
-    }
-
-    #[test]
-    fn extract_repo_name_no_git_suffix() {
+    fn extract_repo_name_https_without_git_suffix() {
         assert_eq!(
             extract_repo_name("https://github.com/org/myrepo"),
             Some("myrepo".to_string())
@@ -367,14 +435,30 @@ mod tests {
     }
 
     #[test]
-    fn is_github_url_recognizes_github() {
-        assert!(is_github_url("https://github.com/org/repo.git"));
-        assert!(is_github_url("git@github.com:org/repo.git"));
+    fn extract_repo_name_ssh_with_git_suffix() {
+        assert_eq!(
+            extract_repo_name("git@github.com:org/myrepo.git"),
+            Some("myrepo".to_string())
+        );
     }
 
     #[test]
-    fn is_github_url_rejects_other() {
-        assert!(!is_github_url("https://gitlab.com/org/repo.git"));
-        assert!(!is_github_url("https://bitbucket.org/org/repo.git"));
+    fn extract_repo_name_ssh_without_git_suffix() {
+        assert_eq!(
+            extract_repo_name("git@github.com:org/myrepo"),
+            Some("myrepo".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_repo_name_trailing_slash_returns_none() {
+        // A URL with a trailing slash has an empty final component; the function
+        // should not return an empty string as a repo name.
+        assert_eq!(extract_repo_name("https://github.com/org/myrepo/"), None);
+    }
+
+    #[test]
+    fn extract_repo_name_empty_returns_none() {
+        assert_eq!(extract_repo_name(""), None);
     }
 }
