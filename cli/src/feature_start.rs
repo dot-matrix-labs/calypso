@@ -2,8 +2,10 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::pr_checklist::seed_pr_body;
 use crate::runtime::{PullRequestResolver, RuntimeError, load_or_initialize_runtime};
 use crate::state::PullRequestRef;
+use crate::template::resolve_template_set_for_path;
 
 const DEFAULT_BRANCH_PREFIX: &str = "feat";
 
@@ -62,6 +64,12 @@ pub trait FeatureStartEnvironment {
         worktree_path: &Path,
     ) -> Result<(), FeatureStartError>;
     fn remove_branch(&self, repo_root: &Path, branch: &str) -> Result<(), FeatureStartError>;
+    fn update_pull_request_body(
+        &self,
+        worktree_path: &Path,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<(), FeatureStartError>;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -185,6 +193,19 @@ impl FeatureStartEnvironment for HostFeatureStartEnvironment {
     fn remove_branch(&self, repo_root: &Path, branch: &str) -> Result<(), FeatureStartError> {
         run_git(repo_root, &["branch", "-D", branch]).map(|_| ())
     }
+
+    fn update_pull_request_body(
+        &self,
+        worktree_path: &Path,
+        pr_number: u64,
+        body: &str,
+    ) -> Result<(), FeatureStartError> {
+        run_gh(
+            worktree_path,
+            &["pr", "edit", &pr_number.to_string(), "--body", body],
+        )
+        .map(|_| ())
+    }
 }
 
 pub fn run_feature_start(
@@ -295,6 +316,21 @@ pub fn start_feature(
             });
         }
     };
+
+    // Seed the PR checklist — best-effort; do not fail feature start on error.
+    if let Ok(template) = resolve_template_set_for_path(&worktree_path) {
+        // Load gate groups from bootstrapped state if available.
+        let gate_groups =
+            if let Ok(repo_state) = crate::state::RepositoryState::load_from_path(&state_path) {
+                repo_state.current_feature.gate_groups
+            } else {
+                Vec::new()
+            };
+
+        let seeded_body = seed_pr_body(&request.feature_id, "feat", &gate_groups, &template);
+        let _ =
+            environment.update_pull_request_body(&worktree_path, pull_request.number, &seeded_body);
+    }
 
     Ok(FeatureStartResult {
         branch,

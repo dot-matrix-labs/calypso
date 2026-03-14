@@ -2,6 +2,7 @@ use calypso_cli::app::{run_doctor, run_status};
 use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::init::{InitRequest, run_init};
+use calypso_cli::pr_checklist::update_pr_body;
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
@@ -124,34 +125,14 @@ fn main() {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             run_init_command(&cwd, Some(provider.as_str()), true);
         }
+        [command, subcommand] if command == "sync-pr" && subcommand == "--state" => {
+            // Require --state flag: sync-pr --state <path>
+            println!("{}", render_help(info));
+        }
+        [command, flag, path] if command == "sync-pr" && flag == "--state" => {
+            run_sync_pr(path);
+        }
         _ => println!("{}", render_help(info)),
-    }
-}
-
-fn run_init_command(cwd: &std::path::Path, provider: Option<&str>, allow_reinit: bool) {
-    let request = InitRequest {
-        repo_path: cwd.to_path_buf(),
-        provider: provider.map(|s| s.to_string()),
-        allow_reinit,
-    };
-    match run_init(&request) {
-        Ok(result) => {
-            println!(
-                "Initialized Calypso repository at {}",
-                result.calypso_dir.display()
-            );
-            println!("State: {}", result.state_path.display());
-            if !result.hooks_installed.is_empty() {
-                println!("Hooks installed: {}", result.hooks_installed.join(", "));
-            }
-            if !result.templates_written.is_empty() {
-                println!("Templates written: {}", result.templates_written.join(", "));
-            }
-        }
-        Err(error) => {
-            eprintln!("init error: {error}");
-            std::process::exit(1);
-        }
     }
 }
 
@@ -249,6 +230,90 @@ fn run_claude_session(state_path: &str, role: &str) {
         ClaudeOutcome::Aborted { reason } => {
             println!("Outcome: ABORTED");
             println!("Reason: {reason}");
+        }
+    }
+}
+
+fn run_init_command(cwd: &std::path::Path, provider: Option<&str>, allow_reinit: bool) {
+    let request = InitRequest {
+        repo_path: cwd.to_path_buf(),
+        provider: provider.map(str::to_string),
+        allow_reinit,
+    };
+    match run_init(&request) {
+        Ok(_) => println!("Repository initialised."),
+        Err(error) => {
+            eprintln!("init error: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_sync_pr(state_path: &str) {
+    let path = std::path::Path::new(state_path);
+    let state = match RepositoryState::load_from_path(path) {
+        Ok(s) => s,
+        Err(error) => {
+            eprintln!("sync-pr error: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    let worktree_path = std::path::Path::new(&state.current_feature.worktree_path);
+    let template = match TemplateSet::load_from_directory(worktree_path) {
+        Ok(t) => t,
+        Err(error) => {
+            eprintln!("sync-pr template error: {error}");
+            std::process::exit(1);
+        }
+    };
+
+    let existing_body = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "view",
+            &state.current_feature.pull_request.number.to_string(),
+            "--json",
+            "body",
+            "--jq",
+            ".body",
+        ])
+        .current_dir(worktree_path)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+
+    let updated = update_pr_body(
+        &existing_body,
+        &state.current_feature.gate_groups,
+        &template,
+    );
+
+    let result = std::process::Command::new("gh")
+        .args([
+            "pr",
+            "edit",
+            &state.current_feature.pull_request.number.to_string(),
+            "--body",
+            &updated,
+        ])
+        .current_dir(worktree_path)
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => println!("PR body updated."),
+        Ok(output) => {
+            eprintln!(
+                "sync-pr gh error: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            std::process::exit(1);
+        }
+        Err(error) => {
+            eprintln!("sync-pr error: {error}");
+            std::process::exit(1);
         }
     }
 }
