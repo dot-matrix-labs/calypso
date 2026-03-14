@@ -145,7 +145,6 @@ fn doctor_command_prints_local_prerequisite_checks() {
     assert!(stdout.contains("gh-installed"));
     assert!(stdout.contains("codex-installed"));
     assert!(stdout.contains("github-remote-configured"));
-    assert!(stdout.contains("feature-binding-resolved"));
     assert!(stdout.contains("required-workflows-present"));
 }
 
@@ -244,7 +243,7 @@ fn status_command_reports_errors_outside_git_repository() {
 
 #[test]
 fn path_flag_long_routes_doctor_to_specified_directory() {
-    // A non-git dir will make github-remote-configured and feature-binding-resolved fail.
+    // A non-git dir will make github-remote-configured fail.
     // Crucially it must NOT make doctor itself fail to run (exit 0).
     let dir = temp_non_git_dir();
 

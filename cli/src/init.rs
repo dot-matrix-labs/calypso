@@ -302,6 +302,9 @@ pub trait InitEnvironment {
     fn set_remote(&self, path: &Path, url: &str) -> Result<(), InitError>;
     /// Write a GitHub Actions workflow file under `.github/workflows/<name>`.
     fn write_workflow_file(&self, path: &Path, name: &str, content: &str) -> Result<(), InitError>;
+    /// Resolve the hooks directory via `git rev-parse --git-path hooks`.
+    /// Handles worktrees and `core.hooksPath` correctly.
+    fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -440,6 +443,32 @@ impl InitEnvironment for HostInitEnvironment {
         fs::create_dir_all(&workflows_dir).map_err(InitError::Io)?;
         let file_path = workflows_dir.join(name);
         fs::write(file_path, content).map_err(InitError::Io)
+    }
+
+    fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                &path.to_string_lossy(),
+                "rev-parse",
+                "--git-path",
+                "hooks",
+            ])
+            .output()
+            .map_err(InitError::Io)?;
+        if !output.status.success() {
+            return Err(InitError::git(
+                "git rev-parse --git-path hooks",
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        let raw = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        // git may return a relative path (e.g. `.git/hooks`) — resolve against the repo root.
+        if raw.is_absolute() {
+            Ok(raw)
+        } else {
+            Ok(path.join(raw))
+        }
     }
 }
 
@@ -702,7 +731,7 @@ fn do_init_steps(
     templates_written.push("prompts.yml".to_string());
 
     // Step 7: install git hook
-    let hooks_dir = request.repo_path.join(".git").join("hooks");
+    let hooks_dir = env.git_hooks_path(&request.repo_path)?;
     env.create_dir(&hooks_dir)?;
     let hook_path = hooks_dir.join("pre-push");
     env.write_file(&hook_path, PRE_PUSH_HOOK)?;

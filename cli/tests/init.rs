@@ -186,6 +186,10 @@ impl InitEnvironment for FakeEnv {
             .push((name.to_string(), content.to_string()));
         Ok(())
     }
+
+    fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
+        Ok(path.join(".git").join("hooks"))
+    }
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
