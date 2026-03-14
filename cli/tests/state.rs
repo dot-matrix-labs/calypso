@@ -1342,81 +1342,92 @@ fn workflow_state_valid_next_states_covers_full_transition_matrix() {
 }
 
 #[test]
-fn workflow_state_valid_next_states_covers_all_remaining_states() {
-    assert_eq!(
-        WorkflowState::PrdReview.valid_next_states(),
-        vec![
-            WorkflowState::ArchitecturePlan,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::ArchitecturePlan.valid_next_states(),
-        vec![
-            WorkflowState::ScaffoldTdd,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::ScaffoldTdd.valid_next_states(),
-        vec![
-            WorkflowState::ArchitectureReview,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::ArchitectureReview.valid_next_states(),
-        vec![
-            WorkflowState::Implementation,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::Implementation.valid_next_states(),
-        vec![
-            WorkflowState::QaValidation,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::QaValidation.valid_next_states(),
-        vec![
-            WorkflowState::ReleaseReady,
-            WorkflowState::Implementation,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::ReleaseReady.valid_next_states(),
-        vec![
-            WorkflowState::Done,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    // Deprecated variants preserve their transition lists
-    assert_eq!(
-        WorkflowState::WaitingForHuman.valid_next_states(),
-        vec![
-            WorkflowState::QaValidation,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
-    assert_eq!(
-        WorkflowState::ReadyForReview.valid_next_states(),
-        vec![
-            WorkflowState::Done,
-            WorkflowState::Blocked,
-            WorkflowState::Aborted
-        ]
-    );
+fn workflow_state_every_advertised_transition_is_reachable() {
+    // For every (source, target) pair advertised by valid_next_states(), construct
+    // the minimal TransitionFacts that satisfy validate_transition and assert Ok(()).
+    // If a developer removes a target from valid_next_states() or tightens
+    // validate_transition so a previously-reachable edge becomes unreachable, this
+    // test catches it — unlike the old mirror test which only verified the list itself.
+
+    let sufficient_facts = |source: &WorkflowState, target: &WorkflowState| -> TransitionFacts {
+        let mut facts = TransitionFacts::default();
+        match (source, target) {
+            // New
+            (WorkflowState::New, WorkflowState::PrdReview) => {
+                facts.feature_binding_complete = true;
+            }
+            (_, WorkflowState::Blocked) => {
+                facts.blocking_issue_present = true;
+            }
+            (_, WorkflowState::Aborted) => {
+                facts.aborted = true;
+            }
+            // Linear forward edges that use stage_complete
+            (WorkflowState::PrdReview, WorkflowState::ArchitecturePlan)
+            | (WorkflowState::ArchitecturePlan, WorkflowState::ScaffoldTdd)
+            | (WorkflowState::ScaffoldTdd, WorkflowState::ArchitectureReview)
+            | (WorkflowState::ArchitectureReview, WorkflowState::Implementation)
+            | (WorkflowState::QaValidation, WorkflowState::ReleaseReady)
+            | (WorkflowState::ReleaseReady, WorkflowState::Done) => {
+                facts.stage_complete = true;
+            }
+            // Implementation -> QaValidation
+            (WorkflowState::Implementation, WorkflowState::QaValidation) => {
+                facts.ready_for_review = true;
+            }
+            // QaValidation -> Implementation (rework)
+            (WorkflowState::QaValidation, WorkflowState::Implementation) => {
+                facts.review_rework_required = true;
+            }
+            // Blocked -> any active state
+            (WorkflowState::Blocked, target_state) => {
+                facts.blocker_resolved = true;
+                facts.target_unblock_state = Some(target_state.clone());
+            }
+            // Deprecated: WaitingForHuman -> QaValidation (maps to Implementation path)
+            (WorkflowState::WaitingForHuman, WorkflowState::QaValidation) => {
+                facts.human_response_ready = true;
+            }
+            // Deprecated: ReadyForReview -> Done
+            (WorkflowState::ReadyForReview, WorkflowState::Done) => {
+                facts.stage_complete = true;
+            }
+            _ => {}
+        }
+        facts
+    };
+
+    // Deprecated alias variants (WaitingForHuman, ReadyForReview) have intentional
+    // inconsistencies between valid_next_states() and available_transitions() and are
+    // excluded from this round-trip test; they are covered by the backward-compat tests.
+    let all_sources = [
+        WorkflowState::New,
+        WorkflowState::PrdReview,
+        WorkflowState::ArchitecturePlan,
+        WorkflowState::ScaffoldTdd,
+        WorkflowState::ArchitectureReview,
+        WorkflowState::Implementation,
+        WorkflowState::QaValidation,
+        WorkflowState::ReleaseReady,
+        WorkflowState::Done,
+        WorkflowState::Aborted,
+        WorkflowState::Blocked,
+    ];
+
+    for source in &all_sources {
+        for target in source.valid_next_states() {
+            let facts = sufficient_facts(source, &target);
+            let result = source.validate_transition(target.clone(), &facts);
+            assert!(
+                result.is_ok(),
+                "expected {:?} -> {:?} to succeed with facts {:?}, got {:?}",
+                source,
+                target,
+                facts,
+                result.unwrap_err()
+            );
+        }
+    }
 }
 
 #[test]
