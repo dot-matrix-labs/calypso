@@ -428,7 +428,7 @@ fn session_started_without_feature_id() {
     let event = Event::session_started("sess-99", None);
     assert_eq!(event.kind, EventKind::SessionStarted);
     assert_eq!(event.payload["session_id"], "sess-99");
-    assert!(event.payload.get("feature_id").is_none());
+    assert!(!event.payload.contains_key("feature_id"));
 }
 
 #[test]
@@ -450,7 +450,7 @@ fn session_ended_with_all_fields() {
 fn session_ended_without_feature_id() {
     let event = Event::session_ended("sess-2", "failure", None);
     assert_eq!(event.kind, EventKind::SessionEnded);
-    assert!(event.payload.get("feature_id").is_none());
+    assert!(!event.payload.contains_key("feature_id"));
 }
 
 #[test]
@@ -466,7 +466,7 @@ fn git_op_without_detail() {
     let event = Event::git_op("fetch", None);
     assert_eq!(event.kind, EventKind::GitOp);
     assert_eq!(event.payload["operation"], "fetch");
-    assert!(event.payload.get("detail").is_none());
+    assert!(!event.payload.contains_key("detail"));
 }
 
 #[test]
@@ -481,21 +481,21 @@ fn github_api_call_with_status_code() {
 fn github_api_call_without_status_code() {
     let event = Event::github_api_call("/repos/foo/bar", None);
     assert_eq!(event.kind, EventKind::GithubApiCall);
-    assert!(event.payload.get("status_code").is_none());
+    assert!(!event.payload.contains_key("status_code"));
 }
 
 #[test]
 fn state_transition_without_feature_id() {
     let event = Event::state_transition("new", "implementation", None);
     assert_eq!(event.kind, EventKind::StateTransition);
-    assert!(event.payload.get("feature_id").is_none());
+    assert!(!event.payload.contains_key("feature_id"));
 }
 
 #[test]
 fn gate_changed_without_feature_id() {
     let event = Event::gate_changed("lint", "failing", None);
     assert_eq!(event.kind, EventKind::GateChanged);
-    assert!(event.payload.get("feature_id").is_none());
+    assert!(!event.payload.contains_key("feature_id"));
 }
 
 // ---------------------------------------------------------------------------
