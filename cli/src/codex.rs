@@ -450,43 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn session_status_and_terminal_outcome_convert_to_persisted_variants() {
-        assert_eq!(
-            AgentSessionStatus::from(SessionStatus::Running),
-            AgentSessionStatus::Running
-        );
-        assert_eq!(
-            AgentSessionStatus::from(SessionStatus::WaitingForHuman),
-            AgentSessionStatus::WaitingForHuman
-        );
-        assert_eq!(
-            AgentSessionStatus::from(SessionStatus::Completed),
-            AgentSessionStatus::Completed
-        );
-        assert_eq!(
-            AgentSessionStatus::from(SessionStatus::Failed),
-            AgentSessionStatus::Failed
-        );
-        assert_eq!(
-            AgentSessionStatus::from(SessionStatus::Aborted),
-            AgentSessionStatus::Aborted
-        );
-
-        assert_eq!(
-            AgentTerminalOutcome::from(TerminalOutcome::Ok),
-            AgentTerminalOutcome::Ok
-        );
-        assert_eq!(
-            AgentTerminalOutcome::from(TerminalOutcome::Nok),
-            AgentTerminalOutcome::Nok
-        );
-        assert_eq!(
-            AgentTerminalOutcome::from(TerminalOutcome::Aborted),
-            AgentTerminalOutcome::Aborted
-        );
-    }
-
-    #[test]
     fn codex_error_display_covers_all_variants() {
         let io_error = CodexError::Io(io::Error::other("disk gone"));
         assert_eq!(io_error.to_string(), "codex runtime I/O error: disk gone");

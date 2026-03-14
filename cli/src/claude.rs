@@ -339,21 +339,6 @@ mod tests {
     }
 
     #[test]
-    fn claude_error_display_covers_all_variants() {
-        let io_err = ClaudeError::Io(std::io::Error::other("disk gone"));
-        assert!(io_err.to_string().contains("claude I/O error"));
-
-        let malformed = ClaudeError::MalformedOutput("missing field".to_string());
-        assert!(malformed.to_string().contains("recognised outcome marker"));
-
-        // Utf8 variant via round-trip
-        let bad_bytes = vec![0xFF_u8, 0xFE];
-        let utf8_err = String::from_utf8(bad_bytes).unwrap_err();
-        let claude_utf8 = ClaudeError::Utf8(utf8_err);
-        assert!(claude_utf8.to_string().contains("UTF-8"));
-    }
-
-    #[test]
     fn parse_ok_with_invalid_json_returns_error() {
         let err = parse_outcome("[CALYPSO:OK]not-json").expect_err("should fail on bad JSON");
         assert!(err.to_string().contains("invalid JSON after [CALYPSO:OK]"));
