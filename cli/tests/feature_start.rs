@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_cli::feature_start::run_feature_start;
 use calypso_cli::feature_start::{
     FeatureStartEnvironment, FeatureStartError, FeatureStartRequest, HostFeatureStartEnvironment,
     derive_feature_branch_name, start_feature,
