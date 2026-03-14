@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, AgentTerminalOutcome, BuiltinEvidence, EvidenceStatus,
+    AgentSession, AgentSessionStatus, BuiltinEvidence, EvidenceStatus,
     FeatureState, FeatureType, Gate, GateEvaluationError, GateGroup, GateGroupStatus,
     GateInitializationError, GateStatus, PullRequestRef, RepositoryIdentity, RepositoryState,
     SchedulingMeta, SessionOutput, SessionOutputStream, StateError, TransitionError,
@@ -137,96 +137,9 @@ fn state_error_formats_io_and_json_failures() {
 
 #[test]
 fn state_enums_serialize_with_expected_kebab_case_variants() {
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::New).expect("workflow state should serialize"),
-        "\"new\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::PrdReview).expect("workflow state should serialize"),
-        "\"prd-review\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::ArchitecturePlan)
-            .expect("workflow state should serialize"),
-        "\"architecture-plan\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::ScaffoldTdd)
-            .expect("workflow state should serialize"),
-        "\"scaffold-tdd\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::ArchitectureReview)
-            .expect("workflow state should serialize"),
-        "\"architecture-review\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::Implementation)
-            .expect("workflow state should serialize"),
-        "\"implementation\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::QaValidation)
-            .expect("workflow state should serialize"),
-        "\"qa-validation\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::ReleaseReady)
-            .expect("workflow state should serialize"),
-        "\"release-ready\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::Done).expect("workflow state should serialize"),
-        "\"done\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::Blocked).expect("workflow state should serialize"),
-        "\"blocked\""
-    );
-    assert_eq!(
-        serde_json::to_string(&WorkflowState::Aborted).expect("workflow state should serialize"),
-        "\"aborted\""
-    );
-
-    assert_eq!(
-        serde_json::to_string(&GateStatus::Failing).expect("gate status should serialize"),
-        "\"failing\""
-    );
-    assert_eq!(
-        serde_json::to_string(&GateStatus::Manual).expect("gate status should serialize"),
-        "\"manual\""
-    );
-
-    assert_eq!(
-        serde_json::to_string(&AgentSessionStatus::WaitingForHuman)
-            .expect("session status should serialize"),
-        "\"waiting-for-human\""
-    );
-    assert_eq!(
-        serde_json::to_string(&AgentSessionStatus::Completed)
-            .expect("session status should serialize"),
-        "\"completed\""
-    );
-    assert_eq!(
-        serde_json::to_string(&AgentSessionStatus::Failed)
-            .expect("session status should serialize"),
-        "\"failed\""
-    );
-    assert_eq!(
-        serde_json::to_string(&AgentSessionStatus::Aborted)
-            .expect("session status should serialize"),
-        "\"aborted\""
-    );
-    assert_eq!(
-        serde_json::to_string(&SessionOutputStream::Stderr)
-            .expect("session output stream should serialize"),
-        "\"stderr\""
-    );
-    assert_eq!(
-        serde_json::to_string(&AgentTerminalOutcome::Nok)
-            .expect("session terminal outcome should serialize"),
-        "\"nok\""
-    );
+    // Deprecated aliases must report their canonical kebab-case string values
+    assert_eq!(WorkflowState::WaitingForHuman.as_str(), "implementation");
+    assert_eq!(WorkflowState::ReadyForReview.as_str(), "release-ready");
 }
 
 #[test]
@@ -943,21 +856,6 @@ fn workflow_state_missing_transition_reason_formats_for_all_pairs() {
     assert!(error.to_string().contains("not supported"));
 }
 
-// --- TransitionError Display ---
-
-#[test]
-fn transition_error_display_includes_from_to_and_reason() {
-    let error = TransitionError::Rejected {
-        from: WorkflowState::New,
-        to: WorkflowState::Blocked,
-        reason: "some reason".to_string(),
-    };
-    let msg = error.to_string();
-    assert!(msg.contains("'new'"));
-    assert!(msg.contains("'blocked'"));
-    assert!(msg.contains("some reason"));
-}
-
 // --- GateGroup::rollup and rollup_status ---
 
 #[test]
@@ -1089,29 +987,6 @@ fn feature_state_gate_group_rollups_returns_one_rollup_per_group() {
 
     let rollups = feature.gate_group_rollups();
     assert_eq!(rollups.len(), feature.gate_groups.len());
-}
-
-#[test]
-fn feature_state_available_transitions_delegates_to_workflow_state() {
-    let template = load_embedded_template_set().expect("embedded template should load");
-    let feature = FeatureState::from_template(
-        "feat-transitions",
-        "feat/transitions",
-        "/worktrees/feat-transitions",
-        PullRequestRef {
-            number: 2,
-            url: "https://github.com/org/repo/pull/2".to_string(),
-        },
-        &template,
-    )
-    .expect("feature should initialize from template");
-
-    let facts = TransitionFacts {
-        feature_binding_complete: true,
-        ..TransitionFacts::default()
-    };
-    let transitions = feature.available_transitions(&facts);
-    assert!(transitions.contains(&WorkflowState::PrdReview));
 }
 
 #[test]

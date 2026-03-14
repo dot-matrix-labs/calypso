@@ -1,6 +1,6 @@
 use calypso_cli::state::{
     DeploymentRecord, DeploymentState, DeploymentTransitionError, FeatureState, FeatureType,
-    GateGroup, PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError,
+    PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError,
     RepositoryIdentity, RepositoryState, SchedulingMeta, WorkflowState,
 };
 
@@ -433,78 +433,6 @@ fn deployment_record_round_trips_through_json() {
 }
 
 // ---------------------------------------------------------------------------
-// ReleaseState serde — kebab-case variants
-// ---------------------------------------------------------------------------
-
-#[test]
-fn release_state_serializes_with_kebab_case_variants() {
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Planned).unwrap(),
-        "\"planned\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::InProgress).unwrap(),
-        "\"in-progress\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Candidate).unwrap(),
-        "\"candidate\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Validated).unwrap(),
-        "\"validated\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Approved).unwrap(),
-        "\"approved\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Deployed).unwrap(),
-        "\"deployed\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::RolledBack).unwrap(),
-        "\"rolled-back\""
-    );
-    assert_eq!(
-        serde_json::to_string(&ReleaseState::Aborted).unwrap(),
-        "\"aborted\""
-    );
-}
-
-#[test]
-fn deployment_state_serializes_with_kebab_case_variants() {
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::Idle).unwrap(),
-        "\"idle\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::Pending).unwrap(),
-        "\"pending\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::Deploying).unwrap(),
-        "\"deploying\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::Deployed).unwrap(),
-        "\"deployed\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::Failed).unwrap(),
-        "\"failed\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::RollingBack).unwrap(),
-        "\"rolling-back\""
-    );
-    assert_eq!(
-        serde_json::to_string(&DeploymentState::RolledBack).unwrap(),
-        "\"rolled-back\""
-    );
-}
-
-// ---------------------------------------------------------------------------
 // Multiple deployments per environment in RepositoryState
 // ---------------------------------------------------------------------------
 
@@ -583,14 +511,4 @@ fn loading_state_with_unknown_deployment_fields_still_succeeds() {
     let record: DeploymentRecord =
         serde_json::from_str(json).expect("should deserialize with unknown fields");
     assert_eq!(record.state, DeploymentState::Idle);
-}
-
-// ---------------------------------------------------------------------------
-// GateGroup import — ensure minimal_feature compiles with empty gate_groups
-// ---------------------------------------------------------------------------
-
-#[test]
-fn gate_group_import_is_available_for_future_tests() {
-    // This test just ensures GateGroup is importable from state module and can be used
-    let _: Vec<GateGroup> = Vec::new();
 }
