@@ -284,3 +284,54 @@ fn redact_scrubs_registered_secret() {
     );
     assert!(output.contains("[REDACTED]"), "output: {output}");
 }
+
+#[test]
+fn register_secret_ignores_empty_string() {
+    // Calling with an empty value must not panic and must not register anything.
+    register_secret("");
+    // A subsequent redact of a normal string should be unaffected.
+    assert_eq!(redact("hello"), "hello");
+}
+
+// ---------------------------------------------------------------------------
+// Recoverability — Display impl
+// ---------------------------------------------------------------------------
+
+#[test]
+fn recoverability_display_recoverable() {
+    assert_eq!(Recoverability::Recoverable.to_string(), "recoverable");
+}
+
+#[test]
+fn recoverability_display_user_action_required() {
+    assert_eq!(
+        Recoverability::UserActionRequired.to_string(),
+        "user-action-required"
+    );
+}
+
+#[test]
+fn recoverability_display_unrecoverable() {
+    assert_eq!(Recoverability::Unrecoverable.to_string(), "unrecoverable");
+}
+
+// ---------------------------------------------------------------------------
+// CalypsoError — Display impl
+// ---------------------------------------------------------------------------
+
+#[test]
+fn calypso_error_display_includes_code_and_message() {
+    let err = CalypsoError::git("branch not found");
+    let display = err.to_string();
+    assert!(display.contains("git"), "display: {display}");
+    assert!(display.contains("branch not found"), "display: {display}");
+}
+
+// ---------------------------------------------------------------------------
+// emit_stderr — smoke test (just ensure it doesn't panic)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn emit_stderr_does_not_panic() {
+    CalypsoError::transport("connection refused").emit_stderr();
+}
