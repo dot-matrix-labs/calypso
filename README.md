@@ -9,7 +9,18 @@ Supergreen software is here. We provide a method, tools, and a reference impleme
 
 ---
 
-## Quickstart
+## Quick Start
+
+### Install the CLI
+
+```bash
+curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash
+calypso-cli --version
+```
+
+For specific versions or canary builds, see [Installation](#installation) below.
+
+### For Project Bootstrapping
 
 Paste into your AI agent (Claude Code, Gemini CLI, Codex, etc.):
 
@@ -92,6 +103,51 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 **Calypso RS** — a minimalist Rust stack end-to-end, with a fully WASM client for state management and DOM rendering. No React.
 
 **[Alien Stack](https://github.com/dot-matrix-labs/alien-stack)** — our research lab paper on the future of software process. One day, maybe LLVM.
+
+---
+
+## Installation
+
+### Precompiled Binaries
+
+Calypso CLI is available as precompiled binaries for:
+
+- **macOS** — arm64 (M1/M2/M3) and x86_64
+- **Linux** — x86_64 and aarch64
+
+All binaries are available on [GitHub Releases](https://github.com/dot-matrix-labs/calypso/releases).
+
+### Installation Methods
+
+**Latest production release:**
+```bash
+curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash
+```
+
+**Specific version:**
+```bash
+curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash -s -- 0.1.0
+```
+
+**Latest canary (pre-release):**
+```bash
+curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash -s -- canary
+```
+
+### Manual Download
+
+1. Visit [GitHub Releases](https://github.com/dot-matrix-labs/calypso/releases)
+2. Download the binary for your platform: `calypso-cli-<platform>-<version>.tar.gz`
+3. Extract and verify the checksum:
+   ```bash
+   tar -xzf calypso-cli-*.tar.gz
+   sha256sum -c calypso-cli-*.tar.gz.sha256
+   ```
+4. Move to `/usr/local/bin`:
+   ```bash
+   sudo mv calypso-cli /usr/local/bin/
+   sudo chmod +x /usr/local/bin/calypso-cli
+   ```
 
 ---
 
