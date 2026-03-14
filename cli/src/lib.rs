@@ -5,6 +5,7 @@ pub mod doctor;
 pub mod error;
 pub mod feature_start;
 pub mod github;
+pub mod init;
 pub mod policy;
 pub mod runtime;
 pub mod state;

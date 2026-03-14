@@ -1,6 +1,7 @@
 use calypso_cli::app::{run_doctor, run_status};
 use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
+use calypso_cli::init::{InitRequest, run_init};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
@@ -101,7 +102,56 @@ fn main() {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             run_template_validate(&cwd);
         }
+        // calypso init
+        [command] if command == "init" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            run_init_command(&cwd, None, false);
+        }
+        // calypso init --allow-reinit
+        [command, flag] if command == "init" && flag == "--allow-reinit" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            run_init_command(&cwd, None, true);
+        }
+        // calypso init --provider <name>
+        [command, flag, provider] if command == "init" && flag == "--provider" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            run_init_command(&cwd, Some(provider.as_str()), false);
+        }
+        // calypso init --provider <name> --allow-reinit
+        [command, flag, provider, reinit_flag]
+            if command == "init" && flag == "--provider" && reinit_flag == "--allow-reinit" =>
+        {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            run_init_command(&cwd, Some(provider.as_str()), true);
+        }
         _ => println!("{}", render_help(info)),
+    }
+}
+
+fn run_init_command(cwd: &std::path::Path, provider: Option<&str>, allow_reinit: bool) {
+    let request = InitRequest {
+        repo_path: cwd.to_path_buf(),
+        provider: provider.map(|s| s.to_string()),
+        allow_reinit,
+    };
+    match run_init(&request) {
+        Ok(result) => {
+            println!(
+                "Initialized Calypso repository at {}",
+                result.calypso_dir.display()
+            );
+            println!("State: {}", result.state_path.display());
+            if !result.hooks_installed.is_empty() {
+                println!("Hooks installed: {}", result.hooks_installed.join(", "));
+            }
+            if !result.templates_written.is_empty() {
+                println!("Templates written: {}", result.templates_written.join(", "));
+            }
+        }
+        Err(error) => {
+            eprintln!("init error: {error}");
+            std::process::exit(1);
+        }
     }
 }
 

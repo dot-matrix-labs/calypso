@@ -5,9 +5,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_STATE_MACHINE_YAML: &str = include_str!("../templates/default/state-machine.yml");
-const DEFAULT_AGENTS_YAML: &str = include_str!("../templates/default/agents.yml");
-const DEFAULT_PROMPTS_YAML: &str = include_str!("../templates/default/prompts.yml");
+pub const DEFAULT_STATE_MACHINE_YAML: &str = include_str!("../templates/default/state-machine.yml");
+pub const DEFAULT_AGENTS_YAML: &str = include_str!("../templates/default/agents.yml");
+pub const DEFAULT_PROMPTS_YAML: &str = include_str!("../templates/default/prompts.yml");
 const LOCAL_STATE_MACHINE_FILE: &str = "calypso-state-machine.yml";
 const LOCAL_AGENTS_FILE: &str = "calypso-agents.yml";
 const LOCAL_PROMPTS_FILE: &str = "calypso-prompts.yml";
