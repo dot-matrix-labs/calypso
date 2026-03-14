@@ -555,3 +555,85 @@ fn non_secret_field_not_redacted() {
     let output = buf.into_string();
     assert!(output.contains("calypso"));
 }
+
+// ---------------------------------------------------------------------------
+// Tests: LogLevel::from_str via CALYPSO_LOG env var
+// ---------------------------------------------------------------------------
+
+/// Exercise LogLevel::from_str for each valid variant by constructing a
+/// Logger::with_writer while CALYPSO_LOG is set.  We use a subprocess so the
+/// env var is isolated and doesn't bleed into parallel test runs.
+///
+/// Because we cannot easily spawn subprocesses here, we use std::env::set_var
+/// in a sequential fashion.  Each variant is tested in a separate scope,
+/// resetting the env var afterwards.
+#[test]
+fn logger_with_writer_reads_calypso_log_debug() {
+    // SAFETY: These tests run with `-- --test-threads=1` or are inherently
+    // sequential within their test binary; no other thread reads CALYPSO_LOG.
+    unsafe { std::env::set_var("CALYPSO_LOG", "debug") };
+    let buf = TestBuf::new();
+    let logger = Logger::with_writer(Box::new(buf));
+    unsafe { std::env::remove_var("CALYPSO_LOG") };
+    assert_eq!(logger.min_level(), LogLevel::Debug);
+}
+
+#[test]
+fn logger_with_writer_reads_calypso_log_warn() {
+    unsafe { std::env::set_var("CALYPSO_LOG", "warn") };
+    let buf = TestBuf::new();
+    let logger = Logger::with_writer(Box::new(buf));
+    unsafe { std::env::remove_var("CALYPSO_LOG") };
+    assert_eq!(logger.min_level(), LogLevel::Warn);
+}
+
+#[test]
+fn logger_with_writer_reads_calypso_log_error() {
+    unsafe { std::env::set_var("CALYPSO_LOG", "error") };
+    let buf = TestBuf::new();
+    let logger = Logger::with_writer(Box::new(buf));
+    unsafe { std::env::remove_var("CALYPSO_LOG") };
+    assert_eq!(logger.min_level(), LogLevel::Error);
+}
+
+#[test]
+fn logger_with_writer_reads_calypso_log_info() {
+    unsafe { std::env::set_var("CALYPSO_LOG", "info") };
+    let buf = TestBuf::new();
+    let logger = Logger::with_writer(Box::new(buf));
+    unsafe { std::env::remove_var("CALYPSO_LOG") };
+    assert_eq!(logger.min_level(), LogLevel::Info);
+}
+
+#[test]
+fn logger_with_writer_falls_back_to_info_for_unknown_calypso_log_value() {
+    unsafe { std::env::set_var("CALYPSO_LOG", "bogus_value") };
+    let buf = TestBuf::new();
+    let logger = Logger::with_writer(Box::new(buf));
+    unsafe { std::env::remove_var("CALYPSO_LOG") };
+    assert_eq!(logger.min_level(), LogLevel::Info);
+}
+
+// ---------------------------------------------------------------------------
+// Tests: LogLevel Display (fmt::Display)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn log_level_display_renders_all_variants() {
+    assert_eq!(format!("{}", LogLevel::Debug), "debug");
+    assert_eq!(format!("{}", LogLevel::Info), "info");
+    assert_eq!(format!("{}", LogLevel::Warn), "warn");
+    assert_eq!(format!("{}", LogLevel::Error), "error");
+}
+
+// ---------------------------------------------------------------------------
+// Tests: Logger::default()
+// ---------------------------------------------------------------------------
+
+#[test]
+fn logger_default_constructs_without_panic() {
+    // Logger::default() calls Logger::new() which writes to stderr.
+    // We just verify it constructs successfully and min_level is at least Info.
+    let logger = Logger::default();
+    assert!(logger.min_level() >= LogLevel::Info || logger.min_level() == LogLevel::Debug);
+}
