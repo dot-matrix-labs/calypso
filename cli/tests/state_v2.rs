@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use calypso_cli::state::{
-    ArtifactRef, ClarificationEntry, FeatureState, FeatureType, Gate, GateGroup,
-    GateStatus, PullRequestRef, RepositoryIdentity, RepositoryState, RoleSession, SchedulingMeta,
+    ArtifactRef, ClarificationEntry, FeatureState, FeatureType, Gate, GateGroup, GateStatus,
+    PullRequestRef, RepositoryIdentity, RepositoryState, RoleSession, SchedulingMeta,
     WorkflowState,
 };
 
