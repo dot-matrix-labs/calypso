@@ -45,6 +45,20 @@ fn main() {
             render_status(path)
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
+        [command, subcommand] if command == "state" && subcommand == "show" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            let state_path = cwd.join(".calypso").join("state.json");
+            match RepositoryState::load_from_path(&state_path) {
+                Ok(state) => println!(
+                    "{}",
+                    state.to_json_pretty().expect("state should serialize")
+                ),
+                Err(error) => {
+                    eprintln!("state show error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         [command, feature_id, flag, worktree_base]
             if command == "feature-start" && flag == "--worktree-base" =>
         {
