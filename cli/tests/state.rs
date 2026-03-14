@@ -1470,3 +1470,189 @@ fn workflow_state_valid_next_states_covers_full_transition_matrix() {
     // Blocked offers all 8 active states
     assert_eq!(WorkflowState::Blocked.valid_next_states().len(), 8);
 }
+
+#[test]
+fn workflow_state_valid_next_states_covers_all_remaining_states() {
+    assert_eq!(
+        WorkflowState::PrdReview.valid_next_states(),
+        vec![
+            WorkflowState::ArchitecturePlan,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::ArchitecturePlan.valid_next_states(),
+        vec![
+            WorkflowState::ScaffoldTdd,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::ScaffoldTdd.valid_next_states(),
+        vec![
+            WorkflowState::ArchitectureReview,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::ArchitectureReview.valid_next_states(),
+        vec![
+            WorkflowState::Implementation,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::Implementation.valid_next_states(),
+        vec![
+            WorkflowState::QaValidation,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::QaValidation.valid_next_states(),
+        vec![
+            WorkflowState::ReleaseReady,
+            WorkflowState::Implementation,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::ReleaseReady.valid_next_states(),
+        vec![
+            WorkflowState::Done,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    // Deprecated variants preserve their transition lists
+    assert_eq!(
+        WorkflowState::WaitingForHuman.valid_next_states(),
+        vec![
+            WorkflowState::QaValidation,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+    assert_eq!(
+        WorkflowState::ReadyForReview.valid_next_states(),
+        vec![
+            WorkflowState::Done,
+            WorkflowState::Blocked,
+            WorkflowState::Aborted
+        ]
+    );
+}
+
+#[test]
+fn workflow_state_missing_transition_reason_covers_all_reject_arms() {
+    let facts = TransitionFacts::default();
+
+    // PrdReview -> Aborted (abort flag not set)
+    let err = WorkflowState::PrdReview
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // ArchitecturePlan -> Blocked / Aborted
+    let err = WorkflowState::ArchitecturePlan
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no blocking issue is present"),
+        "{err}"
+    );
+
+    let err = WorkflowState::ArchitecturePlan
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // ScaffoldTdd -> Blocked / Aborted
+    let err = WorkflowState::ScaffoldTdd
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no blocking issue is present"),
+        "{err}"
+    );
+
+    let err = WorkflowState::ScaffoldTdd
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // ArchitectureReview -> Blocked / Aborted
+    let err = WorkflowState::ArchitectureReview
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no blocking issue is present"),
+        "{err}"
+    );
+
+    let err = WorkflowState::ArchitectureReview
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // Implementation -> Aborted
+    let err = WorkflowState::Implementation
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // QaValidation -> Aborted
+    let err = WorkflowState::QaValidation
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // ReleaseReady -> Aborted
+    let err = WorkflowState::ReleaseReady
+        .validate_transition(WorkflowState::Aborted, &facts)
+        .unwrap_err();
+    assert!(err.to_string().contains("abort flag is not set"), "{err}");
+
+    // WaitingForHuman -> Blocked (deprecated)
+    let err = WorkflowState::WaitingForHuman
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no blocking issue is present"),
+        "{err}"
+    );
+
+    // WaitingForHuman -> Implementation (deprecated)
+    let err = WorkflowState::WaitingForHuman
+        .validate_transition(WorkflowState::Implementation, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no human response is available"),
+        "{err}"
+    );
+
+    // ReadyForReview -> Blocked (deprecated)
+    let err = WorkflowState::ReadyForReview
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no blocking issue is present"),
+        "{err}"
+    );
+
+    // ReadyForReview -> Implementation (deprecated)
+    let err = WorkflowState::ReadyForReview
+        .validate_transition(WorkflowState::Implementation, &facts)
+        .unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("no follow-up implementation request is present"),
+        "{err}"
+    );
+}
