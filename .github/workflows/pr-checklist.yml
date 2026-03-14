@@ -15,7 +15,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = context.payload.pull_request.body || '';
+            const body = (context.payload.pull_request || {}).body || '';
             const incomplete = (body.match(/- \[ \]/g) || []).length;
             if (incomplete > 0) {
               core.setFailed(
