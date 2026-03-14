@@ -1317,7 +1317,11 @@ fn embedded_template_parses_and_references_all_11_states() {
 
     for state in expected_states {
         assert!(
-            template.state_machine.states.contains(&state.to_string()),
+            template
+                .state_machine
+                .states
+                .iter()
+                .any(|s| s.name() == state),
             "embedded template should include state '{state}'"
         );
     }

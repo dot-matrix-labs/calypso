@@ -138,12 +138,22 @@ fn main() {
                 println!("{}", render_help(info));
             }
         }
-        // calypso — no args, launch TUI from current working directory
+        // calypso --step — step mode: one step per Enter keypress
+        [flag] if flag == "--step" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            let state_path = cwd.join(".calypso").join("state.json");
+            if state_path.exists() {
+                run_state_machine_step(&state_path);
+            } else {
+                println!("{}", render_help(info));
+            }
+        }
+        // calypso — no args, drive the state machine automatically
         [] => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             if state_path.exists() {
-                run_watch(&state_path.to_string_lossy());
+                run_state_machine_auto(&state_path);
             } else {
                 println!("{}", render_help(info));
             }
@@ -319,6 +329,107 @@ fn run_claude_session(state_path: &str, role: &str) {
                 std::process::exit(1);
             }
         },
+    }
+}
+
+fn run_state_machine_auto(state_path: &std::path::Path) {
+    use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+    use calypso_cli::execution::ExecutionConfig;
+    use calypso_cli::template::load_embedded_template_set;
+
+    let template = load_embedded_template_set().expect("embedded templates should be valid");
+    let driver = StateMachineDriver {
+        mode: DriverMode::Auto,
+        state_path: state_path.to_path_buf(),
+        template,
+        config: ExecutionConfig::default(),
+    };
+
+    let results = driver.run_auto();
+    for result in &results {
+        match result {
+            DriverStepResult::Advanced(state) => {
+                println!("→ {}", state.as_str());
+            }
+            DriverStepResult::Terminal => {
+                println!("done");
+            }
+            DriverStepResult::Unchanged => {
+                println!("unchanged");
+            }
+            DriverStepResult::ClarificationRequired(q) => {
+                println!("clarification required: {q}");
+                eprintln!("operator input required: {q}");
+                std::process::exit(2);
+            }
+            DriverStepResult::Failed { reason } => {
+                eprintln!("step failed: {reason}");
+                std::process::exit(1);
+            }
+            DriverStepResult::Error(e) => {
+                eprintln!("driver error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn run_state_machine_step(state_path: &std::path::Path) {
+    use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+    use calypso_cli::execution::ExecutionConfig;
+    use calypso_cli::state::RepositoryState;
+    use calypso_cli::template::load_embedded_template_set;
+
+    let template = load_embedded_template_set().expect("embedded templates should be valid");
+    let driver = StateMachineDriver {
+        mode: DriverMode::Step,
+        state_path: state_path.to_path_buf(),
+        template,
+        config: ExecutionConfig::default(),
+    };
+
+    loop {
+        match RepositoryState::load_from_path(state_path) {
+            Ok(state) => {
+                let current = state.current_feature.workflow_state.as_str();
+                println!("state: {current} — press Enter to step, q to quit");
+            }
+            Err(e) => {
+                eprintln!("error loading state: {e}");
+                std::process::exit(1);
+            }
+        }
+
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input).ok();
+        let trimmed = input.trim();
+        if trimmed == "q" || trimmed == "quit" {
+            break;
+        }
+
+        match driver.step() {
+            DriverStepResult::Advanced(state) => {
+                println!("→ advanced to: {}", state.as_str());
+            }
+            DriverStepResult::Terminal => {
+                println!("done");
+                break;
+            }
+            DriverStepResult::Unchanged => {
+                println!("step complete (state unchanged)");
+            }
+            DriverStepResult::ClarificationRequired(q) => {
+                println!("clarification required: {q}");
+            }
+            DriverStepResult::Failed { reason } => {
+                println!("step failed: {reason}");
+                println!("press Enter to retry, q to quit");
+            }
+            DriverStepResult::Error(e) => {
+                eprintln!("error: {e}");
+                std::process::exit(1);
+            }
+        }
     }
 }
 

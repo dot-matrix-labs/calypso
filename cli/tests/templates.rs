@@ -1,6 +1,6 @@
 use calypso_cli::template::{
     AgentCatalog, AgentTask, AgentTaskKind, GateGroupTemplate, GateTemplate, PromptCatalog,
-    StateMachineTemplate, TemplateError, TemplateSet, TransitionTemplate,
+    StateDefinition, StateMachineTemplate, TemplateError, TemplateSet, TransitionTemplate,
     load_embedded_template_set, resolve_template_set_for_path,
 };
 #[allow(unused_imports)]
@@ -778,7 +778,7 @@ fn validate_coherence_returns_error_for_gate_referencing_nonexistent_task() {
     let template = TemplateSet {
         state_machine: StateMachineTemplate {
             initial_state: "new".to_string(),
-            states: vec!["new".to_string()],
+            states: vec![StateDefinition::Simple("new".to_string())],
             gate_groups: vec![GateGroupTemplate {
                 id: "validation".to_string(),
                 label: "Validation".to_string(),
@@ -857,7 +857,13 @@ initial_state: implementation
     assert_eq!(template.state_machine.initial_state, "implementation");
 
     // All other keys (states, gate_groups, policy_gates) come from the defaults
-    assert!(template.state_machine.states.contains(&"new".to_string()));
+    assert!(
+        template
+            .state_machine
+            .states
+            .iter()
+            .any(|s| s.name() == "new")
+    );
     assert!(!template.state_machine.gate_groups.is_empty());
 
     // The agents and prompts come from the defaults (has more than 1 task)
@@ -1072,7 +1078,10 @@ fn make_coherence_template() -> TemplateSet {
     TemplateSet {
         state_machine: StateMachineTemplate {
             initial_state: "new".to_string(),
-            states: vec!["new".to_string(), "implementation".to_string()],
+            states: vec![
+                StateDefinition::Simple("new".to_string()),
+                StateDefinition::Simple("implementation".to_string()),
+            ],
             gate_groups: vec![GateGroupTemplate {
                 id: "coordination".to_string(),
                 label: "Coordination".to_string(),
@@ -1204,4 +1213,75 @@ fn validate_coherence_reports_transition_to_nonexistent_state() {
             .any(|e| e.contains("ghost") && e.contains("to")),
         "expected transition-to error; got: {errors:?}"
     );
+}
+
+// ── StateDefinition serde tests ───────────────────────────────────────────────
+
+#[test]
+fn state_definition_simple_parses_as_string() {
+    let yaml = "states:\n  - new\n  - prd-review\n";
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        states: Vec<StateDefinition>,
+    }
+    let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
+    assert_eq!(w.states.len(), 2);
+    assert_eq!(w.states[0].name(), "new");
+    assert_eq!(w.states[1].name(), "prd-review");
+    assert_eq!(
+        w.states[0].step_type(),
+        calypso_cli::template::StepType::Agent
+    );
+}
+
+#[test]
+fn state_definition_detailed_parses_with_function_type() {
+    let yaml = "states:\n  - name: git-init\n    type: function\n    function: git_init\n";
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        states: Vec<StateDefinition>,
+    }
+    let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
+    assert_eq!(w.states.len(), 1);
+    assert_eq!(w.states[0].name(), "git-init");
+    assert_eq!(
+        w.states[0].step_type(),
+        calypso_cli::template::StepType::Function
+    );
+}
+
+#[test]
+fn state_definition_detailed_defaults_step_type_to_agent() {
+    let yaml = "states:\n  - name: my-state\n";
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        states: Vec<StateDefinition>,
+    }
+    let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
+    assert_eq!(
+        w.states[0].step_type(),
+        calypso_cli::template::StepType::Agent
+    );
+}
+
+#[test]
+fn state_definition_mixed_simple_and_detailed_parse_together() {
+    let yaml = "states:\n  - new\n  - name: setup\n    type: function\n    function: do_setup\n  - implementation\n";
+    #[derive(serde::Deserialize)]
+    struct Wrapper {
+        states: Vec<StateDefinition>,
+    }
+    let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
+    assert_eq!(w.states.len(), 3);
+    assert_eq!(w.states[0].name(), "new");
+    assert_eq!(
+        w.states[0].step_type(),
+        calypso_cli::template::StepType::Agent
+    );
+    assert_eq!(w.states[1].name(), "setup");
+    assert_eq!(
+        w.states[1].step_type(),
+        calypso_cli::template::StepType::Function
+    );
+    assert_eq!(w.states[2].name(), "implementation");
 }

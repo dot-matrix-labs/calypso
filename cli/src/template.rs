@@ -83,7 +83,7 @@ impl TemplateSet {
             .state_machine
             .states
             .iter()
-            .any(|state| state == &self.state_machine.initial_state)
+            .any(|state| state.name() == self.state_machine.initial_state)
         {
             return Err(TemplateError::Validation(format!(
                 "initial state '{}' is not present in states",
@@ -227,12 +227,8 @@ impl TemplateSet {
             .map(|task| task.name.as_str())
             .collect();
 
-        let known_states: BTreeSet<&str> = self
-            .state_machine
-            .states
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+        let known_states: BTreeSet<&str> =
+            self.state_machine.states.iter().map(|s| s.name()).collect();
 
         // Known builtin prefixes accepted by the system
         const KNOWN_BUILTIN_PREFIXES: &[&str] = &[
@@ -316,6 +312,28 @@ impl TemplateSet {
     pub fn task_by_name(&self, task_name: &str) -> Option<&AgentTask> {
         self.agents.tasks.iter().find(|task| task.name == task_name)
     }
+
+    /// Returns the `StepType` for the named state, defaulting to `Agent` if unknown.
+    pub fn step_type_for_state(&self, state_name: &str) -> StepType {
+        self.state_machine
+            .states
+            .iter()
+            .find(|s| s.name() == state_name)
+            .map(|s| s.step_type())
+            .unwrap_or(StepType::Agent)
+    }
+
+    /// Returns the function name bound to the named state, or `None` if not a function step.
+    pub fn function_for_state(&self, state_name: &str) -> Option<String> {
+        self.state_machine
+            .states
+            .iter()
+            .find(|s| s.name() == state_name)
+            .and_then(|s| match s {
+                StateDefinition::Detailed(c) => c.function.clone(),
+                StateDefinition::Simple(_) => None,
+            })
+    }
 }
 
 /// Merge two YAML documents, with keys from `override_yaml` taking precedence over `base_yaml`.
@@ -384,10 +402,59 @@ pub fn resolve_template_set_for_path(root: &Path) -> Result<TemplateSet, Templat
     TemplateSet::from_yaml_strings(&state_machine_yaml, &agents_yaml, &prompts_yaml)
 }
 
+/// A state definition in the state machine template.
+///
+/// Supports two forms in YAML:
+/// - Simple: `- my-state` (bare string, defaults to agent step type)
+/// - Detailed: `- name: my-state\n  type: function\n  function: my_fn`
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StateDefinition {
+    Simple(String),
+    Detailed(StateConfig),
+}
+
+impl StateDefinition {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Simple(s) => s.as_str(),
+            Self::Detailed(c) => c.name.as_str(),
+        }
+    }
+
+    pub fn step_type(&self) -> StepType {
+        match self {
+            Self::Simple(_) => StepType::Agent,
+            Self::Detailed(c) => c.step_type.clone(),
+        }
+    }
+}
+
+/// Detailed state configuration used when a state needs explicit step type or function binding.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct StateConfig {
+    pub name: String,
+    #[serde(rename = "type", default)]
+    pub step_type: StepType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+/// Whether a state is driven by a built-in function or a supervised agent session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum StepType {
+    #[default]
+    Agent,
+    Function,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StateMachineTemplate {
     pub initial_state: String,
-    pub states: Vec<String>,
+    pub states: Vec<StateDefinition>,
     pub gate_groups: Vec<GateGroupTemplate>,
     #[serde(default)]
     pub policy_gates: Vec<PolicyGateTemplate>,

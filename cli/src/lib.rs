@@ -3,6 +3,7 @@ pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
 pub mod doctor;
+pub mod driver;
 pub mod error;
 pub mod execution;
 pub mod feature_start;
