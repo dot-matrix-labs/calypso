@@ -40,7 +40,7 @@ impl DoctorCheckId {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             DoctorCheckId::GhInstalled => "gh-installed",
             DoctorCheckId::CodexInstalled => "codex-installed",
@@ -65,6 +65,15 @@ pub enum DoctorCheckScope {
     ExternalAuth,
 }
 
+/// An automated or manual fix for a failing doctor check.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DoctorFix {
+    /// Execute a command to resolve the issue.
+    RunCommand { command: String, args: Vec<String> },
+    /// Provide human-readable instructions only; no automated action available.
+    Manual { instructions: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DoctorCheck {
     pub id: DoctorCheckId,
@@ -72,6 +81,7 @@ pub struct DoctorCheck {
     pub status: DoctorStatus,
     pub detail: Option<String>,
     pub remediation: Option<String>,
+    pub fix: Option<DoctorFix>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,6 +237,9 @@ fn make_check(
     let remediation = (status == DoctorStatus::Failing)
         .then(|| failing_fix(id, detail.as_deref()))
         .flatten();
+    let fix = (status == DoctorStatus::Failing)
+        .then(|| failing_doctor_fix(id, detail.as_deref()))
+        .flatten();
 
     DoctorCheck {
         id,
@@ -234,6 +247,7 @@ fn make_check(
         status,
         detail,
         remediation,
+        fix,
     }
 }
 
@@ -266,6 +280,103 @@ pub fn render_doctor_report(report: &DoctorReport) -> String {
     }
 
     lines.join("\n")
+}
+
+/// Render a verbose doctor report that includes remediation steps for every failing check.
+pub fn render_doctor_report_verbose(report: &DoctorReport) -> String {
+    let mut lines = vec!["Doctor checks (verbose)".to_string()];
+
+    for check in &report.checks {
+        let status = if matches!(check.status, DoctorStatus::Passing) {
+            "PASS"
+        } else {
+            "FAIL"
+        };
+        lines.push(format!("- [{status}] {}", check.id.label()));
+
+        if let Some(detail) = &check.detail {
+            lines.push(format!("  detail: {detail}"));
+        }
+
+        if let Some(fix) = &check.remediation {
+            lines.push(format!("  fix: {fix}"));
+        }
+
+        if let Some(doctor_fix) = &check.fix {
+            match doctor_fix {
+                DoctorFix::RunCommand { command, args } => {
+                    lines.push(format!("  auto-fix: {command} {}", args.join(" ")));
+                }
+                DoctorFix::Manual { instructions } => {
+                    lines.push(format!("  manual-fix: {instructions}"));
+                }
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Apply a `DoctorFix`, executing automated fixes or returning manual instructions.
+///
+/// Returns `Ok(output)` on success (with command stdout for `RunCommand`, or the
+/// instructions text for `Manual`).  Returns `Err(message)` if a `RunCommand` fix
+/// fails to execute or exits with a non-zero status.
+pub fn apply_fix(fix: &DoctorFix) -> Result<String, String> {
+    match fix {
+        DoctorFix::Manual { instructions } => Ok(instructions.clone()),
+        DoctorFix::RunCommand { command, args } => {
+            let output = Command::new(command)
+                .args(args)
+                .output()
+                .map_err(|error| format!("failed to spawn `{command}`: {error}"))?;
+
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+            if output.status.success() {
+                Ok(if stdout.is_empty() { stderr } else { stdout })
+            } else {
+                Err(if stderr.is_empty() {
+                    format!("`{command}` exited with status {}", output.status)
+                } else {
+                    stderr
+                })
+            }
+        }
+    }
+}
+
+fn failing_doctor_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<DoctorFix> {
+    match id {
+        DoctorCheckId::GhInstalled => Some(DoctorFix::Manual {
+            instructions: "Install gh from https://cli.github.com".to_string(),
+        }),
+        DoctorCheckId::CodexInstalled => Some(DoctorFix::Manual {
+            instructions: "Install codex from https://openai.com/codex".to_string(),
+        }),
+        DoctorCheckId::ClaudeInstalled => Some(DoctorFix::Manual {
+            instructions: "Install claude from https://claude.ai/code".to_string(),
+        }),
+        DoctorCheckId::GhAuthenticated => Some(DoctorFix::RunCommand {
+            command: "gh".to_string(),
+            args: vec!["auth".to_string(), "login".to_string()],
+        }),
+        DoctorCheckId::GithubRemoteConfigured => Some(DoctorFix::Manual {
+            instructions:
+                "Add a GitHub remote: git remote add origin https://github.com/org/repo.git"
+                    .to_string(),
+        }),
+        DoctorCheckId::FeatureBindingResolved => Some(DoctorFix::Manual {
+            instructions: "Run calypso init to initialize the repository".to_string(),
+        }),
+        DoctorCheckId::RequiredWorkflowFilesPresent => Some(DoctorFix::Manual {
+            instructions: format!(
+                "Run calypso init to scaffold required GitHub Actions workflows (missing: {})",
+                detail.unwrap_or("unknown")
+            ),
+        }),
+    }
 }
 
 fn failing_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<String> {

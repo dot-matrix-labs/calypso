@@ -1,4 +1,5 @@
 use calypso_cli::app::{run_doctor, run_status};
+use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::state::RepositoryState;
@@ -30,6 +31,9 @@ fn main() {
         [command] if command == "doctor" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             println!("{}", run_doctor(&cwd));
+        }
+        [command, flag, check_id] if command == "doctor" && flag == "--fix" => {
+            run_doctor_fix(check_id);
         }
         [command] if command == "status" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
@@ -140,6 +144,51 @@ fn looks_like_path(arg: &str) -> bool {
         || arg.starts_with('/')
         || arg.starts_with('~')
         || std::path::Path::new(arg).is_dir()
+}
+
+fn run_doctor_fix(check_id: &str) {
+    let cwd = std::env::current_dir().expect("current directory should resolve");
+    let repo_root = calypso_cli::app::resolve_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
+    let report = collect_doctor_report(&calypso_cli::doctor::HostDoctorEnvironment, &repo_root);
+
+    let check = report
+        .checks
+        .iter()
+        .find(|check| check.id.label() == check_id);
+
+    match check {
+        None => {
+            eprintln!("doctor fix: unknown check id '{check_id}'");
+            std::process::exit(1);
+        }
+        Some(check) => {
+            if check.status == DoctorStatus::Passing {
+                println!("Check '{check_id}' is already passing — no fix needed.");
+                return;
+            }
+            match &check.fix {
+                None => {
+                    eprintln!("No fix available for '{check_id}'.");
+                    std::process::exit(1);
+                }
+                Some(fix) => match apply_fix(fix) {
+                    Ok(output) => {
+                        if matches!(fix, DoctorFix::Manual { .. }) {
+                            println!("Manual fix required:");
+                            println!("{output}");
+                        } else {
+                            println!("Fix applied successfully:");
+                            println!("{output}");
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!("Fix failed: {error}");
+                        std::process::exit(1);
+                    }
+                },
+            }
+        }
+    }
 }
 
 fn run_template_validate(cwd: &std::path::Path) {

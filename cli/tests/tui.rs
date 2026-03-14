@@ -522,3 +522,151 @@ fn operator_surface_renders_gate_group_status_all_variants() {
     assert!(rendered.contains("Specification [passing]"));
     assert!(rendered.contains("Validation [passing]"));
 }
+
+// ── DoctorSurface tests ───────────────────────────────────────────────────────
+
+use calypso_cli::doctor::DoctorStatus;
+use calypso_cli::tui::{DoctorCheckView, DoctorSurface, DoctorSurfaceEvent};
+
+fn sample_doctor_checks() -> Vec<DoctorCheckView> {
+    vec![
+        DoctorCheckView {
+            id: "gh-installed".to_string(),
+            status: DoctorStatus::Passing,
+            detail: None,
+            remediation: None,
+            has_auto_fix: false,
+        },
+        DoctorCheckView {
+            id: "gh-authenticated".to_string(),
+            status: DoctorStatus::Failing,
+            detail: None,
+            remediation: Some(
+                "Run `gh auth login` and confirm the active account can access this repository."
+                    .to_string(),
+            ),
+            has_auto_fix: true,
+        },
+        DoctorCheckView {
+            id: "feature-binding-resolved".to_string(),
+            status: DoctorStatus::Failing,
+            detail: Some("branch not mapped to pull request".to_string()),
+            remediation: Some("Run calypso init to initialize the repository".to_string()),
+            has_auto_fix: false,
+        },
+    ]
+}
+
+#[test]
+fn doctor_surface_renders_check_list_with_pass_fail_indicators() {
+    let surface = DoctorSurface::new(sample_doctor_checks());
+    let rendered = surface.render();
+
+    assert!(rendered.contains("Calypso Doctor"));
+    assert!(rendered.contains("[PASS] gh-installed"));
+    assert!(rendered.contains("[FAIL] gh-authenticated"));
+    assert!(rendered.contains("[FAIL] feature-binding-resolved"));
+    assert!(rendered.contains("[auto-fix]"));
+}
+
+#[test]
+fn doctor_surface_renders_selected_check_detail() {
+    let surface = DoctorSurface::new(sample_doctor_checks());
+    let rendered = surface.render();
+
+    // First item (index 0) is selected by default
+    assert!(rendered.contains("Selected: gh-installed"));
+}
+
+#[test]
+fn doctor_surface_navigation_updates_selected_index() {
+    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let cwd = std::path::Path::new("/tmp");
+
+    assert_eq!(surface.selected(), 0);
+
+    // Navigate down
+    let event = surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+    assert_eq!(event, DoctorSurfaceEvent::Continue);
+    assert_eq!(surface.selected(), 1);
+
+    // Navigate down again
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+    assert_eq!(surface.selected(), 2);
+
+    // Can't go past end
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+    assert_eq!(surface.selected(), 2);
+
+    // Navigate up
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
+    assert_eq!(surface.selected(), 1);
+
+    // Can't go before start
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
+    assert_eq!(surface.selected(), 0);
+}
+
+#[test]
+fn doctor_surface_quit_on_q_and_esc() {
+    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let cwd = std::path::Path::new("/tmp");
+
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Char('q')), cwd),
+        DoctorSurfaceEvent::Quit
+    );
+
+    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Esc), cwd),
+        DoctorSurfaceEvent::Quit
+    );
+}
+
+#[test]
+fn doctor_surface_quit_on_ctrl_c() {
+    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let cwd = std::path::Path::new("/tmp");
+
+    let event = surface.handle_key_event(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        cwd,
+    );
+
+    assert_eq!(event, DoctorSurfaceEvent::Quit);
+}
+
+#[test]
+fn doctor_surface_renders_selected_check_detail_after_navigation() {
+    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let cwd = std::path::Path::new("/tmp");
+
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+
+    let rendered = surface.render();
+    assert!(rendered.contains("Selected: feature-binding-resolved"));
+    assert!(rendered.contains("Detail: branch not mapped to pull request"));
+    assert!(rendered.contains("Fix: Run calypso init"));
+}
+
+#[test]
+fn doctor_surface_check_count_matches_input() {
+    let surface = DoctorSurface::new(sample_doctor_checks());
+    assert_eq!(surface.check_count(), 3);
+
+    let empty_surface = DoctorSurface::new(vec![]);
+    assert_eq!(empty_surface.check_count(), 0);
+}
+
+#[test]
+fn doctor_surface_renders_keybinding_help() {
+    let surface = DoctorSurface::new(sample_doctor_checks());
+    let rendered = surface.render();
+
+    assert!(rendered.contains("[r] Refresh"));
+    assert!(rendered.contains("[f] Apply fix"));
+    assert!(rendered.contains("[q/Esc] Quit"));
+}

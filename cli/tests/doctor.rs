@@ -346,3 +346,90 @@ fn git_remote_parser_rejects_non_github_remotes() {
     ));
     assert!(!git_remote_output_has_github_remote(""));
 }
+
+#[test]
+fn doctor_fix_is_populated_for_failing_checks() {
+    use calypso_cli::doctor::DoctorFix;
+
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
+
+    for check in &report.checks {
+        if check.status == calypso_cli::doctor::DoctorStatus::Failing {
+            assert!(
+                check.fix.is_some(),
+                "failing check {:?} should have a fix",
+                check.id
+            );
+        } else {
+            assert!(
+                check.fix.is_none(),
+                "passing check {:?} should not have a fix",
+                check.id
+            );
+        }
+    }
+
+    // GhAuthenticated should have a RunCommand fix (automated)
+    let gh_auth = check_for(&report, DoctorCheckId::GhAuthenticated);
+    assert_eq!(
+        gh_auth.fix,
+        Some(DoctorFix::RunCommand {
+            command: "gh".to_string(),
+            args: vec!["auth".to_string(), "login".to_string()],
+        })
+    );
+
+    // GhInstalled should have a Manual fix
+    let gh_installed = check_for(&report, DoctorCheckId::GhInstalled);
+    assert!(matches!(gh_installed.fix, Some(DoctorFix::Manual { .. })));
+}
+
+#[test]
+fn apply_fix_returns_instructions_for_manual_fix() {
+    use calypso_cli::doctor::{DoctorFix, apply_fix};
+
+    let fix = DoctorFix::Manual {
+        instructions: "Install gh from https://cli.github.com".to_string(),
+    };
+
+    let result = apply_fix(&fix);
+
+    assert_eq!(
+        result,
+        Ok("Install gh from https://cli.github.com".to_string())
+    );
+}
+
+#[test]
+fn render_doctor_report_verbose_includes_remediation_text() {
+    use calypso_cli::doctor::render_doctor_report_verbose;
+
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default().with_feature_binding_error(
+            repo_root,
+            "current branch is not mapped to an open pull request",
+        ),
+        repo_root,
+    );
+
+    let rendered = render_doctor_report_verbose(&report);
+
+    assert!(rendered.contains("Doctor checks (verbose)"));
+    assert!(rendered.contains("feature-binding-resolved"));
+    assert!(rendered.contains("Ensure this worktree is on a feature branch"));
+    assert!(rendered.contains("manual-fix:"));
+}
+
+#[test]
+fn render_doctor_report_verbose_shows_auto_fix_for_gh_auth() {
+    use calypso_cli::doctor::render_doctor_report_verbose;
+
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
+
+    let rendered = render_doctor_report_verbose(&report);
+
+    assert!(rendered.contains("auto-fix: gh auth login"));
+}
