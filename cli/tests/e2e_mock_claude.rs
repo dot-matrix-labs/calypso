@@ -464,3 +464,287 @@ fn orchestrator_aborted_transitions_to_aborted_state() {
         "state file should transition to aborted state, got: {state_on_disk}"
     );
 }
+
+/// Scenario 5 — Transcript: after an OK run a JSONL transcript file is
+/// written under `.calypso/transcripts/`.
+#[test]
+fn orchestrator_ok_writes_transcript_to_calypso_transcripts_dir() {
+    let _guard = path_mutex()
+        .lock()
+        .expect("PATH mutex should not be poisoned");
+
+    let fake = FakeClaude::builder()
+        .outcome(FakeOutcome::Ok {
+            summary: "transcript test".to_string(),
+        })
+        .install();
+
+    let state_json = r#"{
+  "version": 1,
+  "repo_id": "test-repo",
+  "schema_version": 1,
+  "current_feature": {
+    "feature_id": "feat-transcript-001",
+    "branch": "feat/transcript-001",
+    "worktree_path": "/tmp",
+    "pull_request": {
+      "number": 20,
+      "url": "https://github.com/example/repo/pull/20"
+    },
+    "workflow_state": "implementation",
+    "gate_groups": [],
+    "active_sessions": []
+  }
+}"#;
+
+    let output = spawned_calypso()
+        .prepend_path(fake.dir.clone())
+        .args(["run", "feat-transcript-001", "--role", "implementer"])
+        .state_file_json(state_json)
+        .run();
+
+    assert_eq!(
+        output.exit_code, 0,
+        "calypso run OK should exit 0\nstdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+
+    // The transcripts directory should exist under .calypso/.
+    let transcripts_dir = output.work_dir.join(".calypso").join("transcripts");
+    assert!(
+        transcripts_dir.exists(),
+        "transcripts directory should be created at {transcripts_dir:?}"
+    );
+
+    // At least one .jsonl file should be written.
+    let entries: Vec<_> = std::fs::read_dir(&transcripts_dir)
+        .expect("transcripts dir should be readable")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("jsonl"))
+        .collect();
+
+    assert!(
+        !entries.is_empty(),
+        "at least one .jsonl transcript file should exist in {transcripts_dir:?}"
+    );
+
+    // The first transcript file should contain the session_id and prompt fields.
+    let transcript_content =
+        std::fs::read_to_string(entries[0].path()).expect("transcript should be readable");
+    assert!(
+        transcript_content.contains("session_id"),
+        "transcript should contain session_id, got: {transcript_content}"
+    );
+    assert!(
+        transcript_content.contains("implementer"),
+        "transcript prompt should contain the role, got: {transcript_content}"
+    );
+}
+
+/// Scenario 6 — Gate evidence: OK run marks gates as passing in the state file.
+#[test]
+fn orchestrator_ok_marks_gate_groups_passing_in_state_file() {
+    let _guard = path_mutex()
+        .lock()
+        .expect("PATH mutex should not be poisoned");
+
+    let fake = FakeClaude::builder()
+        .outcome(FakeOutcome::Ok {
+            summary: "gates test ok".to_string(),
+        })
+        .install();
+
+    // Start with a gate that is Pending.
+    let state_json = r#"{
+  "version": 1,
+  "repo_id": "test-repo",
+  "schema_version": 1,
+  "current_feature": {
+    "feature_id": "feat-gates-ok-001",
+    "branch": "feat/gates-ok-001",
+    "worktree_path": "/tmp",
+    "pull_request": {
+      "number": 30,
+      "url": "https://github.com/example/repo/pull/30"
+    },
+    "workflow_state": "implementation",
+    "gate_groups": [
+      {
+        "id": "g-impl",
+        "label": "Implementation Gates",
+        "gates": [
+          {
+            "id": "g-impl.agent",
+            "label": "Agent work complete",
+            "task": "implementation-agent",
+            "status": "pending"
+          }
+        ]
+      }
+    ],
+    "active_sessions": []
+  }
+}"#;
+
+    let output = spawned_calypso()
+        .prepend_path(fake.dir.clone())
+        .args(["run", "feat-gates-ok-001", "--role", "implementer"])
+        .state_file_json(state_json)
+        .run();
+
+    assert_eq!(
+        output.exit_code, 0,
+        "calypso run OK should exit 0\nstdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+
+    let state_on_disk = output
+        .read_state_json()
+        .expect("state file should exist after OK run");
+
+    // The gate status should have changed from pending to passing.
+    assert!(
+        state_on_disk.contains("\"passing\""),
+        "gate status should be passing after OK run, got: {state_on_disk}"
+    );
+    assert!(
+        !state_on_disk.contains("\"pending\""),
+        "no gate should remain pending after OK run, got: {state_on_disk}"
+    );
+}
+
+/// Scenario 7 — Gate evidence: NOK run marks gates as failing.
+#[test]
+fn orchestrator_nok_marks_gate_groups_failing_in_state_file() {
+    let _guard = path_mutex()
+        .lock()
+        .expect("PATH mutex should not be poisoned");
+
+    let fake = FakeClaude::builder()
+        .outcome(FakeOutcome::Nok {
+            summary: "gates nok".to_string(),
+            reason: "tests failed".to_string(),
+        })
+        .install();
+
+    let state_json = r#"{
+  "version": 1,
+  "repo_id": "test-repo",
+  "schema_version": 1,
+  "current_feature": {
+    "feature_id": "feat-gates-nok-001",
+    "branch": "feat/gates-nok-001",
+    "worktree_path": "/tmp",
+    "pull_request": {
+      "number": 31,
+      "url": "https://github.com/example/repo/pull/31"
+    },
+    "workflow_state": "implementation",
+    "gate_groups": [
+      {
+        "id": "g-impl",
+        "label": "Implementation Gates",
+        "gates": [
+          {
+            "id": "g-impl.agent",
+            "label": "Agent work complete",
+            "task": "implementation-agent",
+            "status": "pending"
+          }
+        ]
+      }
+    ],
+    "active_sessions": []
+  }
+}"#;
+
+    let output = spawned_calypso()
+        .prepend_path(fake.dir.clone())
+        .args(["run", "feat-gates-nok-001", "--role", "implementer"])
+        .state_file_json(state_json)
+        .run();
+
+    assert_ne!(
+        output.exit_code, 0,
+        "calypso run NOK should exit non-zero\nstdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+
+    let state_on_disk = output
+        .read_state_json()
+        .expect("state file should exist after NOK run");
+
+    assert!(
+        state_on_disk.contains("\"failing\""),
+        "gate status should be failing after NOK run, got: {state_on_disk}"
+    );
+    // Workflow state must remain unchanged.
+    assert!(
+        state_on_disk.contains("\"implementation\""),
+        "workflow state should remain implementation after NOK, got: {state_on_disk}"
+    );
+}
+
+/// Scenario 8 — Provider failure (binary missing): calypso exits non-zero and
+/// does not corrupt the state file.
+///
+/// We use `FakeClaude` infrastructure to build a temp dir that is on PATH but
+/// contains a `claude` script that exits 127 (command not found) with no
+/// output.  This simulates a transient provider failure after retries.
+#[test]
+fn orchestrator_provider_failure_exits_nonzero_and_state_unchanged() {
+    use helpers::fake_claude::{unique_temp_dir, write_executable};
+
+    let _guard = path_mutex()
+        .lock()
+        .expect("PATH mutex should not be poisoned");
+
+    // Write a `claude` stub that exits 127 with no output — simulates a
+    // binary that is present but always fails (e.g. transient error).
+    let dir = unique_temp_dir("calypso-provider-failure");
+    write_executable(&dir, "claude", "#!/bin/sh\nexit 127\n");
+
+    let state_json = r#"{
+  "version": 1,
+  "repo_id": "test-repo",
+  "schema_version": 1,
+  "current_feature": {
+    "feature_id": "feat-fail-001",
+    "branch": "feat/fail-001",
+    "worktree_path": "/tmp",
+    "pull_request": {
+      "number": 99,
+      "url": "https://github.com/example/repo/pull/99"
+    },
+    "workflow_state": "implementation",
+    "gate_groups": [],
+    "active_sessions": []
+  }
+}"#;
+
+    let output = spawned_calypso()
+        .prepend_path(dir.clone())
+        .args(["run", "feat-fail-001", "--role", "implementer"])
+        .state_file_json(state_json)
+        .run();
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert_ne!(
+        output.exit_code, 0,
+        "calypso run with failing claude binary should exit non-zero\nstdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+
+    // The state file must still be parseable and must NOT have advanced.
+    let state_on_disk = output.read_state_json().expect("state file should exist");
+    assert!(
+        state_on_disk.contains("implementation") || state_on_disk.contains("aborted"),
+        "workflow state should be implementation or aborted after provider failure, got: {state_on_disk}"
+    );
+    // The key requirement: state must not advance forward to qa-validation.
+    assert!(
+        !state_on_disk.contains("qa-validation"),
+        "workflow state must not advance on provider failure, got: {state_on_disk}"
+    );
+}

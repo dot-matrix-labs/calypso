@@ -1,9 +1,7 @@
 use calypso_cli::app::{run_doctor, run_status};
-use calypso_cli::claude::{
-    ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext, parse_clarification,
-};
+use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
-use calypso_cli::state::{RepositoryState, TransitionFacts, WorkflowState};
+use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
 use calypso_cli::{BuildInfo, render_help, render_version};
@@ -151,145 +149,50 @@ where
 }
 
 fn run_claude_session(state_path: &str, role: &str) {
-    let mut state = RepositoryState::load_from_path(std::path::Path::new(state_path))
-        .expect("state file should load");
+    let config = ExecutionConfig::default();
 
-    let prompt = format!(
-        "You are acting as the `{role}` agent for feature `{}`.\n\
-         Current workflow state: {:?}\n\
-         Complete your role tasks and emit a [CALYPSO:OK], [CALYPSO:NOK], [CALYPSO:CLARIFICATION], or [CALYPSO:ABORTED] outcome marker.",
-        state.current_feature.feature_id, state.current_feature.workflow_state,
-    );
-
-    let config = ClaudeConfig::default();
-    let session = ClaudeSession::new(config.clone());
-    let context = SessionContext {
-        working_directory: Some(state.current_feature.worktree_path.clone()),
-    };
-
-    let transcript_path = std::path::Path::new(state_path)
-        .parent()
-        .map(|p| p.join(format!("claude-transcript-{}.jsonl", session.session_id)));
-
-    // First, capture raw output so we can detect CLARIFICATION markers that
-    // are not terminal outcomes.
-    let raw_stdout = capture_raw_claude_output(&config, &prompt, &context);
-
-    if let Some(ref raw) = raw_stdout {
-        // Check for clarification before attempting full outcome parse.
-        if let Some(clarification) = parse_clarification(raw, &session.session_id) {
-            println!("Outcome: CLARIFICATION");
-            println!("Question: {}", clarification.question);
-            eprintln!("Operator input required: {}", clarification.question);
-            std::process::exit(2);
-        }
-    }
-
-    let outcome = session
-        .invoke(&prompt, &context, transcript_path.as_deref())
-        .unwrap_or_else(|error| {
-            eprintln!("claude invocation error: {error}");
+    match run_supervised_session(std::path::Path::new(state_path), role, &config) {
+        Err(err) => {
+            eprintln!("execution error: {err}");
             std::process::exit(1);
-        });
-
-    match &outcome {
-        ClaudeOutcome::Ok {
-            summary,
-            artifact_refs,
-            suggested_next_state,
-        } => {
-            println!("Outcome: OK");
-            println!("Summary: {summary}");
-            if !artifact_refs.is_empty() {
-                println!("Artifacts: {}", artifact_refs.join(", "));
-            }
-            if let Some(next) = suggested_next_state {
-                println!("Suggested next state: {next}");
-            }
-
-            // Advance workflow state to the first valid forward state.
-            // When Claude reports OK, we treat all forward-progress facts as
-            // satisfied so the appropriate transition can be selected regardless
-            // of which state we are currently in.
-            let facts = TransitionFacts {
-                stage_complete: true,
-                ready_for_review: true,
-                feature_binding_complete: true,
-                ..Default::default()
-            };
-            let valid = state.current_feature.workflow_state.valid_next_states();
-            if let Some(next_state) = valid
-                .iter()
-                .find(|s| !matches!(s, WorkflowState::Blocked | WorkflowState::Aborted))
-                .cloned()
-            {
-                if let Err(err) = state
-                    .current_feature
-                    .transition_to(next_state.clone(), &facts)
-                {
-                    eprintln!("state transition error: {err}");
-                    // Non-fatal: outcome was OK, just couldn't advance state
-                } else {
-                    state
-                        .save_to_path(std::path::Path::new(state_path))
-                        .unwrap_or_else(|err| eprintln!("state save error: {err}"));
-                    println!(
-                        "State: {} -> {}",
-                        state.current_feature.workflow_state.as_str(),
-                        next_state.as_str()
-                    );
+        }
+        Ok(outcome) => match outcome {
+            ExecutionOutcome::Ok {
+                summary,
+                artifact_refs,
+                advanced_to,
+            } => {
+                println!("Outcome: OK");
+                println!("Summary: {summary}");
+                if !artifact_refs.is_empty() {
+                    println!("Artifacts: {}", artifact_refs.join(", "));
+                }
+                if let Some(next) = advanced_to {
+                    println!("State advanced to: {}", next.as_str());
                 }
             }
-        }
-        ClaudeOutcome::Nok { summary, reason } => {
-            println!("Outcome: NOK");
-            println!("Summary: {summary}");
-            println!("Reason: {reason}");
-            // State file unchanged — do not save.
-            eprintln!("Session NOK: {reason}");
-            std::process::exit(1);
-        }
-        ClaudeOutcome::Aborted { reason } => {
-            println!("Outcome: ABORTED");
-            println!("Reason: {reason}");
-
-            // Transition to Aborted state.
-            let facts = TransitionFacts {
-                aborted: true,
-                ..Default::default()
-            };
-            if let Err(err) = state
-                .current_feature
-                .transition_to(WorkflowState::Aborted, &facts)
-            {
-                eprintln!("state transition error: {err}");
-            } else {
-                state
-                    .save_to_path(std::path::Path::new(state_path))
-                    .unwrap_or_else(|err| eprintln!("state save error: {err}"));
+            ExecutionOutcome::Nok { summary, reason } => {
+                println!("Outcome: NOK");
+                println!("Summary: {summary}");
+                println!("Reason: {reason}");
+                eprintln!("Session NOK: {reason}");
+                std::process::exit(1);
             }
-            std::process::exit(3);
-        }
+            ExecutionOutcome::Aborted { reason } => {
+                println!("Outcome: ABORTED");
+                println!("Reason: {reason}");
+                std::process::exit(3);
+            }
+            ExecutionOutcome::ClarificationRequired(req) => {
+                println!("Outcome: CLARIFICATION");
+                println!("Question: {}", req.question);
+                eprintln!("Operator input required: {}", req.question);
+                std::process::exit(2);
+            }
+            ExecutionOutcome::ProviderFailure { detail } => {
+                eprintln!("Provider failure: {detail}");
+                std::process::exit(1);
+            }
+        },
     }
-}
-
-/// Invoke `claude` and capture the raw stdout for clarification detection.
-///
-/// This is a lightweight pre-check before the full `ClaudeSession::invoke` path.
-/// Returns `None` if the binary cannot be spawned or produces non-UTF-8 output.
-fn capture_raw_claude_output(
-    config: &ClaudeConfig,
-    prompt: &str,
-    context: &SessionContext,
-) -> Option<String> {
-    let mut cmd = std::process::Command::new(&config.binary);
-    for flag in &config.default_flags {
-        cmd.arg(flag);
-    }
-    cmd.arg(prompt);
-    if let Some(dir) = &context.working_directory {
-        cmd.current_dir(dir);
-    }
-    let output = cmd.output().ok()?;
-    String::from_utf8(output.stdout).ok()
 }
