@@ -34,7 +34,32 @@ pub fn render_version(info: BuildInfo<'_>) -> String {
 
 pub fn render_help(info: BuildInfo<'_>) -> String {
     format!(
-        "calypso-cli\nVersion: {}\nGit hash: {}\nBuild time: {}\nGit tags: {}\n\nUsage:\n  calypso-cli [OPTIONS] [COMMAND]\n\nCommands:\n  doctor                                      Check local Calypso prerequisites\n  status                                      Render the operator surface from a state file\n  feature-start <feature-id> --worktree-base <path>\n                                              Create a feature branch, worktree, draft PR, and seeded state\n\nOptions:\n  -h, --help       Show this help output\n  -v, --version    Show build version information",
+        "\
+calypso-cli {}
+
+Usage:
+  calypso [OPTIONS] [COMMAND]
+
+Options:
+  -p, --path <dir>    Project directory (default: current working directory)
+  -h, --help          Show this help output
+  -v, --version       Show build version information
+
+Commands:
+  (none)              Drive the state machine for the project directory
+  --step              Drive the state machine one step at a time
+  doctor              Check local prerequisites and environment
+  doctor --fix <id>   Apply an available fix for a doctor check
+  status              Render the feature status for the project directory
+  watch               Open the interactive operator surface (live TUI)
+  init                Initialise a repository for Calypso
+  init --reinit       Re-initialise an already-initialised repository
+  state show          Print the current state file as JSON
+  feature-start <id> --worktree-base <path>
+                      Create a feature branch, worktree, draft PR, and state file
+  template validate   Validate the local workflow template
+
+Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags
     )
 }
@@ -73,8 +98,10 @@ mod tests {
         let output = render_help(sample_info());
 
         assert!(output.contains("calypso-cli"));
-        assert!(output.contains("Version: 0.1.0+abc123"));
+        assert!(output.contains("0.1.0+abc123"));
         assert!(output.contains("Git hash: abc123"));
         assert!(output.contains("Commands:"));
+        assert!(output.contains("--path"));
+        assert!(output.contains("-h, --help"));
     }
 }

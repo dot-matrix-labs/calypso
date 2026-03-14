@@ -76,6 +76,10 @@ pub struct OperatorSurface {
     input: InputBuffer,
     queued_follow_ups: Vec<String>,
     pub last_event: String,
+    /// Row offset for scrolling the main pane (paned rendering only).
+    scroll_offset: usize,
+    /// Whether keyboard focus is on the sidebar (paned rendering only).
+    sidebar_focused: bool,
 }
 
 impl OperatorSurface {
@@ -148,58 +152,88 @@ impl OperatorSurface {
                 .flat_map(|session| session.pending_follow_ups.iter().cloned())
                 .collect(),
             last_event: "idle".to_string(),
+            scroll_offset: 0,
+            sidebar_focused: false,
         }
     }
 
     pub fn render(&self) -> String {
         let mut lines = vec![
-            "Calypso Operator Surface".to_string(),
-            format!("Feature: {}", self.feature_id),
-            format!("Branch: {}", self.branch),
-            format!("Workflow: {}", self.workflow),
-            format!("Pull request: #{}", self.pull_request_number),
-            format!("Queued follow-ups: {}", self.queued_follow_ups.len()),
-            format!("Last event: {}", self.last_event),
+            "┌─ Calypso ──────────────────────────────────────────────────────────────────┐"
+                .to_string(),
+            format!("│ Feature: {:<66} │", self.feature_id),
             format!(
-                "Blocking: {}",
-                if self.blocking_gate_ids.is_empty() {
-                    "none".to_string()
-                } else {
-                    self.blocking_gate_ids.join(", ")
-                }
+                "│ Branch:  {:<30}  PR: #{:<29} │",
+                self.branch, self.pull_request_number
             ),
+            "└────────────────────────────────────────────────────────────────────────────┘"
+                .to_string(),
             String::new(),
-            "Gate Groups".to_string(),
         ];
 
+        // State machine pipeline
+        lines.push(render_workflow_pipeline(&self.workflow));
+        lines.push(String::new());
+
+        // Status row
+        let blocking_str = if self.blocking_gate_ids.is_empty() {
+            "none".to_string()
+        } else {
+            self.blocking_gate_ids.join(", ")
+        };
+        lines.push(format!(
+            "  Follow-ups queued: {}   Blocking: {}   Last event: {}",
+            self.queued_follow_ups.len(),
+            blocking_str,
+            self.last_event,
+        ));
+
+        // GitHub
         if let Some(github) = &self.github {
             lines.push(String::new());
-            lines.push("GitHub".to_string());
-            lines.push(format!("PR state: {}", github.pr_state));
-            lines.push(format!("Review: {}", github.review));
-            lines.push(format!("Checks: {}", github.checks));
-            lines.push(format!("Mergeability: {}", github.mergeability));
+            lines.push(format!(
+                "  GitHub  PR: {}  Review: {}  Checks: {}  Merge: {}",
+                github.pr_state, github.review, github.checks, github.mergeability
+            ));
         } else if let Some(error) = &self.github_error {
             lines.push(String::new());
-            lines.push("GitHub".to_string());
-            lines.push(format!("Error: {error}"));
+            lines.push(format!("  GitHub  error: {error}"));
         }
 
-        for group in &self.gate_groups {
-            lines.push(format!("  {} [{}]:", group.label, group.group_status));
-            for gate in &group.gates {
-                let blocking_marker = if gate.is_blocking { " !" } else { "" };
-                lines.push(format!(
-                    "    [{}] {}{}",
-                    gate.status, gate.label, blocking_marker
-                ));
+        // Gate groups
+        if !self.gate_groups.is_empty() {
+            lines.push(String::new());
+            lines.push("  Gates".to_string());
+            lines.push("  ─────────────────────────────────────────────────".to_string());
+            for group in &self.gate_groups {
+                let group_icon = match group.group_status.as_str() {
+                    "passing" => "✓",
+                    "blocked" => "✗",
+                    "manual" => "◆",
+                    _ => "○",
+                };
+                lines.push(format!("  {} {}:", group_icon, group.label));
+                for gate in &group.gates {
+                    let gate_icon = match gate.status.as_str() {
+                        "passing" => "  ✓",
+                        "failing" => "  ✗",
+                        "manual" => "  ◆",
+                        _ => "  ○",
+                    };
+                    let blocking_marker = if gate.is_blocking { " ⚠" } else { "" };
+                    lines.push(format!(
+                        "  {}  {}{}",
+                        gate_icon, gate.label, blocking_marker
+                    ));
+                }
             }
         }
 
         // Pending clarifications
         if !self.pending_clarifications.is_empty() {
             lines.push(String::new());
-            lines.push("Pending Clarifications".to_string());
+            lines.push("  Pending Clarifications".to_string());
+            lines.push("  ─────────────────────────────────────────────────".to_string());
             for clarification in &self.pending_clarifications {
                 lines.push(format!(
                     "  [{}] {}",
@@ -208,16 +242,24 @@ impl OperatorSurface {
             }
         }
 
+        // Active sessions
         lines.push(String::new());
-        lines.push("Active Sessions".to_string());
-
+        lines.push("  Active Sessions".to_string());
+        lines.push("  ─────────────────────────────────────────────────".to_string());
         if self.sessions.is_empty() {
             lines.push("  No active sessions".to_string());
         } else {
             for session in &self.sessions {
+                let status_icon = match session.status.as_str() {
+                    "running" => "▶",
+                    "completed" => "✓",
+                    "failed" => "✗",
+                    "aborted" => "⊗",
+                    _ => "○",
+                };
                 lines.push(format!(
-                    "  {} ({}) [{}]",
-                    session.role, session.session_id, session.status
+                    "  {} {} ({}) [{}]",
+                    status_icon, session.role, session.session_id, session.status
                 ));
                 for output in &session.output {
                     lines.push(format!("    {}", output));
@@ -229,13 +271,14 @@ impl OperatorSurface {
 
         if !self.pending_clarifications.is_empty() {
             lines.push(format!(
-                "Clarification answer (Enter to submit, Ctrl+C to abort): {}",
+                "  Answer (Enter to submit, Ctrl+C to abort): {}▌",
                 self.input.as_str()
             ));
         } else {
-            lines.push(format!("Follow-up input: {}", self.input.as_str()));
+            lines.push(format!("  Follow-up input: {}▌", self.input.as_str()));
         }
 
+        lines.push(String::new());
         lines.push("  [Ctrl+C] Interrupt session  [Esc] Quit".to_string());
 
         lines.join("\n")
@@ -279,6 +322,18 @@ impl OperatorSurface {
             KeyCode::Esc => {
                 self.last_event = "quit requested".to_string();
                 SurfaceEvent::Quit
+            }
+            KeyCode::Tab => {
+                self.sidebar_focused = !self.sidebar_focused;
+                SurfaceEvent::Continue
+            }
+            KeyCode::Up => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                SurfaceEvent::Continue
+            }
+            KeyCode::Down => {
+                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                SurfaceEvent::Continue
             }
             _ => SurfaceEvent::Continue,
         }
@@ -336,6 +391,8 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
 pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
     let mut stdout = io::sink();
     let mut surface = OperatorSurface::from_feature_state(feature);
+    let mut layout: Option<PanedLayout> = None;
+
     let resize = Some(Event::Resize(80, 24));
     let type_a = Some(Event::Key(KeyEvent::from(KeyCode::Char('a'))));
     let submit = Some(Event::Key(KeyEvent::from(KeyCode::Enter)));
@@ -345,20 +402,34 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
         KeyModifiers::CONTROL,
     )));
     let type_c = Some(Event::Key(KeyEvent::from(KeyCode::Char('c'))));
+    let tab = Some(Event::Key(KeyEvent::from(KeyCode::Tab)));
+    let scroll_down = Some(Event::Key(KeyEvent::from(KeyCode::Down)));
+    let scroll_up = Some(Event::Key(KeyEvent::from(KeyCode::Up)));
     let quit = Some(Event::Key(KeyEvent::from(KeyCode::Esc)));
 
-    run_terminal_iteration(&mut stdout, feature, &mut surface, resize)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, type_a)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, submit.clone())?;
+    // Resize first — sets layout, activates paned rendering for subsequent frames.
+    run_terminal_iteration(&mut stdout, feature, &mut surface, resize, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, type_a, &mut layout)?;
+    run_terminal_iteration(
+        &mut stdout,
+        feature,
+        &mut surface,
+        submit.clone(),
+        &mut layout,
+    )?;
     if let Some(active_session) = feature.active_sessions.first_mut() {
         active_session.status = AgentSessionStatus::Completed;
     }
-    run_terminal_iteration(&mut stdout, feature, &mut surface, type_b)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, submit)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, type_b, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, submit, &mut layout)?;
     // Exercise interrupt path — should NOT quit (just aborts active sessions)
-    run_terminal_iteration(&mut stdout, feature, &mut surface, interrupt)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, type_c)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, quit)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, interrupt, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, type_c, &mut layout)?;
+    // Exercise Tab (sidebar focus) and scroll
+    run_terminal_iteration(&mut stdout, feature, &mut surface, tab, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_down, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_up, &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, quit, &mut layout)?;
     Ok(())
 }
 
@@ -368,6 +439,14 @@ fn run_terminal_loop(
     feature: &mut FeatureState,
     surface: &mut OperatorSurface,
 ) -> io::Result<()> {
+    // Initialise the paned layout from the current terminal size.
+    let mut layout: Option<PanedLayout> = crossterm::terminal::size()
+        .ok()
+        .map(|(cols, rows)| PanedLayout::from_size(TerminalSize { cols, rows }));
+
+    // Full clear before the first frame.
+    queue!(stdout, Clear(ClearType::All))?;
+
     loop {
         let next_event = if event::poll(Duration::from_millis(250))? {
             Some(event::read()?)
@@ -375,7 +454,7 @@ fn run_terminal_loop(
             None
         };
 
-        if !run_terminal_iteration(stdout, feature, surface, next_event)? {
+        if !run_terminal_iteration(stdout, feature, surface, next_event, &mut layout)? {
             return Ok(());
         }
     }
@@ -386,13 +465,24 @@ fn run_terminal_iteration(
     feature: &mut FeatureState,
     surface: &mut OperatorSurface,
     next_event: Option<Event>,
+    layout: &mut Option<PanedLayout>,
 ) -> io::Result<bool> {
-    queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-    write!(stdout, "{}", surface.render())?;
+    // Render: use paned layout when available, fall back to flat text.
+    match layout {
+        Some(l) => surface.render_paned(stdout, l)?,
+        None => {
+            queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+            write!(stdout, "{}", surface.render())?;
+        }
+    }
     stdout.flush()?;
 
-    if let Some(Event::Key(key_event)) = next_event {
-        match surface.handle_key_event(key_event) {
+    match next_event {
+        Some(Event::Resize(cols, rows)) => {
+            *layout = Some(PanedLayout::from_size(TerminalSize { cols, rows }));
+            queue!(stdout, Clear(ClearType::All))?;
+        }
+        Some(Event::Key(key_event)) => match surface.handle_key_event(key_event) {
             SurfaceEvent::Continue => {}
             SurfaceEvent::Submitted(follow_up) => {
                 let queued = queue_follow_up(feature, follow_up);
@@ -414,7 +504,8 @@ fn run_terminal_iteration(
                 surface.last_event = "session interrupted".to_string();
             }
             SurfaceEvent::Quit => return Ok(false),
-        }
+        },
+        _ => {}
     }
 
     Ok(true)
@@ -533,6 +624,42 @@ fn workflow_label(state: WorkflowState) -> String {
     state.as_str().to_string()
 }
 
+/// Render a one-line visual pipeline showing the current position in the workflow.
+///
+/// Completed states: ✓label   Active state: ●label   Upcoming states: ○label
+fn render_workflow_pipeline(current: &str) -> String {
+    const PIPELINE: &[(&str, &str)] = &[
+        ("new", "new"),
+        ("prd-review", "prd"),
+        ("architecture-plan", "arch"),
+        ("scaffold-tdd", "tdd"),
+        ("architecture-review", "rev"),
+        ("implementation", "impl"),
+        ("qa-validation", "qa"),
+        ("release-ready", "rel"),
+        ("done", "done"),
+    ];
+
+    let current_pos = PIPELINE.iter().position(|(s, _)| *s == current);
+    let nodes: Vec<String> = PIPELINE
+        .iter()
+        .enumerate()
+        .map(|(i, (_, label))| match current_pos {
+            Some(pos) if i < pos => format!("✓{label}"),
+            Some(pos) if i == pos => format!("●{label}"),
+            _ => format!("○{label}"),
+        })
+        .collect();
+
+    let flow = nodes.join(" → ");
+
+    match current {
+        "blocked" => format!("  {flow}\n  ⚠  state: blocked"),
+        "aborted" => format!("  {flow}\n  ✗  state: aborted"),
+        _ => format!("  {flow}"),
+    }
+}
+
 fn gate_status_label(status: GateStatus) -> &'static str {
     match status {
         GateStatus::Pending => "pending",
@@ -611,6 +738,545 @@ fn evidence_status_label(status: &EvidenceStatus) -> &'static str {
     }
 }
 
+// ── Paned layout ─────────────────────────────────────────────────────────────
+
+/// Terminal dimensions, obtained from `crossterm::terminal::size()` or a Resize event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerminalSize {
+    pub cols: u16,
+    pub rows: u16,
+}
+
+/// Fixed pane boundaries derived from a `TerminalSize`.
+///
+/// All coordinates follow the crossterm `MoveTo(col, row)` convention.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PanedLayout {
+    /// Total terminal columns.
+    pub cols: u16,
+    /// Total terminal rows.
+    pub rows: u16,
+    /// Width of the main (left) pane in columns.
+    pub main_width: u16,
+    /// Column where the vertical divider `│` sits.
+    pub divider_col: u16,
+    /// First column of the sidebar pane.
+    pub sidebar_col: u16,
+    /// Width of the sidebar pane in columns.
+    pub sidebar_width: u16,
+    /// Number of content rows shared by all panes (excludes input + ribbon rows).
+    pub content_rows: u16,
+    /// The row reserved for the text input field.
+    pub input_row: u16,
+    /// The bottom row used for the keybinding ribbon.
+    pub ribbon_row: u16,
+}
+
+impl PanedLayout {
+    /// Compute a layout from terminal dimensions.
+    ///
+    /// Minimum guaranteed dimensions: 80 columns × 24 rows.
+    pub fn from_size(size: TerminalSize) -> Self {
+        let cols = size.cols.max(80);
+        let rows = size.rows.max(24);
+        // Sidebar takes 28 cols on a standard 80-col terminal, up to 34 at wider widths.
+        let sidebar_width: u16 = if cols >= 100 { 34 } else { 28 };
+        let main_width = cols - sidebar_width - 1; // 1 for the divider column
+        let divider_col = main_width;
+        let sidebar_col = main_width + 1;
+        // Reserve 2 rows at the bottom: input row + ribbon row.
+        let ribbon_row = rows - 1;
+        let input_row = rows - 2;
+        let content_rows = rows - 2;
+        Self {
+            cols,
+            rows,
+            main_width,
+            divider_col,
+            sidebar_col,
+            sidebar_width,
+            content_rows,
+            input_row,
+            ribbon_row,
+        }
+    }
+}
+
+/// Write `text` at terminal position `(col, row)`, padded or truncated to exactly `width`
+/// visible characters. Padding with spaces clears stale content from a previous frame.
+fn write_at(
+    stdout: &mut impl Write,
+    col: u16,
+    row: u16,
+    text: &str,
+    width: usize,
+) -> io::Result<()> {
+    queue!(stdout, MoveTo(col, row))?;
+    // Count chars (not bytes) so multi-byte Unicode is handled correctly.
+    let char_count = text.chars().count();
+    if char_count >= width {
+        let truncated: String = text.chars().take(width).collect();
+        write!(stdout, "{truncated}")
+    } else {
+        write!(stdout, "{text}{:width$}", "", width = width - char_count)
+    }
+}
+
+/// Render the vertical divider `│` for all content + input rows.
+fn render_vertical_divider(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+    for row in 0..layout.rows {
+        queue!(stdout, MoveTo(layout.divider_col, row))?;
+        write!(stdout, "│")?;
+    }
+    Ok(())
+}
+
+// ── OperatorSurface paned rendering ──────────────────────────────────────────
+
+impl OperatorSurface {
+    /// Render the operator surface into a multi-pane layout.
+    ///
+    /// The caller is responsible for issuing a full `Clear(ClearType::All)` on the first frame
+    /// and on resize. Subsequent frames overwrite each cell with padded strings, avoiding flicker.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        render_vertical_divider(stdout, layout)?;
+        self.render_operator_main_pane(stdout, layout)?;
+        self.render_operator_sidebar(stdout, layout)?;
+        self.render_operator_input_row(stdout, layout)?;
+        render_keybinding_ribbon_operator(stdout, layout, self.sidebar_focused)?;
+        Ok(())
+    }
+
+    fn render_operator_main_pane(
+        &self,
+        stdout: &mut impl Write,
+        layout: &PanedLayout,
+    ) -> io::Result<()> {
+        let w = layout.main_width as usize;
+
+        // Build content lines for the main pane.
+        let mut lines: Vec<String> = Vec::new();
+
+        // Header box
+        let inner = w.saturating_sub(2);
+        lines.push(format!("┌{}┐", "─".repeat(w.saturating_sub(2))));
+        lines.push(format!(
+            "│ {:<width$}│",
+            format!("Feature: {}", self.feature_id),
+            width = inner.saturating_sub(1)
+        ));
+        lines.push(format!(
+            "│ {:<width$}│",
+            format!(
+                "Branch: {}   PR: #{}",
+                self.branch, self.pull_request_number
+            ),
+            width = inner.saturating_sub(1)
+        ));
+        lines.push(format!("└{}┘", "─".repeat(w.saturating_sub(2))));
+        lines.push(String::new());
+
+        // Workflow pipeline
+        lines.push(render_workflow_pipeline(&self.workflow));
+        lines.push(String::new());
+
+        // Status row
+        let blocking_str = if self.blocking_gate_ids.is_empty() {
+            "none".to_string()
+        } else {
+            self.blocking_gate_ids.join(", ")
+        };
+        lines.push(format!(
+            "  FU: {}  Blocking: {}  {}",
+            self.queued_follow_ups.len(),
+            blocking_str,
+            self.last_event,
+        ));
+
+        // GitHub
+        if let Some(github) = &self.github {
+            lines.push(String::new());
+            lines.push(format!(
+                "  GitHub  PR: {}  Review: {}  Checks: {}  Merge: {}",
+                github.pr_state, github.review, github.checks, github.mergeability
+            ));
+        } else if let Some(error) = &self.github_error {
+            lines.push(String::new());
+            lines.push(format!("  GitHub  error: {error}"));
+        }
+
+        // Gate groups
+        if !self.gate_groups.is_empty() {
+            lines.push(String::new());
+            lines.push("  Gates".to_string());
+            lines.push(format!("  {}", "─".repeat(w.saturating_sub(4))));
+            for group in &self.gate_groups {
+                let group_icon = match group.group_status.as_str() {
+                    "passing" => "✓",
+                    "blocked" => "✗",
+                    "manual" => "◆",
+                    _ => "○",
+                };
+                lines.push(format!("  {} {}:", group_icon, group.label));
+                for gate in &group.gates {
+                    let gate_icon = match gate.status.as_str() {
+                        "passing" => "  ✓",
+                        "failing" => "  ✗",
+                        "manual" => "  ◆",
+                        _ => "  ○",
+                    };
+                    let blocking_marker = if gate.is_blocking { " ⚠" } else { "" };
+                    lines.push(format!(
+                        "  {}  {}{}",
+                        gate_icon, gate.label, blocking_marker
+                    ));
+                }
+            }
+        }
+
+        // Active sessions
+        lines.push(String::new());
+        lines.push("  Sessions".to_string());
+        lines.push(format!("  {}", "─".repeat(w.saturating_sub(4))));
+        if self.sessions.is_empty() {
+            lines.push("  No active sessions".to_string());
+        } else {
+            for session in &self.sessions {
+                let status_icon = match session.status.as_str() {
+                    "running" => "▶",
+                    "completed" => "✓",
+                    "failed" => "✗",
+                    "aborted" => "⊗",
+                    _ => "○",
+                };
+                lines.push(format!(
+                    "  {} {} ({}) [{}]",
+                    status_icon, session.role, session.session_id, session.status
+                ));
+                for output in &session.output {
+                    lines.push(format!("    {}", output));
+                }
+            }
+        }
+
+        // Render with scroll offset
+        let available_rows = layout.content_rows as usize;
+        let start = self.scroll_offset.min(lines.len().saturating_sub(1));
+        for (i, line) in lines.iter().skip(start).enumerate() {
+            if i >= available_rows {
+                break;
+            }
+            write_at(stdout, 0, i as u16, line, w)?;
+        }
+        // Clear any rows below content
+        let rendered = lines.len().saturating_sub(start).min(available_rows);
+        for i in rendered..available_rows {
+            write_at(stdout, 0, i as u16, "", w)?;
+        }
+        Ok(())
+    }
+
+    fn render_operator_sidebar(
+        &self,
+        stdout: &mut impl Write,
+        layout: &PanedLayout,
+    ) -> io::Result<()> {
+        let col = layout.sidebar_col;
+        let w = layout.sidebar_width as usize;
+        let content_rows = layout.content_rows as usize;
+
+        let focus_indicator = if self.sidebar_focused { "●" } else { " " };
+        let header = format!(
+            "┌─{focus_indicator} Chat {}",
+            "─".repeat(w.saturating_sub(8))
+        );
+        write_at(stdout, col, 0, &format!("{header}┐"), w)?;
+
+        let mut row: usize = 1;
+
+        // Pending clarifications section
+        if !self.pending_clarifications.is_empty() {
+            if row < content_rows.saturating_sub(1) {
+                write_at(stdout, col, row as u16, "│ Clarifications:", w)?;
+                row += 1;
+            }
+            for clarification in &self.pending_clarifications {
+                if row >= content_rows.saturating_sub(1) {
+                    break;
+                }
+                let q = format!("│ ? {}", clarification.question);
+                write_at(stdout, col, row as u16, &q, w)?;
+                row += 1;
+            }
+            if row < content_rows.saturating_sub(1) {
+                write_at(stdout, col, row as u16, "│", w)?;
+                row += 1;
+            }
+        }
+
+        // Queued follow-ups section
+        if !self.queued_follow_ups.is_empty() {
+            if row < content_rows.saturating_sub(1) {
+                write_at(stdout, col, row as u16, "│ Follow-ups:", w)?;
+                row += 1;
+            }
+            for follow_up in &self.queued_follow_ups {
+                if row >= content_rows.saturating_sub(1) {
+                    break;
+                }
+                let msg = format!("│ > {}", follow_up);
+                write_at(stdout, col, row as u16, &msg, w)?;
+                row += 1;
+            }
+        }
+
+        // Fill empty rows
+        while row < content_rows.saturating_sub(1) {
+            write_at(stdout, col, row as u16, "│", w)?;
+            row += 1;
+        }
+
+        // Footer
+        if row < content_rows {
+            write_at(
+                stdout,
+                col,
+                row as u16,
+                &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+                w,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    fn render_operator_input_row(
+        &self,
+        stdout: &mut impl Write,
+        layout: &PanedLayout,
+    ) -> io::Result<()> {
+        let prompt = if !self.pending_clarifications.is_empty() {
+            format!("  Answer: {}▌", self.input.as_str())
+        } else {
+            format!("  Input:  {}▌", self.input.as_str())
+        };
+        write_at(stdout, 0, layout.input_row, &prompt, layout.cols as usize)
+    }
+}
+
+fn render_keybinding_ribbon_operator(
+    stdout: &mut impl Write,
+    layout: &PanedLayout,
+    sidebar_focused: bool,
+) -> io::Result<()> {
+    let focus_hint = if sidebar_focused {
+        "[Tab] Main"
+    } else {
+        "[Tab] Chat"
+    };
+    let ribbon = format!(" [Ctrl+C] Interrupt  [Esc] Quit  {focus_hint}  [↑/↓] Scroll");
+    write_at(stdout, 0, layout.ribbon_row, &ribbon, layout.cols as usize)
+}
+
+// ── DoctorSurface paned rendering ────────────────────────────────────────────
+
+impl DoctorSurface {
+    /// Render the doctor surface into a multi-pane layout.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        render_vertical_divider(stdout, layout)?;
+        self.render_doctor_check_list(stdout, layout)?;
+        self.render_doctor_detail_pane(stdout, layout)?;
+        render_keybinding_ribbon_doctor(stdout, layout)?;
+        Ok(())
+    }
+
+    fn render_doctor_check_list(
+        &self,
+        stdout: &mut impl Write,
+        layout: &PanedLayout,
+    ) -> io::Result<()> {
+        let w = layout.main_width as usize;
+        let passing = self
+            .checks
+            .iter()
+            .filter(|c| matches!(c.status, DoctorStatus::Passing))
+            .count();
+        let total = self.checks.len();
+
+        write_at(
+            stdout,
+            0,
+            0,
+            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(
+            stdout,
+            0,
+            1,
+            &format!("│ Calypso Doctor  {passing}/{total} passing"),
+            w,
+        )?;
+        write_at(
+            stdout,
+            0,
+            2,
+            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 3, "", w)?;
+
+        for (index, check) in self.checks.iter().enumerate() {
+            let row = 4 + index as u16;
+            if row >= layout.content_rows {
+                break;
+            }
+            let pointer = if index == self.selected { "▶" } else { " " };
+            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
+                "✓"
+            } else {
+                "✗"
+            };
+            let fix_tag = if check.has_auto_fix {
+                "  [auto-fix]"
+            } else {
+                ""
+            };
+            write_at(
+                stdout,
+                0,
+                row,
+                &format!("  {pointer} {status_icon}  {}{fix_tag}", check.id),
+                w,
+            )?;
+        }
+
+        // Clear remaining rows
+        let first_empty = 4 + self.checks.len() as u16;
+        for row in first_empty..layout.content_rows {
+            write_at(stdout, 0, row, "", w)?;
+        }
+
+        Ok(())
+    }
+
+    fn render_doctor_detail_pane(
+        &self,
+        stdout: &mut impl Write,
+        layout: &PanedLayout,
+    ) -> io::Result<()> {
+        let col = layout.sidebar_col;
+        let w = layout.sidebar_width as usize;
+        let content_rows = layout.content_rows as usize;
+
+        write_at(
+            stdout,
+            col,
+            0,
+            &format!("┌─ Detail {}", "─".repeat(w.saturating_sub(10))),
+            w,
+        )?;
+
+        let mut row: usize = 1;
+
+        if let Some(check) = self.checks.get(self.selected) {
+            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
+                "✓"
+            } else {
+                "✗"
+            };
+            write_at(
+                stdout,
+                col,
+                row as u16,
+                &format!("│ {status_icon}  {}", check.id),
+                w,
+            )?;
+            row += 1;
+
+            if let Some(detail) = &check.detail {
+                write_at(stdout, col, row as u16, "│", w)?;
+                row += 1;
+                if row < content_rows.saturating_sub(1) {
+                    write_at(stdout, col, row as u16, "│ Detail:", w)?;
+                    row += 1;
+                }
+                for line in detail
+                    .chars()
+                    .collect::<Vec<_>>()
+                    .chunks(w.saturating_sub(4))
+                {
+                    if row >= content_rows.saturating_sub(1) {
+                        break;
+                    }
+                    let s: String = line.iter().collect();
+                    write_at(stdout, col, row as u16, &format!("│   {s}"), w)?;
+                    row += 1;
+                }
+            }
+
+            if let Some(remediation) = &check.remediation {
+                write_at(stdout, col, row as u16, "│", w)?;
+                row += 1;
+                if row < content_rows.saturating_sub(1) {
+                    write_at(stdout, col, row as u16, "│ Fix:", w)?;
+                    row += 1;
+                }
+                for line in remediation
+                    .chars()
+                    .collect::<Vec<_>>()
+                    .chunks(w.saturating_sub(4))
+                {
+                    if row >= content_rows.saturating_sub(1) {
+                        break;
+                    }
+                    let s: String = line.iter().collect();
+                    write_at(stdout, col, row as u16, &format!("│   {s}"), w)?;
+                    row += 1;
+                }
+            }
+
+            if let Some(output) = &self.fix_output
+                && row < content_rows.saturating_sub(2)
+            {
+                write_at(stdout, col, row as u16, "│", w)?;
+                row += 1;
+                write_at(stdout, col, row as u16, "│ Fix output:", w)?;
+                row += 1;
+                write_at(stdout, col, row as u16, &format!("│   {output}"), w)?;
+                row += 1;
+            }
+        }
+
+        // Fill empty rows
+        while row < content_rows.saturating_sub(1) {
+            write_at(stdout, col, row as u16, "│", w)?;
+            row += 1;
+        }
+
+        // Footer
+        if row < content_rows {
+            write_at(
+                stdout,
+                col,
+                row as u16,
+                &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+                w,
+            )?;
+        }
+
+        Ok(())
+    }
+}
+
+fn render_keybinding_ribbon_doctor(
+    stdout: &mut impl Write,
+    layout: &PanedLayout,
+) -> io::Result<()> {
+    let ribbon = " [↑/↓] Select  [f] Apply fix  [r] Refresh  [q/Esc] Quit";
+    write_at(stdout, 0, layout.ribbon_row, ribbon, layout.cols as usize)
+}
+
 // ── Doctor TUI surface ────────────────────────────────────────────────────────
 
 use crate::app::resolve_repo_root;
@@ -661,48 +1327,71 @@ impl DoctorSurface {
 
     /// Render the surface to a plain-text string.
     pub fn render(&self) -> String {
+        let passing = self
+            .checks
+            .iter()
+            .filter(|c| matches!(c.status, DoctorStatus::Passing))
+            .count();
+        let total = self.checks.len();
+
         let mut lines = vec![
-            "Calypso Doctor".to_string(),
-            format!("Checks: {}  Selected: {}", self.checks.len(), self.selected),
+            "┌─ Calypso Doctor ───────────────────────────────────────────────────────────┐"
+                .to_string(),
+            format!(
+                "│ Environment diagnostics  {passing}/{total} passing{:<48} │",
+                ""
+            ),
+            "└────────────────────────────────────────────────────────────────────────────┘"
+                .to_string(),
             String::new(),
         ];
 
         for (index, check) in self.checks.iter().enumerate() {
-            let pointer = if index == self.selected { ">" } else { " " };
-            let status = if matches!(check.status, DoctorStatus::Passing) {
-                "PASS"
+            let pointer = if index == self.selected { "▶" } else { " " };
+            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
+                "✓"
             } else {
-                "FAIL"
+                "✗"
             };
-            let auto_fix_marker = if check.has_auto_fix {
-                " [auto-fix]"
+            let fix_tag = if check.has_auto_fix {
+                "  [auto-fix]"
             } else {
                 ""
             };
-            lines.push(format!(
-                "{pointer} [{status}] {}{auto_fix_marker}",
-                check.id
-            ));
+            lines.push(format!("  {pointer} {status_icon}  {}{fix_tag}", check.id));
         }
 
         if let Some(selected_check) = self.checks.get(self.selected) {
             lines.push(String::new());
-            lines.push(format!("Selected: {}", selected_check.id));
+            lines.push(
+                "  ─────────────────────────────────────────────────────────────────────────"
+                    .to_string(),
+            );
+            let status_icon = if matches!(selected_check.status, DoctorStatus::Passing) {
+                "✓"
+            } else {
+                "✗"
+            };
+            lines.push(format!("  Selected: {} {status_icon}", selected_check.id));
             if let Some(detail) = &selected_check.detail {
-                lines.push(format!("  Detail: {detail}"));
+                lines.push(format!("     Detail: {detail}"));
             }
             if let Some(remediation) = &selected_check.remediation {
-                lines.push(format!("  Fix: {remediation}"));
+                lines.push(format!("     Fix: {remediation}"));
             }
         }
 
         if let Some(output) = &self.fix_output {
             lines.push(String::new());
-            lines.push(format!("Fix output: {output}"));
+            lines.push(format!("  Fix output: {output}"));
         }
 
         lines.push(String::new());
-        lines.push("  [r] Refresh  [f] Apply fix  [q/Esc] Quit".to_string());
+        lines.push(
+            "  ─────────────────────────────────────────────────────────────────────────"
+                .to_string(),
+        );
+        lines.push("  [↑/↓] Select  [f] Apply fix  [r] Refresh  [q/Esc] Quit".to_string());
 
         lines.join("\n")
     }
@@ -838,19 +1527,38 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, Hide)?;
 
+    // Initialise paned layout from terminal size; fall back to flat render if unavailable.
+    let mut layout: Option<PanedLayout> = crossterm::terminal::size()
+        .ok()
+        .map(|(cols, rows)| PanedLayout::from_size(TerminalSize { cols, rows }));
+    queue!(stdout, Clear(ClearType::All))?;
+
     let loop_result = loop {
-        queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-        write!(stdout, "{}", surface.render())?;
+        match &layout {
+            Some(l) => surface.render_paned(&mut stdout, l)?,
+            None => {
+                queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+                write!(stdout, "{}", surface.render())?;
+            }
+        }
         stdout.flush()?;
 
-        if crossterm::event::poll(Duration::from_millis(250))?
-            && let crossterm::event::Event::Key(key_event) = crossterm::event::read()?
-            && matches!(
-                surface.handle_key_event(key_event, cwd),
-                DoctorSurfaceEvent::Quit
-            )
-        {
-            break Ok(());
+        if crossterm::event::poll(Duration::from_millis(250))? {
+            match crossterm::event::read()? {
+                crossterm::event::Event::Resize(cols, rows) => {
+                    layout = Some(PanedLayout::from_size(TerminalSize { cols, rows }));
+                    queue!(stdout, Clear(ClearType::All))?;
+                }
+                crossterm::event::Event::Key(key_event) => {
+                    if matches!(
+                        surface.handle_key_event(key_event, cwd),
+                        DoctorSurfaceEvent::Quit
+                    ) {
+                        break Ok(());
+                    }
+                }
+                _ => {}
+            }
         }
     };
 
@@ -868,8 +1576,9 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     let mut surface = DoctorSurface::new(doctor_check_views_from_report(&report));
 
     let mut stdout = io::sink();
+    let mut layout: Option<PanedLayout> = None;
 
-    // Exercise a set of key events for coverage
+    // Exercise a set of events for coverage — resize first activates paned rendering.
     let events = vec![
         Some(crossterm::event::Event::Resize(80, 24)),
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Down))),
@@ -884,17 +1593,28 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     ];
 
     for event in events {
-        queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-        write!(stdout, "{}", surface.render())?;
+        match &layout {
+            Some(l) => surface.render_paned(&mut stdout, l)?,
+            None => {
+                queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
+                write!(stdout, "{}", surface.render())?;
+            }
+        }
         stdout.flush()?;
 
-        if let Some(crossterm::event::Event::Key(key_event)) = event {
-            if matches!(
-                surface.handle_key_event(key_event, cwd),
-                DoctorSurfaceEvent::Quit
-            ) {
-                break;
+        match event {
+            Some(crossterm::event::Event::Resize(cols, rows)) => {
+                layout = Some(PanedLayout::from_size(TerminalSize { cols, rows }));
             }
+            Some(crossterm::event::Event::Key(key_event)) => {
+                if matches!(
+                    surface.handle_key_event(key_event, cwd),
+                    DoctorSurfaceEvent::Quit
+                ) {
+                    break;
+                }
+            }
+            _ => {}
         }
     }
 

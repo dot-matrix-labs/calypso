@@ -7,12 +7,36 @@ use calypso_cli::state::{
     SessionOutputStream, WorkflowState,
 };
 
-fn temp_state_path() -> std::path::PathBuf {
-    let unique = SystemTime::now()
+fn unique_id() -> u128 {
+    SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("calypso-cli-status-{unique}.json"))
+        .as_nanos()
+}
+
+fn temp_state_path() -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("calypso-cli-status-{}.json", unique_id()))
+}
+
+/// Create an isolated temp directory that is NOT a git repository.
+fn temp_non_git_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("calypso-cli-test-{}", unique_id()));
+    std::fs::create_dir_all(&dir).expect("temp dir should be created");
+    dir
+}
+
+/// Create a temp project directory that has a `.calypso/state.json`.
+fn temp_project_dir_with_state(state: &RepositoryState) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("calypso-cli-project-{}", unique_id()));
+    let calypso_dir = dir.join(".calypso");
+    std::fs::create_dir_all(&calypso_dir).expect("project dir should be created");
+    let state_path = calypso_dir.join("state.json");
+    state.save_to_path(&state_path).expect("state should save");
+    dir
+}
+
+fn calypso() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_calypso-cli"))
 }
 
 fn sample_state() -> RepositoryState {
@@ -100,10 +124,10 @@ fn help_flag_exposes_version_information() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(stdout.contains("calypso-cli"));
-    assert!(stdout.contains("Version: "));
     assert!(stdout.contains("Git hash: "));
     assert!(stdout.contains("Usage:"));
-    assert!(stdout.contains("feature-start <feature-id> --worktree-base <path>"));
+    assert!(stdout.contains("--path"));
+    assert!(stdout.contains("feature-start <id> --worktree-base <path>"));
 }
 
 #[test]
@@ -158,7 +182,7 @@ fn status_command_renders_operator_surface_from_state_file() {
     assert!(output.status.success());
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("Calypso Operator Surface"));
+    assert!(stdout.contains("Calypso"));
     assert!(stdout.contains("Feature: feat-tui-surface"));
     assert!(stdout.contains("engineer (session_01) [waiting-for-human]"));
     assert!(stdout.contains("Waiting on operator guidance"));
@@ -214,4 +238,218 @@ fn status_command_reports_errors_outside_git_repository() {
     assert!(stderr.contains("status error: not inside a git repository"));
 
     std::fs::remove_dir_all(path).expect("temp dir should be removed");
+}
+
+// ── --path / -p flag routing ──────────────────────────────────────────────────
+
+#[test]
+fn path_flag_long_routes_doctor_to_specified_directory() {
+    // A non-git dir will make github-remote-configured and feature-binding-resolved fail.
+    // Crucially it must NOT make doctor itself fail to run (exit 0).
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .args(["--path"])
+        .arg(&dir)
+        .arg("doctor")
+        .output()
+        .expect("failed to run calypso-cli --path <dir> doctor");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(
+        output.status.success(),
+        "doctor should exit 0 even with failing checks"
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(
+        stdout.contains("gh-installed"),
+        "doctor output should list checks"
+    );
+    assert!(
+        stdout.contains("github-remote-configured"),
+        "routing used the supplied dir"
+    );
+}
+
+#[test]
+fn path_flag_short_routes_doctor_to_specified_directory() {
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .args(["-p"])
+        .arg(&dir)
+        .arg("doctor")
+        .output()
+        .expect("failed to run calypso-cli -p <dir> doctor");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(stdout.contains("gh-installed"));
+}
+
+#[test]
+fn path_flag_placed_after_subcommand_is_also_accepted() {
+    // extract_path_flag strips -p wherever it appears in the arg list.
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .arg("doctor")
+        .args(["-p"])
+        .arg(&dir)
+        .output()
+        .expect("failed to run calypso-cli doctor -p <dir>");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(stdout.contains("gh-installed"));
+}
+
+#[test]
+fn path_flag_routes_status_to_specified_directory() {
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .args(["--path"])
+        .arg(&dir)
+        .arg("status")
+        .output()
+        .expect("failed to run calypso-cli --path <dir> status");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    // Non-git dir → status exits 1 with a routing-confirming error
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
+    assert!(
+        stderr.contains("status error"),
+        "routing reached the status command handler"
+    );
+}
+
+#[test]
+fn path_flag_routes_state_show_to_specified_directory() {
+    let state = sample_state();
+    let dir = temp_project_dir_with_state(&state);
+
+    let output = calypso()
+        .args(["--path"])
+        .arg(&dir)
+        .arg("state")
+        .arg("show")
+        .output()
+        .expect("failed to run calypso-cli --path <dir> state show");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    // Output is the JSON state file — must contain the feature id we seeded
+    assert!(
+        stdout.contains("feat-tui-surface"),
+        "state show used the supplied directory"
+    );
+}
+
+// ── Routing: subcommands not yet covered ─────────────────────────────────────
+
+#[test]
+fn state_show_prints_json_for_current_directory() {
+    // Seed a state file under a temp dir and run state show from there.
+    let state = sample_state();
+    let dir = temp_project_dir_with_state(&state);
+
+    let output = calypso()
+        .args(["state", "show"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run calypso-cli state show");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(stdout.contains("feat-tui-surface"));
+    // Must be valid JSON
+    serde_json::from_str::<serde_json::Value>(&stdout)
+        .expect("state show output should be valid JSON");
+}
+
+#[test]
+fn state_show_fails_gracefully_when_no_state_file_exists() {
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .args(["state", "show"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run calypso-cli state show");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
+    assert!(stderr.contains("state show error"));
+}
+
+#[test]
+fn init_state_subcommand_exits_cleanly_when_no_init_state_exists() {
+    let dir = temp_non_git_dir();
+
+    let output = calypso()
+        .args(["init", "--state"])
+        .current_dir(&dir)
+        .output()
+        .expect("failed to run calypso-cli init --state");
+
+    std::fs::remove_dir_all(&dir).ok();
+
+    // No init state yet — should print a message and exit 0 (informational, not an error)
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(stdout.contains("No init state found") || stdout.contains("init"));
+}
+
+#[test]
+fn template_validate_succeeds_for_bundled_templates() {
+    // Run from the cli crate root where the embedded templates live
+    let output = calypso()
+        .args(["template", "validate"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to run calypso-cli template validate");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert_eq!(stdout.trim(), "OK");
+}
+
+#[test]
+fn doctor_fix_unknown_id_exits_nonzero_with_message() {
+    let output = calypso()
+        .args(["doctor", "--fix", "nonexistent-check-id"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to run calypso-cli doctor --fix");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
+    assert!(stderr.contains("nonexistent-check-id"));
+}
+
+#[test]
+fn unknown_command_prints_help_and_exits_zero() {
+    let output = calypso()
+        .arg("--this-flag-does-not-exist")
+        .output()
+        .expect("failed to run calypso-cli with unknown flag");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(stdout.contains("Usage:"));
+    assert!(stdout.contains("Commands:"));
 }
