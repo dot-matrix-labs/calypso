@@ -2,6 +2,7 @@ use calypso_cli::app::{run_doctor, run_status};
 use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::state::RepositoryState;
+use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
 use calypso_cli::{BuildInfo, render_help, render_version};
 
@@ -96,7 +97,31 @@ fn main() {
             let state_path = cwd.join(".calypso/repository-state.json");
             run_claude_session(&state_path.to_string_lossy(), role);
         }
+        [command, subcommand] if command == "template" && subcommand == "validate" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            run_template_validate(&cwd);
+        }
         _ => println!("{}", render_help(info)),
+    }
+}
+
+fn run_template_validate(cwd: &std::path::Path) {
+    match TemplateSet::load_from_directory(cwd) {
+        Ok(template_set) => {
+            let errors = template_set.validate_coherence();
+            if errors.is_empty() {
+                println!("OK");
+            } else {
+                for error in &errors {
+                    eprintln!("coherence error: {error}");
+                }
+                std::process::exit(1);
+            }
+        }
+        Err(error) => {
+            eprintln!("template error: {error}");
+            std::process::exit(1);
+        }
     }
 }
 
