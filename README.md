@@ -153,9 +153,8 @@ curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/i
 
 ## Documentation
 
-- [Calypso Blueprint](agent-context/blueprints/calypso-blueprint.md) — full architecture and process standard (TOC)
-- [UX Blueprint](agent-context/blueprints/ux-blueprint.md) — UX posture, agent UX, beauty as a gate condition
-- [Auth Blueprint](agent-context/blueprints/auth-blueprint.md) — agent auth, scopes, and security posture
-- [Data Blueprint](agent-context/blueprints/data-blueprint.md) — data architecture, encryption, and privacy
-- [Scaffold Task Entrypoint](agent-context/init/scaffold-task.md) — the agent's first action on a new project
-- [Agent Communication](agent-communication.md) — how to write documents in agent-context/ that agents interpret reliably
+- [CLI Build Instructions](cli/README.md) — building and developing the Calypso CLI
+- [Calypso Blueprint](calypso-blueprint/blueprints/calypso-blueprint.md) — full architecture and process standard
+- [Scaffold Task](calypso-blueprint/init/scaffold-task.md) — bootstrapping new Calypso projects
+- [Agent Communication](agent-communication.md) — how to write documents agents interpret reliably
+- See [calypso-blueprint/](calypso-blueprint/) for complete architecture, rules, and guidelines
