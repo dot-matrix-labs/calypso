@@ -1,7 +1,7 @@
 use calypso_cli::state::{
     DeploymentRecord, DeploymentState, DeploymentTransitionError, FeatureState, FeatureType,
-    PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError,
-    RepositoryIdentity, RepositoryState, SchedulingMeta, WorkflowState,
+    PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError, RepositoryIdentity,
+    RepositoryState, SchedulingMeta, WorkflowState,
 };
 
 // ---------------------------------------------------------------------------
