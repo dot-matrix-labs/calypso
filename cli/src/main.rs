@@ -25,19 +25,25 @@ fn build_info() -> BuildInfo<'static> {
 
 fn main() {
     let info = build_info();
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+
+    // Strip -p / --path <dir> from args before dispatching.
+    // This makes --path a global flag that works with every subcommand.
+    let (path_override, args) = extract_path_flag(&raw_args);
+    let cwd = path_override.unwrap_or_else(|| {
+        std::env::current_dir().expect("current directory should resolve")
+    });
 
     match args.as_slice() {
+        [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
         [flag] if flag == "-v" || flag == "--version" => println!("{}", render_version(info)),
         [command] if command == "doctor" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             println!("{}", run_doctor(&cwd));
         }
         [command, flag, check_id] if command == "doctor" && flag == "--fix" => {
-            run_doctor_fix(check_id);
+            run_doctor_fix(check_id, &cwd);
         }
         [command] if command == "status" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             match run_status(&cwd) {
                 Ok(output) => println!("{output}"),
                 Err(error) => {
@@ -53,19 +59,15 @@ fn main() {
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
         [command] if command == "init" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             run_calypso_init(&cwd, false);
         }
         [command, flag] if command == "init" && flag == "--reinit" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             run_calypso_init(&cwd, true);
         }
         [command, flag] if command == "init" && flag == "--state" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             run_init_state_show(&cwd);
         }
         [command, subcommand] if command == "state" && subcommand == "show" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             match RepositoryState::load_from_path(&state_path) {
                 Ok(state) => println!(
@@ -81,7 +83,6 @@ fn main() {
         [command, feature_id, flag, worktree_base]
             if command == "feature-start" && flag == "--worktree-base" =>
         {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let request = FeatureStartRequest {
                 feature_id: feature_id.to_string(),
                 worktree_base: std::path::PathBuf::from(worktree_base),
@@ -110,13 +111,11 @@ fn main() {
         }
         // calypso run <feature-id> --role <role>
         [command, _feature_id, role_flag, role] if command == "run" && role_flag == "--role" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso/repository-state.json");
             run_claude_session(&state_path.to_string_lossy(), role);
         }
-        // calypso watch — live TUI from current working directory state file
+        // calypso watch — live TUI from project directory state file
         [command] if command == "watch" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             run_watch(&state_path.to_string_lossy());
         }
@@ -125,10 +124,9 @@ fn main() {
             run_watch(path);
         }
         [command, subcommand] if command == "template" && subcommand == "validate" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             run_template_validate(&cwd);
         }
-        // calypso <path> — launch TUI for a specific project directory
+        // calypso <path> — positional project directory (kept for backward compatibility)
         [path] if looks_like_path(path) => {
             let project_dir = std::path::Path::new(path);
             let state_path = project_dir.join(".calypso").join("state.json");
@@ -140,7 +138,6 @@ fn main() {
         }
         // calypso --step — step mode: one step per Enter keypress
         [flag] if flag == "--step" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             if state_path.exists() {
                 run_state_machine_step(&state_path);
@@ -150,7 +147,6 @@ fn main() {
         }
         // calypso — no args: drive state machine if initialized, else show doctor TUI
         [] => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso").join("state.json");
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
@@ -160,6 +156,23 @@ fn main() {
         }
         _ => println!("{}", render_help(info)),
     }
+}
+
+/// Strip `-p`/`--path <dir>` from `args` and return the path (if present) plus the remaining args.
+fn extract_path_flag(args: &[String]) -> (Option<std::path::PathBuf>, Vec<String>) {
+    let mut remaining = Vec::new();
+    let mut path: Option<std::path::PathBuf> = None;
+    let mut i = 0;
+    while i < args.len() {
+        if (args[i] == "-p" || args[i] == "--path") && i + 1 < args.len() {
+            path = Some(std::path::PathBuf::from(&args[i + 1]));
+            i += 2;
+        } else {
+            remaining.push(args[i].clone());
+            i += 1;
+        }
+    }
+    (path, remaining)
 }
 
 fn run_calypso_init(cwd: &std::path::Path, allow_reinit: bool) {
@@ -195,9 +208,8 @@ fn looks_like_path(arg: &str) -> bool {
         || std::path::Path::new(arg).is_dir()
 }
 
-fn run_doctor_fix(check_id: &str) {
-    let cwd = std::env::current_dir().expect("current directory should resolve");
-    let repo_root = calypso_cli::app::resolve_repo_root(&cwd).unwrap_or_else(|| cwd.clone());
+fn run_doctor_fix(check_id: &str, cwd: &std::path::Path) {
+    let repo_root = calypso_cli::app::resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let report = collect_doctor_report(&calypso_cli::doctor::HostDoctorEnvironment, &repo_root);
 
     let check = report
@@ -435,7 +447,7 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::looks_like_path;
+    use super::{extract_path_flag, looks_like_path};
 
     #[test]
     fn looks_like_path_recognises_dot_relative() {
@@ -470,5 +482,49 @@ mod tests {
         assert!(looks_like_path(
             tmp.to_str().expect("temp dir should be valid utf-8")
         ));
+    }
+
+    #[test]
+    fn extract_path_flag_strips_short_flag() {
+        let args = s(&["-p", "/my/project", "doctor"]);
+        let (path, remaining) = extract_path_flag(&args);
+        assert_eq!(path, Some(std::path::PathBuf::from("/my/project")));
+        assert_eq!(remaining, s(&["doctor"]));
+    }
+
+    #[test]
+    fn extract_path_flag_strips_long_flag() {
+        let args = s(&["--path", "/my/project", "--step"]);
+        let (path, remaining) = extract_path_flag(&args);
+        assert_eq!(path, Some(std::path::PathBuf::from("/my/project")));
+        assert_eq!(remaining, s(&["--step"]));
+    }
+
+    #[test]
+    fn extract_path_flag_flag_at_end_is_ignored() {
+        // -p with no following argument — not consumed
+        let args = s(&["doctor", "-p"]);
+        let (path, remaining) = extract_path_flag(&args);
+        assert!(path.is_none());
+        assert_eq!(remaining, s(&["doctor", "-p"]));
+    }
+
+    #[test]
+    fn extract_path_flag_returns_none_when_absent() {
+        let args = s(&["doctor"]);
+        let (path, remaining) = extract_path_flag(&args);
+        assert!(path.is_none());
+        assert_eq!(remaining, s(&["doctor"]));
+    }
+
+    #[test]
+    fn extract_path_flag_works_with_empty_args() {
+        let (path, remaining) = extract_path_flag(&[]);
+        assert!(path.is_none());
+        assert!(remaining.is_empty());
+    }
+
+    fn s(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
     }
 }

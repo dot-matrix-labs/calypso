@@ -79,15 +79,15 @@ fn operator_surface_render_includes_feature_context_gates_and_sessions() {
 
     let rendered = surface.render();
 
-    assert!(rendered.contains("Calypso Operator Surface"));
+    assert!(rendered.contains("Calypso"));
     assert!(rendered.contains("Feature: feat-tui-surface"));
-    assert!(rendered.contains("Branch: feat/cli-tui-operator-surface"));
-    assert!(rendered.contains("Workflow: implementation"));
+    assert!(rendered.contains("feat/cli-tui-operator-surface"));
+    assert!(rendered.contains("●impl"));
     assert!(rendered.contains("Blocking: rust-quality-green"));
     assert!(rendered.contains("Specification"));
-    assert!(rendered.contains("[passing] PR canonicalized"));
+    assert!(rendered.contains("✓  PR canonicalized"));
     assert!(rendered.contains("Validation"));
-    assert!(rendered.contains("[failing] Rust quality green"));
+    assert!(rendered.contains("✗  Rust quality green"));
     assert!(rendered.contains("engineer (session_01) [running]"));
     assert!(rendered.contains("Inspecting branch state"));
     assert!(rendered.contains("Waiting on operator guidance"));
@@ -107,10 +107,10 @@ fn operator_surface_renders_normalized_github_evidence() {
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
     assert!(rendered.contains("GitHub"));
-    assert!(rendered.contains("PR state: ready-for-review"));
+    assert!(rendered.contains("PR: ready-for-review"));
     assert!(rendered.contains("Review: approved"));
     assert!(rendered.contains("Checks: passing"));
-    assert!(rendered.contains("Mergeability: mergeable"));
+    assert!(rendered.contains("Merge: mergeable"));
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn operator_surface_renders_github_error_when_snapshot_is_missing() {
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
     assert!(rendered.contains("GitHub"));
-    assert!(rendered.contains("Error: Run `gh auth login`."));
+    assert!(rendered.contains("error: Run `gh auth login`."));
 }
 
 #[test]
@@ -218,10 +218,10 @@ fn operator_surface_renders_draft_pr_state_label() {
 
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
-    assert!(rendered.contains("PR state: draft"));
+    assert!(rendered.contains("PR: draft"));
     assert!(rendered.contains("Review: review-required"));
     assert!(rendered.contains("Checks: failing"));
-    assert!(rendered.contains("Mergeability: conflicting"));
+    assert!(rendered.contains("Merge: conflicting"));
 }
 
 #[test]
@@ -238,7 +238,7 @@ fn operator_surface_renders_all_github_label_variants() {
     let rendered = OperatorSurface::from_feature_state(&feature).render();
     assert!(rendered.contains("Review: changes-requested"));
     assert!(rendered.contains("Checks: pending"));
-    assert!(rendered.contains("Mergeability: blocked"));
+    assert!(rendered.contains("Merge: blocked"));
 
     // Approved + Unknown + Manual checks
     feature.github_snapshot = Some(GithubPullRequestSnapshot {
@@ -249,7 +249,7 @@ fn operator_surface_renders_all_github_label_variants() {
     });
     let rendered = OperatorSurface::from_feature_state(&feature).render();
     assert!(rendered.contains("Checks: manual"));
-    assert!(rendered.contains("Mergeability: unknown"));
+    assert!(rendered.contains("Merge: unknown"));
 }
 
 #[test]
@@ -263,21 +263,21 @@ fn operator_surface_renders_empty_and_alternate_status_states() {
 
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
-    assert!(rendered.contains("Workflow: new"));
-    assert!(rendered.contains("[manual] PR canonicalized"));
-    assert!(rendered.contains("[pending] Rust quality green"));
+    assert!(rendered.contains("●new"));
+    assert!(rendered.contains("◆  PR canonicalized"));
+    assert!(rendered.contains("○  Rust quality green"));
     assert!(rendered.contains("engineer (session_01) [completed]"));
     assert!(rendered.contains("No streamed output yet."));
 
     feature.workflow_state = WorkflowState::ReleaseReady;
     feature.active_sessions.clear();
     let rendered = OperatorSurface::from_feature_state(&feature).render();
-    assert!(rendered.contains("Workflow: release-ready"));
+    assert!(rendered.contains("●rel"));
     assert!(rendered.contains("No active sessions"));
 
     feature.workflow_state = WorkflowState::Blocked;
     let rendered = OperatorSurface::from_feature_state(&feature).render();
-    assert!(rendered.contains("Workflow: blocked"));
+    assert!(rendered.contains("state: blocked"));
 
     feature.active_sessions = vec![AgentSession {
         role: "reviewer".to_string(),
@@ -302,9 +302,9 @@ fn operator_surface_renders_gate_group_rollup_status() {
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
     // Specification group: all passing
-    assert!(rendered.contains("Specification [passing]"));
+    assert!(rendered.contains("✓ Specification:"));
     // Validation group: has a failing gate — shows blocked
-    assert!(rendered.contains("Validation [blocked]"));
+    assert!(rendered.contains("✗ Validation:"));
 }
 
 #[test]
@@ -313,11 +313,11 @@ fn operator_surface_highlights_blocking_gates() {
     let rendered = OperatorSurface::from_feature_state(&feature).render();
 
     // Passing gate has no blocking marker
-    assert!(rendered.contains("[passing] PR canonicalized"));
-    assert!(!rendered.contains("[passing] PR canonicalized !"));
+    assert!(rendered.contains("✓  PR canonicalized"));
+    assert!(!rendered.contains("PR canonicalized ⚠"));
 
-    // Failing gate is marked as blocking with " !"
-    assert!(rendered.contains("[failing] Rust quality green !"));
+    // Failing gate is marked as blocking with ⚠
+    assert!(rendered.contains("✗  Rust quality green ⚠"));
 }
 
 #[test]
@@ -348,7 +348,7 @@ fn operator_surface_renders_pending_clarifications() {
     assert_eq!(surface.pending_clarification_count(), 1);
 
     // When there are pending clarifications the input prompt changes
-    assert!(rendered.contains("Clarification answer"));
+    assert!(rendered.contains("Answer (Enter to submit"));
 }
 
 #[test]
@@ -495,7 +495,7 @@ fn operator_surface_renders_without_crashing_on_empty_session() {
     let surface = OperatorSurface::from_feature_state(&feature);
     let rendered = surface.render();
 
-    assert!(rendered.contains("Calypso Operator Surface"));
+    assert!(rendered.contains("Calypso"));
     assert!(rendered.contains("No active sessions"));
     assert!(rendered.contains("Blocking: none"));
 }
@@ -508,19 +508,19 @@ fn operator_surface_renders_gate_group_status_all_variants() {
     feature.gate_groups[0].gates[0].status = GateStatus::Pending;
     feature.gate_groups[1].gates[0].status = GateStatus::Pending;
     let rendered = OperatorSurface::from_feature_state(&feature).render();
-    assert!(rendered.contains("Specification [pending]"));
+    assert!(rendered.contains("○ Specification:"));
 
     // Manual gate
     feature.gate_groups[0].gates[0].status = GateStatus::Manual;
     let rendered = OperatorSurface::from_feature_state(&feature).render();
-    assert!(rendered.contains("Specification [manual]"));
+    assert!(rendered.contains("◆ Specification:"));
 
     // All passing
     feature.gate_groups[0].gates[0].status = GateStatus::Passing;
     feature.gate_groups[1].gates[0].status = GateStatus::Passing;
     let rendered = OperatorSurface::from_feature_state(&feature).render();
-    assert!(rendered.contains("Specification [passing]"));
-    assert!(rendered.contains("Validation [passing]"));
+    assert!(rendered.contains("✓ Specification:"));
+    assert!(rendered.contains("✓ Validation:"));
 }
 
 // ── DoctorSurface tests ───────────────────────────────────────────────────────
@@ -563,9 +563,9 @@ fn doctor_surface_renders_check_list_with_pass_fail_indicators() {
     let rendered = surface.render();
 
     assert!(rendered.contains("Calypso Doctor"));
-    assert!(rendered.contains("[PASS] gh-installed"));
-    assert!(rendered.contains("[FAIL] gh-authenticated"));
-    assert!(rendered.contains("[FAIL] feature-binding-resolved"));
+    assert!(rendered.contains("✓  gh-installed"));
+    assert!(rendered.contains("✗  gh-authenticated"));
+    assert!(rendered.contains("✗  feature-binding-resolved"));
     assert!(rendered.contains("[auto-fix]"));
 }
 
@@ -574,7 +574,7 @@ fn doctor_surface_renders_selected_check_detail() {
     let surface = DoctorSurface::new(sample_doctor_checks());
     let rendered = surface.render();
 
-    // First item (index 0) is selected by default
+    // First item (index 0) is selected by default — shown in detail panel
     assert!(rendered.contains("Selected: gh-installed"));
 }
 
@@ -649,7 +649,7 @@ fn doctor_surface_renders_selected_check_detail_after_navigation() {
     let rendered = surface.render();
     assert!(rendered.contains("Selected: feature-binding-resolved"));
     assert!(rendered.contains("Detail: branch not mapped to pull request"));
-    assert!(rendered.contains("Fix: Run calypso init"));
+    assert!(rendered.contains("Fix: Run calypso init to initialize the repository"));
 }
 
 #[test]
