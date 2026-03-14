@@ -2,39 +2,41 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::state::{BuiltinEvidence, PullRequestRef};
+use crate::state::{BuiltinEvidence, EvidenceStatus, PullRequestRef};
+
+pub use crate::state::{GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GithubCheckId {
     PullRequestExists,
-    PullRequestMerged,
+    PullRequestReadyForReview,
     PullRequestChecksGreen,
+    PullRequestReviewApproved,
+    PullRequestMergeable,
 }
 
 impl GithubCheckId {
     fn builtin_key(self) -> &'static str {
         match self {
             GithubCheckId::PullRequestExists => "builtin.github.pr_exists",
-            GithubCheckId::PullRequestMerged => "builtin.github.pr_merged",
+            GithubCheckId::PullRequestReadyForReview => "builtin.github.pr_ready_for_review",
             GithubCheckId::PullRequestChecksGreen => "builtin.github.pr_checks_green",
+            GithubCheckId::PullRequestReviewApproved => "builtin.github.pr_review_approved",
+            GithubCheckId::PullRequestMergeable => "builtin.github.pr_mergeable",
         }
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GithubStatus {
-    Passing,
-    Failing,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubCheck {
     pub id: GithubCheckId,
-    pub status: GithubStatus,
+    pub status: EvidenceStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GithubReport {
+    pub snapshot: Option<GithubPullRequestSnapshot>,
+    pub error: Option<String>,
     pub checks: Vec<GithubCheck>,
 }
 
@@ -43,41 +45,27 @@ impl GithubReport {
         self.checks
             .iter()
             .fold(BuiltinEvidence::new(), |evidence, check| {
-                evidence.with_result(
-                    check.id.builtin_key(),
-                    check.status == GithubStatus::Passing,
-                )
+                evidence.with_status(check.id.builtin_key(), check.status)
             })
     }
 }
 
 pub trait GithubEnvironment {
-    fn pr_exists(&self, pull_request: &PullRequestRef) -> bool;
-    fn pr_merged(&self, pull_request: &PullRequestRef) -> bool;
-    fn checks_green(&self, pull_request: &PullRequestRef) -> bool;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PullRequestStatus {
-    pub exists: bool,
-    pub merged: bool,
-    pub checks_green: bool,
+    fn pull_request_snapshot(
+        &self,
+        pull_request: &PullRequestRef,
+    ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HostGithubEnvironment;
 
 impl GithubEnvironment for HostGithubEnvironment {
-    fn pr_exists(&self, pull_request: &PullRequestRef) -> bool {
-        fetch_pull_request_status(pull_request).is_some()
-    }
-
-    fn pr_merged(&self, pull_request: &PullRequestRef) -> bool {
-        fetch_pull_request_status(pull_request).is_some_and(|status| status.merged)
-    }
-
-    fn checks_green(&self, pull_request: &PullRequestRef) -> bool {
-        fetch_pull_request_status(pull_request).is_some_and(|status| status.checks_green)
+    fn pull_request_snapshot(
+        &self,
+        pull_request: &PullRequestRef,
+    ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+        fetch_pull_request_snapshot(pull_request)
     }
 }
 
@@ -85,85 +73,230 @@ pub fn collect_github_report(
     environment: &impl GithubEnvironment,
     pull_request: &PullRequestRef,
 ) -> GithubReport {
+    let (snapshot, error) = match environment.pull_request_snapshot(pull_request) {
+        Ok(snapshot) => (Some(snapshot), None),
+        Err(error) => (None, Some(error.to_string())),
+    };
     GithubReport {
-        checks: vec![
+        snapshot: snapshot.clone(),
+        error,
+        checks: checks_from_snapshot(snapshot.as_ref()),
+    }
+}
+
+fn checks_from_snapshot(snapshot: Option<&GithubPullRequestSnapshot>) -> Vec<GithubCheck> {
+    let mut checks = vec![GithubCheck {
+        id: GithubCheckId::PullRequestExists,
+        status: if snapshot.is_some() {
+            EvidenceStatus::Passing
+        } else {
+            EvidenceStatus::Failing
+        },
+    }];
+
+    if let Some(snapshot) = snapshot {
+        checks.extend([
             GithubCheck {
-                id: GithubCheckId::PullRequestExists,
-                status: status_from_bool(environment.pr_exists(pull_request)),
-            },
-            GithubCheck {
-                id: GithubCheckId::PullRequestMerged,
-                status: status_from_bool(environment.pr_merged(pull_request)),
+                id: GithubCheckId::PullRequestReadyForReview,
+                status: if snapshot.is_draft {
+                    EvidenceStatus::Failing
+                } else {
+                    EvidenceStatus::Passing
+                },
             },
             GithubCheck {
                 id: GithubCheckId::PullRequestChecksGreen,
-                status: status_from_bool(environment.checks_green(pull_request)),
+                status: snapshot.checks,
             },
-        ],
+            GithubCheck {
+                id: GithubCheckId::PullRequestReviewApproved,
+                status: review_status_to_evidence(snapshot.review_status.clone()),
+            },
+            GithubCheck {
+                id: GithubCheckId::PullRequestMergeable,
+                status: mergeability_to_evidence(snapshot.mergeability.clone()),
+            },
+        ]);
+    }
+
+    checks
+}
+
+fn review_status_to_evidence(review_status: GithubReviewStatus) -> EvidenceStatus {
+    match review_status {
+        GithubReviewStatus::Approved => EvidenceStatus::Passing,
+        GithubReviewStatus::ReviewRequired => EvidenceStatus::Manual,
+        GithubReviewStatus::ChangesRequested => EvidenceStatus::Failing,
     }
 }
 
-fn status_from_bool(passing: bool) -> GithubStatus {
-    if passing {
-        GithubStatus::Passing
-    } else {
-        GithubStatus::Failing
+fn mergeability_to_evidence(mergeability: GithubMergeability) -> EvidenceStatus {
+    match mergeability {
+        GithubMergeability::Mergeable => EvidenceStatus::Passing,
+        GithubMergeability::Conflicting | GithubMergeability::Blocked => EvidenceStatus::Failing,
+        GithubMergeability::Unknown => EvidenceStatus::Pending,
     }
 }
 
-pub fn parse_pull_request_view_json(json: &str) -> Result<PullRequestStatus, serde_json::Error> {
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct PrView {
-        merged_at: Option<String>,
-        state: String,
-        #[serde(default)]
-        status_check_rollup: Vec<CheckRollup>,
+#[derive(Debug)]
+pub enum GithubSnapshotError {
+    Json(serde_json::Error),
+    MissingField(&'static str),
+    UnsupportedValue { field: &'static str, value: String },
+}
+
+impl std::fmt::Display for GithubSnapshotError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GithubSnapshotError::Json(error) => write!(f, "invalid GitHub JSON: {error}"),
+            GithubSnapshotError::MissingField(message) => write!(f, "{message}"),
+            GithubSnapshotError::UnsupportedValue { field, value } => {
+                write!(f, "unsupported GitHub value for {field}: {value}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for GithubSnapshotError {}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrView {
+    state: String,
+    is_draft: bool,
+    review_decision: Option<String>,
+    merge_state_status: String,
+    status_check_rollup: Vec<CheckRollup>,
+}
+
+#[derive(Deserialize)]
+struct CheckRollup {
+    status: Option<String>,
+    conclusion: Option<String>,
+}
+
+pub fn parse_pull_request_view_json(
+    json: &str,
+) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+    let view: PrView = serde_json::from_str(json).map_err(GithubSnapshotError::Json)?;
+    if view.state != "OPEN" && view.state != "MERGED" {
+        return Err(GithubSnapshotError::UnsupportedValue {
+            field: "state",
+            value: view.state,
+        });
     }
 
-    #[derive(Deserialize, Default)]
-    struct CheckRollup {
-        status: Option<String>,
-        conclusion: Option<String>,
-    }
-
-    let view: PrView = serde_json::from_str(json)?;
-    let checks_green = view.status_check_rollup.iter().all(|check| {
-        matches!(check.status.as_deref(), None | Some("COMPLETED"))
-            && matches!(
-                check.conclusion.as_deref(),
-                None | Some("SUCCESS") | Some("NEUTRAL") | Some("SKIPPED")
-            )
-    });
-
-    Ok(PullRequestStatus {
-        exists: true,
-        merged: view.state == "MERGED" || view.merged_at.is_some(),
-        checks_green,
+    Ok(GithubPullRequestSnapshot {
+        is_draft: view.is_draft,
+        review_status: parse_review_status(view.review_decision.as_deref())?,
+        checks: parse_checks_status(&view.status_check_rollup)?,
+        mergeability: parse_mergeability(view.merge_state_status.as_str())?,
     })
 }
 
-fn fetch_pull_request_status(pull_request: &PullRequestRef) -> Option<PullRequestStatus> {
+fn parse_review_status(
+    review_decision: Option<&str>,
+) -> Result<GithubReviewStatus, GithubSnapshotError> {
+    match review_decision {
+        Some("APPROVED") => Ok(GithubReviewStatus::Approved),
+        Some("REVIEW_REQUIRED") | None => Ok(GithubReviewStatus::ReviewRequired),
+        Some("CHANGES_REQUESTED") => Ok(GithubReviewStatus::ChangesRequested),
+        Some(value) => Err(GithubSnapshotError::UnsupportedValue {
+            field: "reviewDecision",
+            value: value.to_string(),
+        }),
+    }
+}
+
+fn parse_checks_status(checks: &[CheckRollup]) -> Result<EvidenceStatus, GithubSnapshotError> {
+    if checks.is_empty() {
+        return Ok(EvidenceStatus::Pending);
+    }
+
+    let mut saw_pending = false;
+    for check in checks {
+        let status = check
+            .status
+            .as_deref()
+            .ok_or(GithubSnapshotError::MissingField(
+                "statusCheckRollup entry is missing status",
+            ))?;
+
+        match status {
+            "QUEUED" | "IN_PROGRESS" | "PENDING" | "WAITING" | "REQUESTED" => {
+                saw_pending = true;
+            }
+            "COMPLETED" => {
+                let conclusion =
+                    check
+                        .conclusion
+                        .as_deref()
+                        .ok_or(GithubSnapshotError::MissingField(
+                            "statusCheckRollup entry is missing conclusion",
+                        ))?;
+
+                if !matches!(conclusion, "SUCCESS" | "NEUTRAL" | "SKIPPED") {
+                    return Ok(EvidenceStatus::Failing);
+                }
+            }
+            value => {
+                return Err(GithubSnapshotError::UnsupportedValue {
+                    field: "statusCheckRollup.status",
+                    value: value.to_string(),
+                });
+            }
+        }
+    }
+
+    if saw_pending {
+        Ok(EvidenceStatus::Pending)
+    } else {
+        Ok(EvidenceStatus::Passing)
+    }
+}
+
+fn parse_mergeability(value: &str) -> Result<GithubMergeability, GithubSnapshotError> {
+    match value {
+        "CLEAN" | "HAS_HOOKS" | "UNSTABLE" => Ok(GithubMergeability::Mergeable),
+        "DIRTY" => Ok(GithubMergeability::Conflicting),
+        "BLOCKED" | "BEHIND" | "DRAFT" => Ok(GithubMergeability::Blocked),
+        "UNKNOWN" => Ok(GithubMergeability::Unknown),
+        other => Err(GithubSnapshotError::UnsupportedValue {
+            field: "mergeStateStatus",
+            value: other.to_string(),
+        }),
+    }
+}
+
+fn fetch_pull_request_snapshot(
+    pull_request: &PullRequestRef,
+) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
     let mut command = Command::new("gh");
     command.args([
         "pr",
         "view",
         &pull_request.number.to_string(),
         "--json",
-        "state,mergedAt,statusCheckRollup",
+        "state,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup",
     ]);
 
-    fetch_pull_request_status_with_command(&mut command)
+    fetch_pull_request_snapshot_with_command(&mut command)
 }
 
-fn fetch_pull_request_status_with_command(command: &mut Command) -> Option<PullRequestStatus> {
-    let output = command.output().ok()?;
+fn fetch_pull_request_snapshot_with_command(
+    command: &mut Command,
+) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+    let output = command
+        .output()
+        .map_err(|_| GithubSnapshotError::MissingField("gh command failed to spawn"))?;
 
     if !output.status.success() {
-        return None;
+        return Err(GithubSnapshotError::MissingField(
+            "gh command returned a non-zero exit status",
+        ));
     }
 
-    parse_pull_request_view_json(&String::from_utf8_lossy(&output.stdout)).ok()
+    parse_pull_request_view_json(&String::from_utf8_lossy(&output.stdout))
 }
 
 #[cfg(test)]
@@ -223,18 +356,28 @@ mod tests {
     }
 
     #[test]
-    fn fetch_pull_request_status_returns_none_for_failed_gh_command() {
+    fn fetch_pull_request_status_returns_error_for_failed_gh_command() {
         let mut command = Command::new("/bin/sh");
         command.args(["-c", "exit 1"]);
 
-        assert_eq!(fetch_pull_request_status_with_command(&mut command), None);
+        assert!(
+            fetch_pull_request_snapshot_with_command(&mut command)
+                .expect_err("failed command should return an error")
+                .to_string()
+                .contains("non-zero exit status")
+        );
     }
 
     #[test]
-    fn fetch_pull_request_status_returns_none_when_command_cannot_spawn() {
+    fn fetch_pull_request_status_returns_error_when_command_cannot_spawn() {
         let mut command = Command::new("/definitely/missing-binary");
 
-        assert_eq!(fetch_pull_request_status_with_command(&mut command), None);
+        assert!(
+            fetch_pull_request_snapshot_with_command(&mut command)
+                .expect_err("missing command should return an error")
+                .to_string()
+                .contains("failed to spawn")
+        );
     }
 
     #[test]
@@ -247,31 +390,32 @@ mod tests {
         let mut command = Command::new("/bin/sh");
         command.args([
             "-c",
-            "printf '{\"state\":\"MERGED\",\"mergedAt\":\"2026-03-13T00:00:00Z\",\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}'",
+            "printf '{\"state\":\"OPEN\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[{\"status\":\"COMPLETED\",\"conclusion\":\"SUCCESS\"}]}'",
         ]);
 
         let status =
-            fetch_pull_request_status_with_command(&mut command).expect("status should parse");
+            fetch_pull_request_snapshot_with_command(&mut command).expect("status should parse");
 
-        assert!(status.exists);
-        assert!(status.merged);
-        assert!(status.checks_green);
+        assert!(!status.is_draft);
+        assert_eq!(status.review_status, GithubReviewStatus::Approved);
+        assert_eq!(status.checks, EvidenceStatus::Passing);
+        assert_eq!(status.mergeability, GithubMergeability::Mergeable);
     }
 
     #[test]
     fn fetch_pull_request_status_uses_gh_command_for_pr_number() {
         with_fake_gh(
-            "printf '{\"state\":\"MERGED\",\"mergedAt\":\"2026-03-13T00:00:00Z\",\"statusCheckRollup\":[]}'",
+            "printf '{\"state\":\"OPEN\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}'",
             || {
-                let status = fetch_pull_request_status(&PullRequestRef {
+                let status = fetch_pull_request_snapshot(&PullRequestRef {
                     number: 42,
                     url: "https://github.com/dot-matrix-labs/calypso/pull/42".to_string(),
                 })
                 .expect("status should parse");
 
-                assert!(status.exists);
-                assert!(status.merged);
-                assert!(status.checks_green);
+                assert!(!status.is_draft);
+                assert_eq!(status.review_status, GithubReviewStatus::Approved);
+                assert_eq!(status.checks, EvidenceStatus::Pending);
             },
         );
     }
@@ -285,9 +429,13 @@ mod tests {
                 url: "https://github.com/dot-matrix-labs/calypso/pull/99".to_string(),
             };
 
-            assert!(!environment.pr_exists(&pull_request));
-            assert!(!environment.pr_merged(&pull_request));
-            assert!(!environment.checks_green(&pull_request));
+            assert!(
+                environment
+                    .pull_request_snapshot(&pull_request)
+                    .expect_err("failed gh command should surface an error")
+                    .to_string()
+                    .contains("non-zero exit status")
+            );
         });
     }
 }

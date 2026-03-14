@@ -40,6 +40,10 @@ pub struct FeatureState {
     pub branch: String,
     pub worktree_path: String,
     pub pull_request: PullRequestRef,
+    #[serde(default)]
+    pub github_snapshot: Option<GithubPullRequestSnapshot>,
+    #[serde(default)]
+    pub github_error: Option<String>,
     pub workflow_state: WorkflowState,
     pub gate_groups: Vec<GateGroup>,
     pub active_sessions: Vec<AgentSession>,
@@ -58,6 +62,8 @@ impl FeatureState {
             branch: branch.to_string(),
             worktree_path: worktree_path.to_string(),
             pull_request,
+            github_snapshot: None,
+            github_error: None,
             workflow_state: WorkflowState::from_template_state_name(
                 template.state_machine.initial_state.as_str(),
             )?,
@@ -102,9 +108,11 @@ impl FeatureState {
                             .as_deref()
                             .expect("validated builtin tasks must define a builtin evaluator");
 
-                        match evidence.result_for(builtin) {
-                            Some(true) => GateStatus::Passing,
-                            Some(false) => GateStatus::Failing,
+                        match evidence.status_for(builtin) {
+                            Some(EvidenceStatus::Passing) => GateStatus::Passing,
+                            Some(EvidenceStatus::Failing) => GateStatus::Failing,
+                            Some(EvidenceStatus::Pending) => GateStatus::Pending,
+                            Some(EvidenceStatus::Manual) => GateStatus::Manual,
                             None => GateStatus::Pending,
                         }
                     }
@@ -169,6 +177,31 @@ pub struct PullRequestChecklistItem {
     pub gate_id: String,
     pub label: String,
     pub checked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GithubPullRequestSnapshot {
+    pub is_draft: bool,
+    pub review_status: GithubReviewStatus,
+    pub checks: EvidenceStatus,
+    pub mergeability: GithubMergeability,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GithubReviewStatus {
+    Approved,
+    ReviewRequired,
+    ChangesRequested,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GithubMergeability {
+    Mergeable,
+    Conflicting,
+    Blocked,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -488,9 +521,18 @@ impl fmt::Display for GateInitializationError {
 
 impl std::error::Error for GateInitializationError {}
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum EvidenceStatus {
+    Passing,
+    Failing,
+    Pending,
+    Manual,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BuiltinEvidence {
-    results: BTreeMap<String, bool>,
+    results: BTreeMap<String, EvidenceStatus>,
 }
 
 impl BuiltinEvidence {
@@ -499,11 +541,31 @@ impl BuiltinEvidence {
     }
 
     pub fn with_result(mut self, builtin: &str, passed: bool) -> Self {
-        self.results.insert(builtin.to_string(), passed);
+        self.results.insert(
+            builtin.to_string(),
+            if passed {
+                EvidenceStatus::Passing
+            } else {
+                EvidenceStatus::Failing
+            },
+        );
+        self
+    }
+
+    pub fn with_status(mut self, builtin: &str, status: EvidenceStatus) -> Self {
+        self.results.insert(builtin.to_string(), status);
         self
     }
 
     pub fn result_for(&self, builtin: &str) -> Option<bool> {
+        match self.results.get(builtin).copied() {
+            Some(EvidenceStatus::Passing) => Some(true),
+            Some(EvidenceStatus::Failing) => Some(false),
+            Some(EvidenceStatus::Pending) | Some(EvidenceStatus::Manual) | None => None,
+        }
+    }
+
+    pub fn status_for(&self, builtin: &str) -> Option<EvidenceStatus> {
         self.results.get(builtin).copied()
     }
 

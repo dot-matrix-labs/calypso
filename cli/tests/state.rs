@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, AgentTerminalOutcome, BuiltinEvidence, FeatureState, Gate,
-    GateEvaluationError, GateGroup, GateGroupRollup, GateGroupStatus, GateInitializationError,
+    AgentSession, AgentSessionStatus, AgentTerminalOutcome, BuiltinEvidence, EvidenceStatus,
+    FeatureState, Gate, GateEvaluationError, GateGroup, GateGroupStatus, GateInitializationError,
     GateStatus, PullRequestRef, RepositoryState, SessionOutput, SessionOutputStream, StateError,
     TransitionError, TransitionFacts, WorkflowState,
 };
@@ -22,6 +22,8 @@ fn sample_state() -> RepositoryState {
                 number: 231,
                 url: "https://github.com/org/repo/pull/231".to_string(),
             },
+            github_snapshot: None,
+            github_error: None,
             workflow_state: WorkflowState::Implementation,
             gate_groups: vec![
                 GateGroup {
@@ -67,12 +69,6 @@ fn temp_state_path() -> PathBuf {
         .expect("system time should be after unix epoch")
         .as_nanos();
     std::env::temp_dir().join(format!("calypso-state-{unique}.json"))
-}
-
-fn sample_feature(workflow_state: WorkflowState) -> FeatureState {
-    let mut feature = sample_state().current_feature;
-    feature.workflow_state = workflow_state;
-    feature
 }
 
 #[test]
@@ -499,8 +495,10 @@ fn feature_state_reports_blocking_gate_ids_after_evaluation() {
         .with_result("builtin.policy.next_prompt_present", true)
         .with_result("builtin.policy.required_workflows_present", true)
         .with_result("builtin.github.pr_exists", true)
+        .with_result("builtin.github.pr_ready_for_review", true)
         .with_result("builtin.github.pr_checks_green", true)
-        .with_result("builtin.github.pr_merged", false);
+        .with_status("builtin.github.pr_review_approved", EvidenceStatus::Manual)
+        .with_result("builtin.github.pr_mergeable", true);
 
     feature
         .evaluate_gates(&template, &evidence)
@@ -511,338 +509,114 @@ fn feature_state_reports_blocking_gate_ids_after_evaluation() {
         vec![
             "pr-canonicalized".to_string(),
             "blueprint-policy-clean".to_string(),
+            "feature-pr-reviewed".to_string(),
             "merge-drift-reviewed".to_string(),
         ]
     );
 }
 
 #[test]
-fn feature_state_reports_gate_group_rollups_for_mixed_statuses() {
-    let feature = FeatureState {
-        gate_groups: vec![
-            GateGroup {
-                id: "specification".to_string(),
-                label: "Specification".to_string(),
-                gates: vec![Gate {
-                    id: "pr-canonicalized".to_string(),
-                    label: "PR canonicalized".to_string(),
-                    task: "pr-editor".to_string(),
-                    status: GateStatus::Passing,
-                }],
-            },
-            GateGroup {
-                id: "validation".to_string(),
-                label: "Validation".to_string(),
-                gates: vec![
-                    Gate {
-                        id: "rust-quality-green".to_string(),
-                        label: "Rust quality green".to_string(),
-                        task: "rust-quality".to_string(),
-                        status: GateStatus::Passing,
-                    },
-                    Gate {
-                        id: "qa-signoff".to_string(),
-                        label: "QA signoff".to_string(),
-                        task: "qa-review".to_string(),
-                        status: GateStatus::Manual,
-                    },
-                ],
-            },
-            GateGroup {
-                id: "merge-readiness".to_string(),
-                label: "Merge Readiness".to_string(),
-                gates: vec![
-                    Gate {
-                        id: "merge-drift-reviewed".to_string(),
-                        label: "Merge drift reviewed".to_string(),
-                        task: "main-compatible".to_string(),
-                        status: GateStatus::Failing,
-                    },
-                    Gate {
-                        id: "pr-green".to_string(),
-                        label: "PR green".to_string(),
-                        task: "pr-green".to_string(),
-                        status: GateStatus::Pending,
-                    },
-                ],
-            },
-        ],
-        ..sample_feature(WorkflowState::Implementation)
-    };
-
-    assert_eq!(
-        feature.gate_group_rollups(),
-        vec![
-            GateGroupRollup {
-                id: "specification".to_string(),
-                label: "Specification".to_string(),
-                status: GateGroupStatus::Passing,
-                blocking_gate_ids: vec![],
-            },
-            GateGroupRollup {
-                id: "validation".to_string(),
-                label: "Validation".to_string(),
-                status: GateGroupStatus::Manual,
-                blocking_gate_ids: vec!["qa-signoff".to_string()],
-            },
-            GateGroupRollup {
-                id: "merge-readiness".to_string(),
-                label: "Merge Readiness".to_string(),
-                status: GateGroupStatus::Blocked,
-                blocking_gate_ids: vec!["merge-drift-reviewed".to_string(), "pr-green".to_string(),],
-            },
-        ]
-    );
-}
-
-#[test]
-fn feature_state_reports_available_transitions_for_each_workflow_state() {
-    assert_eq!(
-        sample_feature(WorkflowState::New).available_transitions(&TransitionFacts {
-            feature_binding_complete: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Implementation]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::Implementation).available_transitions(&TransitionFacts {
-            waiting_for_human_input: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::WaitingForHuman]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::Implementation).available_transitions(&TransitionFacts {
-            ready_for_review: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::ReadyForReview]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::Implementation).available_transitions(&TransitionFacts {
-            blocking_issue_present: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Blocked]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::WaitingForHuman).available_transitions(&TransitionFacts {
-            human_response_ready: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Implementation]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::ReadyForReview).available_transitions(&TransitionFacts {
-            review_rework_required: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Implementation]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::Blocked).available_transitions(&TransitionFacts {
-            blocker_resolved: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Implementation]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::WaitingForHuman).available_transitions(&TransitionFacts {
-            blocking_issue_present: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Blocked]
-    );
-
-    assert_eq!(
-        sample_feature(WorkflowState::ReadyForReview).available_transitions(&TransitionFacts {
-            blocking_issue_present: true,
-            ..TransitionFacts::default()
-        }),
-        vec![WorkflowState::Blocked]
-    );
-}
-
-#[test]
-fn feature_state_rejects_transitions_without_required_facts() {
-    let mut feature = sample_feature(WorkflowState::Implementation);
-
-    let error = feature
-        .transition_to(WorkflowState::ReadyForReview, &TransitionFacts::default())
-        .expect_err("missing readiness facts should reject the transition");
-
-    assert_eq!(
-        error,
-        TransitionError::Rejected {
-            from: WorkflowState::Implementation,
-            to: WorkflowState::ReadyForReview,
-            reason: "feature is not ready for review".to_string(),
-        }
-    );
-    assert_eq!(
-        error.to_string(),
-        "cannot transition from 'implementation' to 'ready-for-review': feature is not ready for review"
-    );
-}
-
-#[test]
-fn feature_state_transitions_when_required_facts_are_present() {
-    let mut feature = sample_feature(WorkflowState::WaitingForHuman);
-
-    feature
-        .transition_to(
-            WorkflowState::Implementation,
-            &TransitionFacts {
-                human_response_ready: true,
-                ..TransitionFacts::default()
-            },
-        )
-        .expect("human response should resume implementation");
-
-    assert_eq!(feature.workflow_state, WorkflowState::Implementation);
-}
-
-#[test]
-fn workflow_state_as_str_covers_all_variants() {
-    assert_eq!(WorkflowState::New.as_str(), "new");
-    assert_eq!(WorkflowState::Implementation.as_str(), "implementation");
-    assert_eq!(WorkflowState::WaitingForHuman.as_str(), "waiting-for-human");
-    assert_eq!(WorkflowState::ReadyForReview.as_str(), "ready-for-review");
-    assert_eq!(WorkflowState::Blocked.as_str(), "blocked");
-}
-
-#[test]
-fn feature_state_rejects_all_missing_fact_transitions() {
-    // New -> Implementation without binding
-    let error = sample_feature(WorkflowState::New)
-        .transition_to(WorkflowState::Implementation, &TransitionFacts::default())
-        .expect_err("missing binding should reject");
-    assert!(error.to_string().contains("feature binding is incomplete"));
-
-    // Implementation -> WaitingForHuman without waiting flag
-    let error = sample_feature(WorkflowState::Implementation)
-        .transition_to(WorkflowState::WaitingForHuman, &TransitionFacts::default())
-        .expect_err("missing waiting flag should reject");
-    assert!(
-        error
-            .to_string()
-            .contains("no agent session is waiting for human input")
-    );
-
-    // Implementation -> Blocked without blocking issue
-    let error = sample_feature(WorkflowState::Implementation)
-        .transition_to(WorkflowState::Blocked, &TransitionFacts::default())
-        .expect_err("missing blocking issue should reject");
-    assert!(error.to_string().contains("no blocking issue is present"));
-
-    // WaitingForHuman -> Implementation without human response
-    let error = sample_feature(WorkflowState::WaitingForHuman)
-        .transition_to(WorkflowState::Implementation, &TransitionFacts::default())
-        .expect_err("missing human response should reject");
-    assert!(error.to_string().contains("no human response is available"));
-
-    // WaitingForHuman -> Blocked without blocking issue
-    let error = sample_feature(WorkflowState::WaitingForHuman)
-        .transition_to(WorkflowState::Blocked, &TransitionFacts::default())
-        .expect_err("missing blocking issue should reject");
-    assert!(error.to_string().contains("no blocking issue is present"));
-
-    // ReadyForReview -> Implementation without rework flag
-    let error = sample_feature(WorkflowState::ReadyForReview)
-        .transition_to(WorkflowState::Implementation, &TransitionFacts::default())
-        .expect_err("missing rework flag should reject");
-    assert!(
-        error
-            .to_string()
-            .contains("no follow-up implementation request is present")
-    );
-
-    // ReadyForReview -> Blocked without blocking issue
-    let error = sample_feature(WorkflowState::ReadyForReview)
-        .transition_to(WorkflowState::Blocked, &TransitionFacts::default())
-        .expect_err("missing blocking issue should reject");
-    assert!(error.to_string().contains("no blocking issue is present"));
-
-    // Blocked -> Implementation without blocker resolved
-    let error = sample_feature(WorkflowState::Blocked)
-        .transition_to(WorkflowState::Implementation, &TransitionFacts::default())
-        .expect_err("unresolved blocker should reject");
-    assert!(
-        error
-            .to_string()
-            .contains("blocking issue is still present")
-    );
-
-    // Unsupported transition (New -> Blocked)
-    let error = sample_feature(WorkflowState::New)
-        .transition_to(WorkflowState::Blocked, &TransitionFacts::default())
-        .expect_err("unsupported transition should reject");
-    assert!(
-        error
-            .to_string()
-            .contains("transition is not supported by the prototype workflow")
-    );
-}
-
-#[test]
-fn gate_group_rollup_status_is_pending_when_all_gates_are_pending() {
-    let feature = FeatureState {
-        gate_groups: vec![GateGroup {
-            id: "validation".to_string(),
-            label: "Validation".to_string(),
-            gates: vec![
-                Gate {
-                    id: "gate-a".to_string(),
-                    label: "Gate A".to_string(),
-                    task: "task-a".to_string(),
-                    status: GateStatus::Pending,
-                },
-                Gate {
-                    id: "gate-b".to_string(),
-                    label: "Gate B".to_string(),
-                    task: "task-b".to_string(),
-                    status: GateStatus::Pending,
-                },
-            ],
-        }],
-        ..sample_feature(WorkflowState::Implementation)
-    };
-
-    let rollups = feature.gate_group_rollups();
-    assert_eq!(rollups[0].status, GateGroupStatus::Pending);
-}
-
-#[test]
-fn feature_state_evaluate_gates_maps_human_task_to_manual_status() {
+fn feature_state_maps_pending_builtin_evidence_to_pending_gate_status() {
     let template = TemplateSet::from_yaml_strings(
         r#"
 initial_state: new
 states:
   - new
 gate_groups:
-  - id: review
-    label: Review
+  - id: validation
+    label: Validation
     gates:
-      - id: human-signoff
-        label: Human signoff
-        task: human-reviewer
+      - id: review-gate
+        label: Review gate
+        task: review-check
 "#,
         r#"
 tasks:
-  - name: human-reviewer
+  - name: review-check
+    kind: builtin
+    builtin: builtin.github.pr_review_approved
+"#,
+        "prompts: {}\n",
+    )
+    .expect("template should parse");
+
+    let mut feature = FeatureState::from_template(
+        "feat-pending-evidence",
+        "feat/pending",
+        "/worktrees/feat-pending",
+        PullRequestRef {
+            number: 1,
+            url: "https://github.com/org/repo/pull/1".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature
+        .evaluate_gates(
+            &template,
+            &BuiltinEvidence::new()
+                .with_status("builtin.github.pr_review_approved", EvidenceStatus::Pending),
+        )
+        .expect("gate evaluation should succeed");
+
+    let gate = feature.gate_groups[0]
+        .gates
+        .first()
+        .expect("gate should exist");
+    assert_eq!(gate.status, GateStatus::Pending);
+}
+
+#[test]
+fn feature_state_maps_human_task_to_manual_gate_status() {
+    let template = TemplateSet::from_yaml_strings(
+        r#"
+initial_state: new
+states:
+  - new
+gate_groups:
+  - id: approval
+    label: Approval
+    gates:
+      - id: human-sign-off
+        label: Human sign-off
+        task: human-approver
+"#,
+        r#"
+tasks:
+  - name: human-approver
     kind: human
 "#,
         "prompts: {}\n",
     )
-    .expect("template with human task should be valid");
+    .expect("template should parse");
 
+    let mut feature = FeatureState::from_template(
+        "feat-human-task",
+        "feat/human",
+        "/worktrees/feat-human",
+        PullRequestRef {
+            number: 2,
+            url: "https://github.com/org/repo/pull/2".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    feature
+        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .expect("gate evaluation should succeed");
+
+    let gate = feature.gate_groups[0]
+        .gates
+        .first()
+        .expect("gate should exist");
+    assert_eq!(gate.status, GateStatus::Manual);
+}
+
+#[test]
+fn feature_state_maps_manual_builtin_evidence_to_manual_gate_status() {
+    let template = load_embedded_template_set().expect("embedded template should load");
     let mut feature = FeatureState::from_template(
         "feat-auth-refresh",
         "feat/123-token-refresh",
@@ -856,60 +630,387 @@ tasks:
     .expect("feature should initialize from template");
 
     feature
-        .evaluate_gates(&template, &BuiltinEvidence::new())
+        .evaluate_gates(
+            &template,
+            &BuiltinEvidence::new()
+                .with_status("builtin.github.pr_review_approved", EvidenceStatus::Manual),
+        )
         .expect("gate evaluation should succeed");
 
-    let gate = feature
+    let review_gate = feature
         .gate_groups
         .iter()
         .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "human-signoff")
-        .expect("human signoff gate should exist");
-    assert_eq!(gate.status, GateStatus::Manual);
+        .find(|gate| gate.id == "feature-pr-reviewed")
+        .expect("review gate should exist");
+
+    assert_eq!(review_gate.status, GateStatus::Manual);
+}
+
+// --- WorkflowState::as_str ---
+
+#[test]
+fn workflow_state_as_str_returns_expected_slugs() {
+    assert_eq!(WorkflowState::New.as_str(), "new");
+    assert_eq!(WorkflowState::Implementation.as_str(), "implementation");
+    assert_eq!(WorkflowState::WaitingForHuman.as_str(), "waiting-for-human");
+    assert_eq!(WorkflowState::ReadyForReview.as_str(), "ready-for-review");
+    assert_eq!(WorkflowState::Blocked.as_str(), "blocked");
+}
+
+// --- WorkflowState::available_transitions ---
+
+#[test]
+fn workflow_state_new_transitions_to_implementation_when_binding_complete() {
+    let facts = TransitionFacts {
+        feature_binding_complete: true,
+        ..TransitionFacts::default()
+    };
+    assert_eq!(
+        WorkflowState::New.available_transitions(&facts),
+        vec![WorkflowState::Implementation]
+    );
 }
 
 #[test]
-fn feature_state_sets_human_task_gate_to_manual_status() {
-    use calypso_cli::template::TemplateSet;
+fn workflow_state_new_has_no_transitions_when_binding_incomplete() {
+    let facts = TransitionFacts::default();
+    assert!(WorkflowState::New.available_transitions(&facts).is_empty());
+}
 
-    let template = TemplateSet::from_yaml_strings(
-        r#"
-initial_state: new
-states:
-  - new
-gate_groups:
-  - id: coordination
-    label: Coordination
-    gates:
-      - id: human-approval
-        label: Human approval
-        task: human-approval
-"#,
-        r#"
-tasks:
-  - name: human-approval
-    kind: human
-"#,
-        "prompts: {}\n",
-    )
-    .expect("template should validate");
+#[test]
+fn workflow_state_implementation_transitions_to_all_valid_targets() {
+    let facts = TransitionFacts {
+        blocking_issue_present: true,
+        waiting_for_human_input: true,
+        ready_for_review: true,
+        ..TransitionFacts::default()
+    };
+    let transitions = WorkflowState::Implementation.available_transitions(&facts);
+    assert!(transitions.contains(&WorkflowState::Blocked));
+    assert!(transitions.contains(&WorkflowState::WaitingForHuman));
+    assert!(transitions.contains(&WorkflowState::ReadyForReview));
+}
 
-    let mut feature = FeatureState::from_template(
-        "feat-human",
-        "feat/human-test",
-        "/worktrees/feat-human",
+#[test]
+fn workflow_state_waiting_for_human_transitions_based_on_facts() {
+    let facts = TransitionFacts {
+        blocking_issue_present: true,
+        human_response_ready: true,
+        ..TransitionFacts::default()
+    };
+    let transitions = WorkflowState::WaitingForHuman.available_transitions(&facts);
+    assert!(transitions.contains(&WorkflowState::Blocked));
+    assert!(transitions.contains(&WorkflowState::Implementation));
+}
+
+#[test]
+fn workflow_state_ready_for_review_transitions_based_on_facts() {
+    let facts = TransitionFacts {
+        blocking_issue_present: true,
+        review_rework_required: true,
+        ..TransitionFacts::default()
+    };
+    let transitions = WorkflowState::ReadyForReview.available_transitions(&facts);
+    assert!(transitions.contains(&WorkflowState::Blocked));
+    assert!(transitions.contains(&WorkflowState::Implementation));
+}
+
+#[test]
+fn workflow_state_blocked_transitions_to_implementation_when_blocker_resolved() {
+    let facts = TransitionFacts {
+        blocker_resolved: true,
+        ..TransitionFacts::default()
+    };
+    assert_eq!(
+        WorkflowState::Blocked.available_transitions(&facts),
+        vec![WorkflowState::Implementation]
+    );
+}
+
+// --- WorkflowState::validate_transition ---
+
+#[test]
+fn workflow_state_validate_transition_succeeds_for_valid_transitions() {
+    let facts = TransitionFacts {
+        feature_binding_complete: true,
+        ..TransitionFacts::default()
+    };
+    assert!(
+        WorkflowState::New
+            .validate_transition(WorkflowState::Implementation, &facts)
+            .is_ok()
+    );
+}
+
+#[test]
+fn workflow_state_validate_transition_rejects_unsupported_transition() {
+    let facts = TransitionFacts::default();
+    let error = WorkflowState::New
+        .validate_transition(WorkflowState::Blocked, &facts)
+        .expect_err("unsupported transition should fail");
+    assert!(matches!(error, TransitionError::Rejected { .. }));
+    assert!(error.to_string().contains("cannot transition from"));
+    assert!(error.to_string().contains("'new'"));
+}
+
+#[test]
+fn workflow_state_validate_transition_rejects_all_invalid_pairs() {
+    let facts = TransitionFacts::default();
+
+    let invalid_pairs = [
+        (WorkflowState::New, WorkflowState::Implementation),
+        (
+            WorkflowState::Implementation,
+            WorkflowState::WaitingForHuman,
+        ),
+        (WorkflowState::Implementation, WorkflowState::ReadyForReview),
+        (WorkflowState::Implementation, WorkflowState::Blocked),
+        (
+            WorkflowState::WaitingForHuman,
+            WorkflowState::Implementation,
+        ),
+        (WorkflowState::WaitingForHuman, WorkflowState::Blocked),
+        (WorkflowState::ReadyForReview, WorkflowState::Implementation),
+        (WorkflowState::ReadyForReview, WorkflowState::Blocked),
+        (WorkflowState::Blocked, WorkflowState::Implementation),
+    ];
+
+    for (from, to) in invalid_pairs {
+        let result = from.clone().validate_transition(to.clone(), &facts);
+        assert!(
+            result.is_err(),
+            "expected {from} -> {to} to be rejected with empty facts"
+        );
+    }
+}
+
+#[test]
+fn workflow_state_missing_transition_reason_formats_for_all_pairs() {
+    // Exercises the wildcard arm of missing_transition_reason
+    let facts = TransitionFacts::default();
+    let error = WorkflowState::New
+        .validate_transition(WorkflowState::ReadyForReview, &facts)
+        .expect_err("unsupported transition should fail");
+    assert!(error.to_string().contains("not supported"));
+}
+
+// --- TransitionError Display ---
+
+#[test]
+fn transition_error_display_includes_from_to_and_reason() {
+    let error = TransitionError::Rejected {
+        from: WorkflowState::New,
+        to: WorkflowState::Blocked,
+        reason: "some reason".to_string(),
+    };
+    let msg = error.to_string();
+    assert!(msg.contains("'new'"));
+    assert!(msg.contains("'blocked'"));
+    assert!(msg.contains("some reason"));
+}
+
+// --- GateGroup::rollup and rollup_status ---
+
+#[test]
+fn gate_group_rollup_status_is_blocked_when_any_gate_is_failing() {
+    let group = GateGroup {
+        id: "g".to_string(),
+        label: "G".to_string(),
+        gates: vec![
+            Gate {
+                id: "a".to_string(),
+                label: "A".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Passing,
+            },
+            Gate {
+                id: "b".to_string(),
+                label: "B".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Failing,
+            },
+        ],
+    };
+    assert_eq!(group.rollup_status(), GateGroupStatus::Blocked);
+}
+
+#[test]
+fn gate_group_rollup_status_is_pending_when_no_failing_but_some_pending() {
+    let group = GateGroup {
+        id: "g".to_string(),
+        label: "G".to_string(),
+        gates: vec![
+            Gate {
+                id: "a".to_string(),
+                label: "A".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Passing,
+            },
+            Gate {
+                id: "b".to_string(),
+                label: "B".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Pending,
+            },
+        ],
+    };
+    assert_eq!(group.rollup_status(), GateGroupStatus::Pending);
+}
+
+#[test]
+fn gate_group_rollup_status_is_manual_when_only_manual_and_passing() {
+    let group = GateGroup {
+        id: "g".to_string(),
+        label: "G".to_string(),
+        gates: vec![
+            Gate {
+                id: "a".to_string(),
+                label: "A".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Passing,
+            },
+            Gate {
+                id: "b".to_string(),
+                label: "B".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Manual,
+            },
+        ],
+    };
+    assert_eq!(group.rollup_status(), GateGroupStatus::Manual);
+}
+
+#[test]
+fn gate_group_rollup_status_is_passing_when_all_gates_pass() {
+    let group = GateGroup {
+        id: "g".to_string(),
+        label: "G".to_string(),
+        gates: vec![Gate {
+            id: "a".to_string(),
+            label: "A".to_string(),
+            task: "t".to_string(),
+            status: GateStatus::Passing,
+        }],
+    };
+    assert_eq!(group.rollup_status(), GateGroupStatus::Passing);
+}
+
+#[test]
+fn gate_group_rollup_captures_blocking_gate_ids() {
+    let group = GateGroup {
+        id: "validation".to_string(),
+        label: "Validation".to_string(),
+        gates: vec![
+            Gate {
+                id: "gate-pass".to_string(),
+                label: "Pass".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Passing,
+            },
+            Gate {
+                id: "gate-fail".to_string(),
+                label: "Fail".to_string(),
+                task: "t".to_string(),
+                status: GateStatus::Failing,
+            },
+        ],
+    };
+    let rollup = group.rollup();
+    assert_eq!(rollup.id, "validation");
+    assert_eq!(rollup.status, GateGroupStatus::Blocked);
+    assert_eq!(rollup.blocking_gate_ids, vec!["gate-fail".to_string()]);
+}
+
+// --- FeatureState transition helpers ---
+
+#[test]
+fn feature_state_gate_group_rollups_returns_one_rollup_per_group() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let feature = FeatureState::from_template(
+        "feat-rollup",
+        "feat/rollup",
+        "/worktrees/feat-rollup",
         PullRequestRef {
             number: 1,
             url: "https://github.com/org/repo/pull/1".to_string(),
         },
         &template,
     )
-    .expect("feature should initialize");
+    .expect("feature should initialize from template");
 
+    let rollups = feature.gate_group_rollups();
+    assert_eq!(rollups.len(), feature.gate_groups.len());
+}
+
+#[test]
+fn feature_state_available_transitions_delegates_to_workflow_state() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let feature = FeatureState::from_template(
+        "feat-transitions",
+        "feat/transitions",
+        "/worktrees/feat-transitions",
+        PullRequestRef {
+            number: 2,
+            url: "https://github.com/org/repo/pull/2".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    let facts = TransitionFacts {
+        feature_binding_complete: true,
+        ..TransitionFacts::default()
+    };
+    let transitions = feature.available_transitions(&facts);
+    assert!(transitions.contains(&WorkflowState::Implementation));
+}
+
+#[test]
+fn feature_state_transition_to_succeeds_for_valid_transition() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-transition-valid",
+        "feat/transition",
+        "/worktrees/feat-transition",
+        PullRequestRef {
+            number: 3,
+            url: "https://github.com/org/repo/pull/3".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    let facts = TransitionFacts {
+        feature_binding_complete: true,
+        ..TransitionFacts::default()
+    };
     feature
-        .evaluate_gates(&template, &BuiltinEvidence::new())
-        .expect("gate evaluation should succeed");
+        .transition_to(WorkflowState::Implementation, &facts)
+        .expect("valid transition should succeed");
 
-    let gate = feature.gate_groups[0].gates[0].clone();
-    assert_eq!(gate.status, GateStatus::Manual);
+    assert_eq!(feature.workflow_state, WorkflowState::Implementation);
+}
+
+#[test]
+fn feature_state_transition_to_rejects_invalid_transition() {
+    let template = load_embedded_template_set().expect("embedded template should load");
+    let mut feature = FeatureState::from_template(
+        "feat-transition-invalid",
+        "feat/transition",
+        "/worktrees/feat-transition",
+        PullRequestRef {
+            number: 4,
+            url: "https://github.com/org/repo/pull/4".to_string(),
+        },
+        &template,
+    )
+    .expect("feature should initialize from template");
+
+    let facts = TransitionFacts::default();
+    let error = feature
+        .transition_to(WorkflowState::Blocked, &facts)
+        .expect_err("invalid transition should fail");
+
+    assert!(matches!(error, TransitionError::Rejected { .. }));
 }

@@ -12,6 +12,12 @@ gate_groups:
       - id: pr-canonicalized
         label: PR canonicalized
         task: pr-editor
+      - id: feature-pr-exists
+        label: Feature PR exists
+        task: feature-pr-exists
+      - id: feature-pr-ready-for-review
+        label: Feature PR ready for review
+        task: feature-pr-ready-for-review
   - id: policy
     label: Policy
     gates:
@@ -48,9 +54,6 @@ gate_groups:
       - id: github-remote-configured
         label: GitHub remote configured
         task: github-remote-configured
-      - id: feature-pr-exists
-        label: Feature PR exists
-        task: feature-pr-exists
       - id: feature-pr-checks-green
         label: Feature PR checks green
         task: feature-pr-checks-green
@@ -60,6 +63,12 @@ gate_groups:
   - id: merge-readiness
     label: Merge Readiness
     gates:
+      - id: feature-pr-reviewed
+        label: Feature PR reviewed
+        task: feature-pr-reviewed
+      - id: feature-pr-mergeable
+        label: Feature PR mergeable
+        task: feature-pr-mergeable
       - id: merge-drift-reviewed
         label: Merge drift reviewed
         task: main-compatibility

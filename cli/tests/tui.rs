@@ -1,7 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
 use calypso_cli::state::{
-    AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
+    AgentSession, AgentSessionStatus, EvidenceStatus, FeatureState, Gate, GateGroup, GateStatus,
+    GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef,
     SessionOutput, SessionOutputStream, WorkflowState,
 };
 use calypso_cli::tui::{InputBuffer, OperatorSurface, SurfaceEvent, queue_follow_up};
@@ -15,6 +16,8 @@ fn sample_feature() -> FeatureState {
             number: 22,
             url: "https://github.com/org/repo/pull/22".to_string(),
         },
+        github_snapshot: None,
+        github_error: None,
         workflow_state: WorkflowState::WaitingForHuman,
         gate_groups: vec![
             GateGroup {
@@ -79,6 +82,36 @@ fn operator_surface_render_includes_feature_context_gates_and_sessions() {
     assert!(rendered.contains("Inspecting branch state"));
     assert!(rendered.contains("Waiting on operator guidance"));
     assert!(rendered.contains("Follow-up input:"));
+}
+
+#[test]
+fn operator_surface_renders_normalized_github_evidence() {
+    let mut feature = sample_feature();
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Passing,
+        mergeability: GithubMergeability::Mergeable,
+    });
+
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+
+    assert!(rendered.contains("GitHub"));
+    assert!(rendered.contains("PR state: ready-for-review"));
+    assert!(rendered.contains("Review: approved"));
+    assert!(rendered.contains("Checks: passing"));
+    assert!(rendered.contains("Mergeability: mergeable"));
+}
+
+#[test]
+fn operator_surface_renders_github_error_when_snapshot_is_missing() {
+    let mut feature = sample_feature();
+    feature.github_error = Some("Run `gh auth login`.".to_string());
+
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+
+    assert!(rendered.contains("GitHub"));
+    assert!(rendered.contains("Error: Run `gh auth login`."));
 }
 
 #[test]
@@ -161,6 +194,52 @@ fn queue_follow_up_routes_message_to_active_session() {
         &mut feature,
         "This should not be queued".to_string()
     ));
+}
+
+#[test]
+fn operator_surface_renders_draft_pr_state_label() {
+    let mut feature = sample_feature();
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: true,
+        review_status: GithubReviewStatus::ReviewRequired,
+        checks: EvidenceStatus::Failing,
+        mergeability: GithubMergeability::Conflicting,
+    });
+
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+
+    assert!(rendered.contains("PR state: draft"));
+    assert!(rendered.contains("Review: review-required"));
+    assert!(rendered.contains("Checks: failing"));
+    assert!(rendered.contains("Mergeability: conflicting"));
+}
+
+#[test]
+fn operator_surface_renders_all_github_label_variants() {
+    let mut feature = sample_feature();
+
+    // ChangesRequested + Blocked + Pending
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::ChangesRequested,
+        checks: EvidenceStatus::Pending,
+        mergeability: GithubMergeability::Blocked,
+    });
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+    assert!(rendered.contains("Review: changes-requested"));
+    assert!(rendered.contains("Checks: pending"));
+    assert!(rendered.contains("Mergeability: blocked"));
+
+    // Approved + Unknown + Manual checks
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Manual,
+        mergeability: GithubMergeability::Unknown,
+    });
+    let rendered = OperatorSurface::from_feature_state(&feature).render();
+    assert!(rendered.contains("Checks: manual"));
+    assert!(rendered.contains("Mergeability: unknown"));
 }
 
 #[test]
