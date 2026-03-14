@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -25,7 +25,7 @@ fn unique_temp_dir(prefix: &str) -> PathBuf {
     path
 }
 
-fn write_fake_script(dir: &PathBuf, name: &str, contents: &str) -> PathBuf {
+fn write_fake_script(dir: &Path, name: &str, contents: &str) -> PathBuf {
     let script = dir.join(name);
     fs::write(&script, contents).expect("fake script should be written");
 

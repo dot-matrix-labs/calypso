@@ -352,4 +352,66 @@ mod tests {
         let claude_utf8 = ClaudeError::Utf8(utf8_err);
         assert!(claude_utf8.to_string().contains("UTF-8"));
     }
+
+    #[test]
+    fn parse_ok_with_invalid_json_returns_error() {
+        let err = parse_outcome("[CALYPSO:OK]not-json").expect_err("should fail on bad JSON");
+        assert!(err.to_string().contains("invalid JSON after [CALYPSO:OK]"));
+    }
+
+    #[test]
+    fn parse_nok_with_invalid_json_returns_error() {
+        let err = parse_outcome("[CALYPSO:NOK]not-json").expect_err("should fail on bad JSON");
+        assert!(err.to_string().contains("invalid JSON after [CALYPSO:NOK]"));
+    }
+
+    #[test]
+    fn parse_aborted_with_invalid_json_returns_error() {
+        let err = parse_outcome("[CALYPSO:ABORTED]not-json").expect_err("should fail on bad JSON");
+        assert!(
+            err.to_string()
+                .contains("invalid JSON after [CALYPSO:ABORTED]")
+        );
+    }
+
+    #[test]
+    fn parse_ok_with_missing_summary_returns_error() {
+        let err = parse_outcome(r#"[CALYPSO:OK]{"artifact_refs":[]}"#)
+            .expect_err("should fail on missing summary");
+        assert!(err.to_string().contains("`summary`"));
+    }
+
+    #[test]
+    fn parse_nok_with_missing_reason_returns_error() {
+        let err = parse_outcome(r#"[CALYPSO:NOK]{"summary":"oops"}"#)
+            .expect_err("should fail on missing reason");
+        assert!(err.to_string().contains("`reason`"));
+    }
+
+    #[test]
+    fn parse_aborted_with_missing_reason_returns_error() {
+        let err =
+            parse_outcome(r#"[CALYPSO:ABORTED]{}"#).expect_err("should fail on missing reason");
+        assert!(err.to_string().contains("`reason`"));
+    }
+
+    #[test]
+    fn parse_clarification_returns_none_when_no_marker() {
+        let result = parse_clarification("no clarification here", "session-1");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn parse_outcome_ok_with_artifact_refs() {
+        let output = r#"[CALYPSO:OK]{"summary":"done","artifact_refs":["a.rs","b.rs"],"suggested_next_state":"deploy"}"#;
+        let outcome = parse_outcome(output).expect("should parse");
+        assert_eq!(
+            outcome,
+            ClaudeOutcome::Ok {
+                summary: "done".to_string(),
+                artifact_refs: vec!["a.rs".to_string(), "b.rs".to_string()],
+                suggested_next_state: Some("deploy".to_string()),
+            }
+        );
+    }
 }
