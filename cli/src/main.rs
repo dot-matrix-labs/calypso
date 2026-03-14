@@ -3,7 +3,7 @@ use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_s
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
-use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
+use calypso_cli::tui::{OperatorSurface, run_terminal_surface, run_watch};
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -96,6 +96,16 @@ fn main() {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             let state_path = cwd.join(".calypso/repository-state.json");
             run_claude_session(&state_path.to_string_lossy(), role);
+        }
+        // calypso watch — live TUI from current working directory state file
+        [command] if command == "watch" => {
+            let cwd = std::env::current_dir().expect("current directory should resolve");
+            let state_path = cwd.join(".calypso").join("state.json");
+            run_watch(&state_path.to_string_lossy());
+        }
+        // calypso watch --state <path>
+        [command, flag, path] if command == "watch" && flag == "--state" => {
+            run_watch(path);
         }
         [command, subcommand] if command == "template" && subcommand == "validate" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
