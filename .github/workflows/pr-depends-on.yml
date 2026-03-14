@@ -3,6 +3,7 @@ name: PR depends-on
 on:
   pull_request:
     types: [opened, edited, synchronize, reopened]
+  merge_group:
 
 jobs:
   depends-on:
