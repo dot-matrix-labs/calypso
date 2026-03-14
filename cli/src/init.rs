@@ -392,7 +392,9 @@ mod tests {
     #[test]
     fn is_github_url_rejects_github_com_as_path_component() {
         // github.com appears in the path, not the host
-        assert!(!is_github_url("https://mirror.example.com/github.com/org/repo"));
+        assert!(!is_github_url(
+            "https://mirror.example.com/github.com/org/repo"
+        ));
     }
 
     #[test]
