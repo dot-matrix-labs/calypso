@@ -82,9 +82,15 @@ fn version_flag_prints_required_build_metadata() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(stdout.contains("calypso-cli "));
-    assert!(stdout.contains("Git hash: "));
-    assert!(stdout.contains("Build time: "));
-    assert!(stdout.contains("Git tags: "));
+    assert!(stdout.contains("git:"));
+    assert!(stdout.contains("built:"));
+    assert!(stdout.contains("tags:"));
+    // version output must be a single line
+    assert_eq!(
+        stdout.trim().lines().count(),
+        1,
+        "version output must be one line"
+    );
 }
 
 #[test]

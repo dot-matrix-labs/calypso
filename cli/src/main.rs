@@ -28,7 +28,10 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.as_slice() {
-        [flag] if flag == "-v" || flag == "--version" => println!("{}", render_version(info)),
+        [flag] if flag == "-v" || flag == "-V" || flag == "--version" => {
+            println!("{}", render_version(info))
+        }
+        [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
         [command] if command == "doctor" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             println!("{}", run_doctor(&cwd));

@@ -24,7 +24,7 @@ pub struct BuildInfo<'a> {
 
 pub fn render_version(info: BuildInfo<'_>) -> String {
     format!(
-        "calypso-cli {}\nGit hash: {}\nBuild time: {}\nGit tags: {}",
+        "calypso-cli {} git:{} built:{} tags:{}",
         info.version, info.git_hash, info.build_time, info.git_tags
     )
 }
@@ -53,10 +53,16 @@ mod tests {
     fn version_output_contains_required_build_metadata() {
         let output = render_version(sample_info());
 
-        assert!(output.contains("0.1.0+abc123"));
-        assert!(output.contains("abc123"));
-        assert!(output.contains("2026-03-13T12:00:00Z"));
-        assert!(output.contains("v0.1.0"));
+        assert!(output.contains("0.1.0+abc123"), "missing semver+hash");
+        assert!(output.contains("abc123"), "missing git hash");
+        assert!(output.contains("2026-03-13T12:00:00Z"), "missing timestamp");
+        assert!(output.contains("v0.1.0"), "missing git tag");
+    }
+
+    #[test]
+    fn version_output_is_a_single_line() {
+        let output = render_version(sample_info());
+        assert_eq!(output.lines().count(), 1, "version output must be one line");
     }
 
     #[test]
