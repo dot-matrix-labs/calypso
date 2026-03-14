@@ -1,9 +1,9 @@
 use calypso_cli::app::{run_doctor, run_status};
-use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
+use calypso_cli::claude::{
+    ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext, parse_clarification,
+};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
-use calypso_cli::init::{InitRequest, run_init};
-use calypso_cli::pr_checklist::update_pr_body;
-use calypso_cli::state::RepositoryState;
+use calypso_cli::state::{RepositoryState, TransitionFacts, WorkflowState};
 use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_terminal_surface};
 use calypso_cli::{BuildInfo, render_help, render_version};
@@ -28,10 +28,7 @@ fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     match args.as_slice() {
-        [flag] if flag == "-v" || flag == "-V" || flag == "--version" => {
-            println!("{}", render_version(info))
-        }
-        [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
+        [flag] if flag == "-v" || flag == "--version" => println!("{}", render_version(info)),
         [command] if command == "doctor" => {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             println!("{}", run_doctor(&cwd));
@@ -106,35 +103,6 @@ fn main() {
             let cwd = std::env::current_dir().expect("current directory should resolve");
             run_template_validate(&cwd);
         }
-        // calypso init
-        [command] if command == "init" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
-            run_init_command(&cwd, None, false);
-        }
-        // calypso init --allow-reinit
-        [command, flag] if command == "init" && flag == "--allow-reinit" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
-            run_init_command(&cwd, None, true);
-        }
-        // calypso init --provider <name>
-        [command, flag, provider] if command == "init" && flag == "--provider" => {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
-            run_init_command(&cwd, Some(provider.as_str()), false);
-        }
-        // calypso init --provider <name> --allow-reinit
-        [command, flag, provider, reinit_flag]
-            if command == "init" && flag == "--provider" && reinit_flag == "--allow-reinit" =>
-        {
-            let cwd = std::env::current_dir().expect("current directory should resolve");
-            run_init_command(&cwd, Some(provider.as_str()), true);
-        }
-        [command, subcommand] if command == "sync-pr" && subcommand == "--state" => {
-            // Require --state flag: sync-pr --state <path>
-            println!("{}", render_help(info));
-        }
-        [command, flag, path] if command == "sync-pr" && flag == "--state" => {
-            run_sync_pr(path);
-        }
         _ => println!("{}", render_help(info)),
     }
 }
@@ -183,18 +151,18 @@ where
 }
 
 fn run_claude_session(state_path: &str, role: &str) {
-    let state = RepositoryState::load_from_path(std::path::Path::new(state_path))
+    let mut state = RepositoryState::load_from_path(std::path::Path::new(state_path))
         .expect("state file should load");
 
     let prompt = format!(
         "You are acting as the `{role}` agent for feature `{}`.\n\
          Current workflow state: {:?}\n\
-         Complete your role tasks and emit a [CALYPSO:OK], [CALYPSO:NOK], or [CALYPSO:ABORTED] outcome marker.",
+         Complete your role tasks and emit a [CALYPSO:OK], [CALYPSO:NOK], [CALYPSO:CLARIFICATION], or [CALYPSO:ABORTED] outcome marker.",
         state.current_feature.feature_id, state.current_feature.workflow_state,
     );
 
     let config = ClaudeConfig::default();
-    let session = ClaudeSession::new(config);
+    let session = ClaudeSession::new(config.clone());
     let context = SessionContext {
         working_directory: Some(state.current_feature.worktree_path.clone()),
     };
@@ -202,6 +170,20 @@ fn run_claude_session(state_path: &str, role: &str) {
     let transcript_path = std::path::Path::new(state_path)
         .parent()
         .map(|p| p.join(format!("claude-transcript-{}.jsonl", session.session_id)));
+
+    // First, capture raw output so we can detect CLARIFICATION markers that
+    // are not terminal outcomes.
+    let raw_stdout = capture_raw_claude_output(&config, &prompt, &context);
+
+    if let Some(ref raw) = raw_stdout {
+        // Check for clarification before attempting full outcome parse.
+        if let Some(clarification) = parse_clarification(raw, &session.session_id) {
+            println!("Outcome: CLARIFICATION");
+            println!("Question: {}", clarification.question);
+            eprintln!("Operator input required: {}", clarification.question);
+            std::process::exit(2);
+        }
+    }
 
     let outcome = session
         .invoke(&prompt, &context, transcript_path.as_deref())
@@ -224,99 +206,90 @@ fn run_claude_session(state_path: &str, role: &str) {
             if let Some(next) = suggested_next_state {
                 println!("Suggested next state: {next}");
             }
+
+            // Advance workflow state to the first valid forward state.
+            // When Claude reports OK, we treat all forward-progress facts as
+            // satisfied so the appropriate transition can be selected regardless
+            // of which state we are currently in.
+            let facts = TransitionFacts {
+                stage_complete: true,
+                ready_for_review: true,
+                feature_binding_complete: true,
+                ..Default::default()
+            };
+            let valid = state.current_feature.workflow_state.valid_next_states();
+            if let Some(next_state) = valid
+                .iter()
+                .find(|s| !matches!(s, WorkflowState::Blocked | WorkflowState::Aborted))
+                .cloned()
+            {
+                if let Err(err) = state
+                    .current_feature
+                    .transition_to(next_state.clone(), &facts)
+                {
+                    eprintln!("state transition error: {err}");
+                    // Non-fatal: outcome was OK, just couldn't advance state
+                } else {
+                    state
+                        .save_to_path(std::path::Path::new(state_path))
+                        .unwrap_or_else(|err| eprintln!("state save error: {err}"));
+                    println!(
+                        "State: {} -> {}",
+                        state.current_feature.workflow_state.as_str(),
+                        next_state.as_str()
+                    );
+                }
+            }
         }
         ClaudeOutcome::Nok { summary, reason } => {
             println!("Outcome: NOK");
             println!("Summary: {summary}");
             println!("Reason: {reason}");
+            // State file unchanged — do not save.
+            eprintln!("Session NOK: {reason}");
+            std::process::exit(1);
         }
         ClaudeOutcome::Aborted { reason } => {
             println!("Outcome: ABORTED");
             println!("Reason: {reason}");
+
+            // Transition to Aborted state.
+            let facts = TransitionFacts {
+                aborted: true,
+                ..Default::default()
+            };
+            if let Err(err) = state
+                .current_feature
+                .transition_to(WorkflowState::Aborted, &facts)
+            {
+                eprintln!("state transition error: {err}");
+            } else {
+                state
+                    .save_to_path(std::path::Path::new(state_path))
+                    .unwrap_or_else(|err| eprintln!("state save error: {err}"));
+            }
+            std::process::exit(3);
         }
     }
 }
 
-fn run_init_command(cwd: &std::path::Path, provider: Option<&str>, allow_reinit: bool) {
-    let request = InitRequest {
-        repo_path: cwd.to_path_buf(),
-        provider: provider.map(str::to_string),
-        allow_reinit,
-    };
-    match run_init(&request) {
-        Ok(_) => println!("Repository initialised."),
-        Err(error) => {
-            eprintln!("init error: {error}");
-            std::process::exit(1);
-        }
+/// Invoke `claude` and capture the raw stdout for clarification detection.
+///
+/// This is a lightweight pre-check before the full `ClaudeSession::invoke` path.
+/// Returns `None` if the binary cannot be spawned or produces non-UTF-8 output.
+fn capture_raw_claude_output(
+    config: &ClaudeConfig,
+    prompt: &str,
+    context: &SessionContext,
+) -> Option<String> {
+    let mut cmd = std::process::Command::new(&config.binary);
+    for flag in &config.default_flags {
+        cmd.arg(flag);
     }
-}
-
-fn run_sync_pr(state_path: &str) {
-    let path = std::path::Path::new(state_path);
-    let state = match RepositoryState::load_from_path(path) {
-        Ok(s) => s,
-        Err(error) => {
-            eprintln!("sync-pr error: {error}");
-            std::process::exit(1);
-        }
-    };
-
-    let worktree_path = std::path::Path::new(&state.current_feature.worktree_path);
-    let template = match TemplateSet::load_from_directory(worktree_path) {
-        Ok(t) => t,
-        Err(error) => {
-            eprintln!("sync-pr template error: {error}");
-            std::process::exit(1);
-        }
-    };
-
-    let existing_body = std::process::Command::new("gh")
-        .args([
-            "pr",
-            "view",
-            &state.current_feature.pull_request.number.to_string(),
-            "--json",
-            "body",
-            "--jq",
-            ".body",
-        ])
-        .current_dir(worktree_path)
-        .output()
-        .ok()
-        .filter(|o| o.status.success())
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
-
-    let updated = update_pr_body(
-        &existing_body,
-        &state.current_feature.gate_groups,
-        &template,
-    );
-
-    let result = std::process::Command::new("gh")
-        .args([
-            "pr",
-            "edit",
-            &state.current_feature.pull_request.number.to_string(),
-            "--body",
-            &updated,
-        ])
-        .current_dir(worktree_path)
-        .output();
-
-    match result {
-        Ok(output) if output.status.success() => println!("PR body updated."),
-        Ok(output) => {
-            eprintln!(
-                "sync-pr gh error: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            );
-            std::process::exit(1);
-        }
-        Err(error) => {
-            eprintln!("sync-pr error: {error}");
-            std::process::exit(1);
-        }
+    cmd.arg(prompt);
+    if let Some(dir) = &context.working_directory {
+        cmd.current_dir(dir);
     }
+    let output = cmd.output().ok()?;
+    String::from_utf8(output.stdout).ok()
 }
