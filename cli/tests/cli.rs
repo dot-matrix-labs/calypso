@@ -257,10 +257,19 @@ fn path_flag_long_routes_doctor_to_specified_directory() {
 
     std::fs::remove_dir_all(&dir).ok();
 
-    assert!(output.status.success(), "doctor should exit 0 even with failing checks");
+    assert!(
+        output.status.success(),
+        "doctor should exit 0 even with failing checks"
+    );
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("gh-installed"), "doctor output should list checks");
-    assert!(stdout.contains("github-remote-configured"), "routing used the supplied dir");
+    assert!(
+        stdout.contains("gh-installed"),
+        "doctor output should list checks"
+    );
+    assert!(
+        stdout.contains("github-remote-configured"),
+        "routing used the supplied dir"
+    );
 }
 
 #[test]
@@ -340,7 +349,10 @@ fn path_flag_routes_state_show_to_specified_directory() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     // Output is the JSON state file — must contain the feature id we seeded
-    assert!(stdout.contains("feat-tui-surface"), "state show used the supplied directory");
+    assert!(
+        stdout.contains("feat-tui-surface"),
+        "state show used the supplied directory"
+    );
 }
 
 // ── Routing: subcommands not yet covered ─────────────────────────────────────

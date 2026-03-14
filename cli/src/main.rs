@@ -30,9 +30,8 @@ fn main() {
     // Strip -p / --path <dir> from args before dispatching.
     // This makes --path a global flag that works with every subcommand.
     let (path_override, args) = extract_path_flag(&raw_args);
-    let cwd = path_override.unwrap_or_else(|| {
-        std::env::current_dir().expect("current directory should resolve")
-    });
+    let cwd = path_override
+        .unwrap_or_else(|| std::env::current_dir().expect("current directory should resolve"));
 
     match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
@@ -43,15 +42,13 @@ fn main() {
         [command, flag, check_id] if command == "doctor" && flag == "--fix" => {
             run_doctor_fix(check_id, &cwd);
         }
-        [command] if command == "status" => {
-            match run_status(&cwd) {
-                Ok(output) => println!("{output}"),
-                Err(error) => {
-                    eprintln!("status error: {error}");
-                    std::process::exit(1);
-                }
+        [command] if command == "status" => match run_status(&cwd) {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("status error: {error}");
+                std::process::exit(1);
             }
-        }
+        },
         [command, flag, path, headless]
             if command == "status" && flag == "--state" && headless == "--headless" =>
         {

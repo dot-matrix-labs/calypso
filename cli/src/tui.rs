@@ -161,10 +161,7 @@ impl OperatorSurface {
         let mut lines = vec![
             "┌─ Calypso ──────────────────────────────────────────────────────────────────┐"
                 .to_string(),
-            format!(
-                "│ Feature: {:<66} │",
-                self.feature_id
-            ),
+            format!("│ Feature: {:<66} │", self.feature_id),
             format!(
                 "│ Branch:  {:<30}  PR: #{:<29} │",
                 self.branch, self.pull_request_number
@@ -224,7 +221,10 @@ impl OperatorSurface {
                         _ => "  ○",
                     };
                     let blocking_marker = if gate.is_blocking { " ⚠" } else { "" };
-                    lines.push(format!("  {}  {}{}", gate_icon, gate.label, blocking_marker));
+                    lines.push(format!(
+                        "  {}  {}{}",
+                        gate_icon, gate.label, blocking_marker
+                    ));
                 }
             }
         }
@@ -410,7 +410,13 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
     // Resize first — sets layout, activates paned rendering for subsequent frames.
     run_terminal_iteration(&mut stdout, feature, &mut surface, resize, &mut layout)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, type_a, &mut layout)?;
-    run_terminal_iteration(&mut stdout, feature, &mut surface, submit.clone(), &mut layout)?;
+    run_terminal_iteration(
+        &mut stdout,
+        feature,
+        &mut surface,
+        submit.clone(),
+        &mut layout,
+    )?;
     if let Some(active_session) = feature.active_sessions.first_mut() {
         active_session.status = AgentSessionStatus::Completed;
     }
@@ -920,7 +926,10 @@ impl OperatorSurface {
                         _ => "  ○",
                     };
                     let blocking_marker = if gate.is_blocking { " ⚠" } else { "" };
-                    lines.push(format!("  {}  {}{}", gate_icon, gate.label, blocking_marker));
+                    lines.push(format!(
+                        "  {}  {}{}",
+                        gate_icon, gate.label, blocking_marker
+                    ));
                 }
             }
         }
@@ -977,7 +986,10 @@ impl OperatorSurface {
         let content_rows = layout.content_rows as usize;
 
         let focus_indicator = if self.sidebar_focused { "●" } else { " " };
-        let header = format!("┌─{focus_indicator} Chat {}", "─".repeat(w.saturating_sub(8)));
+        let header = format!(
+            "┌─{focus_indicator} Chat {}",
+            "─".repeat(w.saturating_sub(8))
+        );
         write_at(stdout, col, 0, &format!("{header}┐"), w)?;
 
         let mut row: usize = 1;
@@ -1062,9 +1074,7 @@ fn render_keybinding_ribbon_operator(
     } else {
         "[Tab] Chat"
     };
-    let ribbon = format!(
-        " [Ctrl+C] Interrupt  [Esc] Quit  {focus_hint}  [↑/↓] Scroll"
-    );
+    let ribbon = format!(" [Ctrl+C] Interrupt  [Esc] Quit  {focus_hint}  [↑/↓] Scroll");
     write_at(stdout, 0, layout.ribbon_row, &ribbon, layout.cols as usize)
 }
 
@@ -1127,7 +1137,11 @@ impl DoctorSurface {
             } else {
                 "✗"
             };
-            let fix_tag = if check.has_auto_fix { "  [auto-fix]" } else { "" };
+            let fix_tag = if check.has_auto_fix {
+                "  [auto-fix]"
+            } else {
+                ""
+            };
             write_at(
                 stdout,
                 0,
@@ -1187,7 +1201,11 @@ impl DoctorSurface {
                     write_at(stdout, col, row as u16, "│ Detail:", w)?;
                     row += 1;
                 }
-                for line in detail.chars().collect::<Vec<_>>().chunks(w.saturating_sub(4)) {
+                for line in detail
+                    .chars()
+                    .collect::<Vec<_>>()
+                    .chunks(w.saturating_sub(4))
+                {
                     if row >= content_rows.saturating_sub(1) {
                         break;
                     }
@@ -1218,15 +1236,15 @@ impl DoctorSurface {
                 }
             }
 
-            if let Some(output) = &self.fix_output {
-                if row < content_rows.saturating_sub(2) {
-                    write_at(stdout, col, row as u16, "│", w)?;
-                    row += 1;
-                    write_at(stdout, col, row as u16, "│ Fix output:", w)?;
-                    row += 1;
-                    write_at(stdout, col, row as u16, &format!("│   {output}"), w)?;
-                    row += 1;
-                }
+            if let Some(output) = &self.fix_output
+                && row < content_rows.saturating_sub(2)
+            {
+                write_at(stdout, col, row as u16, "│", w)?;
+                row += 1;
+                write_at(stdout, col, row as u16, "│ Fix output:", w)?;
+                row += 1;
+                write_at(stdout, col, row as u16, &format!("│   {output}"), w)?;
+                row += 1;
             }
         }
 
@@ -1319,7 +1337,10 @@ impl DoctorSurface {
         let mut lines = vec![
             "┌─ Calypso Doctor ───────────────────────────────────────────────────────────┐"
                 .to_string(),
-            format!("│ Environment diagnostics  {passing}/{total} passing{:<48} │", ""),
+            format!(
+                "│ Environment diagnostics  {passing}/{total} passing{:<48} │",
+                ""
+            ),
             "└────────────────────────────────────────────────────────────────────────────┘"
                 .to_string(),
             String::new(),
