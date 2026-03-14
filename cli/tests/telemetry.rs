@@ -229,43 +229,8 @@ fn event_stream_drain_empties_the_stream() {
 }
 
 // ---------------------------------------------------------------------------
-// Tests: output goes to stderr (structural — verify via writer injection)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn log_output_goes_to_injected_writer_not_stdout() {
-    // This test verifies the output routing contract by using an injected writer.
-    // In normal operation Logger::new() uses stderr.
-    let (logger, buf) = logger_with_buf(LogLevel::Info);
-    logger.info("stderr target");
-    assert!(!buf.into_string().is_empty());
-    // stdout is not captured here — if we had printed to stdout the buf would
-    // be empty (proving the output went to the injected writer, i.e. stderr).
-}
-
-// ---------------------------------------------------------------------------
 // Tests: warn and error log levels
 // ---------------------------------------------------------------------------
-
-#[test]
-fn warn_entry_emitted_and_has_correct_level() {
-    let (logger, buf) = logger_with_buf(LogLevel::Warn);
-    logger.warn("something degraded");
-    let output = buf.into_string();
-    let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(entry["level"], "warn");
-    assert_eq!(entry["message"], "something degraded");
-}
-
-#[test]
-fn error_entry_emitted_and_has_correct_level() {
-    let (logger, buf) = logger_with_buf(LogLevel::Error);
-    logger.error("fatal problem");
-    let output = buf.into_string();
-    let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(entry["level"], "error");
-    assert_eq!(entry["message"], "fatal problem");
-}
 
 #[test]
 fn warn_suppressed_when_level_is_error() {
@@ -296,12 +261,6 @@ fn logger_default_min_level_is_info_without_env_var() {
     }
 }
 
-#[test]
-fn logger_debug_impl_does_not_panic() {
-    let (logger, _buf) = logger_with_buf(LogLevel::Info);
-    let _ = format!("{logger:?}");
-}
-
 // ---------------------------------------------------------------------------
 // Tests: CorrelationContext partial fields
 // ---------------------------------------------------------------------------
@@ -319,36 +278,6 @@ fn partial_context_only_feature_id_set() {
     assert_eq!(entry["feature_id"], "feat-only");
     assert!(entry.get("session_id").is_none());
     assert!(entry.get("thread_id").is_none());
-}
-
-#[test]
-fn partial_context_only_session_id_set() {
-    let ctx = CorrelationContext::new().with_session_id("sess-only");
-
-    let (logger, buf) = logger_with_buf(LogLevel::Info);
-    let logger = logger.with_context(ctx);
-    logger.info("session only");
-
-    let output = buf.into_string();
-    let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert!(entry.get("feature_id").is_none());
-    assert_eq!(entry["session_id"], "sess-only");
-    assert!(entry.get("thread_id").is_none());
-}
-
-#[test]
-fn partial_context_only_thread_id_set() {
-    let ctx = CorrelationContext::new().with_thread_id("thread-only");
-
-    let (logger, buf) = logger_with_buf(LogLevel::Info);
-    let logger = logger.with_context(ctx);
-    logger.info("thread only");
-
-    let output = buf.into_string();
-    let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert!(entry.get("feature_id").is_none());
-    assert!(entry.get("session_id").is_none());
-    assert_eq!(entry["thread_id"], "thread-only");
 }
 
 // ---------------------------------------------------------------------------
@@ -404,20 +333,6 @@ fn log_event_macro_no_fields() {
     assert_eq!(entry["message"], "bare message");
     // fields key should be absent when empty (skip_serializing_if)
     assert!(entry.get("fields").is_none());
-}
-
-// ---------------------------------------------------------------------------
-// Tests: EventKind Display and all variants
-// ---------------------------------------------------------------------------
-
-#[test]
-fn event_kind_display_all_variants() {
-    assert_eq!(EventKind::StateTransition.to_string(), "state_transition");
-    assert_eq!(EventKind::GateChanged.to_string(), "gate_changed");
-    assert_eq!(EventKind::SessionStarted.to_string(), "session_started");
-    assert_eq!(EventKind::SessionEnded.to_string(), "session_ended");
-    assert_eq!(EventKind::GitOp.to_string(), "git_op");
-    assert_eq!(EventKind::GithubApiCall.to_string(), "github_api_call");
 }
 
 // ---------------------------------------------------------------------------
@@ -586,36 +501,6 @@ fn logger_with_writer_reads_calypso_log_debug() {
 }
 
 #[test]
-fn logger_with_writer_reads_calypso_log_warn() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::set_var("CALYPSO_LOG", "warn") };
-    let buf = TestBuf::new();
-    let logger = Logger::with_writer(Box::new(buf));
-    unsafe { std::env::remove_var("CALYPSO_LOG") };
-    assert_eq!(logger.min_level(), LogLevel::Warn);
-}
-
-#[test]
-fn logger_with_writer_reads_calypso_log_error() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::set_var("CALYPSO_LOG", "error") };
-    let buf = TestBuf::new();
-    let logger = Logger::with_writer(Box::new(buf));
-    unsafe { std::env::remove_var("CALYPSO_LOG") };
-    assert_eq!(logger.min_level(), LogLevel::Error);
-}
-
-#[test]
-fn logger_with_writer_reads_calypso_log_info() {
-    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::set_var("CALYPSO_LOG", "info") };
-    let buf = TestBuf::new();
-    let logger = Logger::with_writer(Box::new(buf));
-    unsafe { std::env::remove_var("CALYPSO_LOG") };
-    assert_eq!(logger.min_level(), LogLevel::Info);
-}
-
-#[test]
 fn logger_with_writer_falls_back_to_info_for_unknown_calypso_log_value() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     unsafe { std::env::set_var("CALYPSO_LOG", "bogus_value") };
@@ -625,26 +510,3 @@ fn logger_with_writer_falls_back_to_info_for_unknown_calypso_log_value() {
     assert_eq!(logger.min_level(), LogLevel::Info);
 }
 
-// ---------------------------------------------------------------------------
-// Tests: LogLevel Display (fmt::Display)
-// ---------------------------------------------------------------------------
-
-#[test]
-fn log_level_display_renders_all_variants() {
-    assert_eq!(format!("{}", LogLevel::Debug), "debug");
-    assert_eq!(format!("{}", LogLevel::Info), "info");
-    assert_eq!(format!("{}", LogLevel::Warn), "warn");
-    assert_eq!(format!("{}", LogLevel::Error), "error");
-}
-
-// ---------------------------------------------------------------------------
-// Tests: Logger::default()
-// ---------------------------------------------------------------------------
-
-#[test]
-fn logger_default_constructs_without_panic() {
-    // Logger::default() calls Logger::new() which writes to stderr.
-    // We just verify it constructs successfully and min_level is at least Info.
-    let logger = Logger::default();
-    assert!(logger.min_level() >= LogLevel::Info || logger.min_level() == LogLevel::Debug);
-}

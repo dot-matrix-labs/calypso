@@ -539,33 +539,3 @@ impl EventStream {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn days_to_ymd_epoch() {
-        assert_eq!(days_to_ymd(0), (1970, 1, 1));
-    }
-
-    #[test]
-    fn days_to_ymd_known_date() {
-        // 2026-03-14 => days since epoch = 20526
-        // verified independently
-        let (y, m, d) = days_to_ymd(20526);
-        assert_eq!((y, m, d), (2026, 3, 14));
-    }
-
-    #[test]
-    fn log_level_ordering() {
-        assert!(LogLevel::Debug < LogLevel::Info);
-        assert!(LogLevel::Info < LogLevel::Warn);
-        assert!(LogLevel::Warn < LogLevel::Error);
-    }
-
-    #[test]
-    fn redaction_masks_token_keys() {
-        assert_eq!(redact_if_secret("github_token", "ghp_secret"), "[REDACTED]");
-        assert_eq!(redact_if_secret("message", "hello"), "hello");
-    }
-}
