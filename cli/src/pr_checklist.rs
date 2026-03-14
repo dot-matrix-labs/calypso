@@ -43,7 +43,7 @@ pub fn update_pr_body(
 }
 
 fn render_gates_section(gate_groups: &[GateGroup], template: &TemplateSet) -> String {
-    let mut out = String::new();
+    let mut out = String::with_capacity(512);
 
     for group in gate_groups {
         out.push_str(&format!("### {}\n", group.label));

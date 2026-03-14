@@ -346,7 +346,7 @@ pub fn derive_feature_branch_name(feature_id: &str) -> Result<String, FeatureSta
         return Err(FeatureStartError::EmptyFeatureId);
     }
 
-    let mut slug = String::new();
+    let mut slug = String::with_capacity(trimmed.len());
     let mut previous_was_dash = false;
 
     for ch in trimmed.chars() {
