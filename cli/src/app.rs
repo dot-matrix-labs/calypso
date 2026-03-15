@@ -542,7 +542,7 @@ fn session_display_parts(session: &AgentSession) -> (&'static str, &'static str)
         AgentSessionStatus::WaitingForHuman => ("⏸", "waiting-for-human"),
         AgentSessionStatus::Completed => ("✓", "completed"),
         AgentSessionStatus::Failed => ("✗", "failed"),
-        AgentSessionStatus::Aborted => ("✗", "aborted"),
+        AgentSessionStatus::Aborted => ("⊗", "aborted"),
     }
 }
 

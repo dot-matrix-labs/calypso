@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "repo_id": "fixture-repo",
+  "schema_version": 2,
+  "current_feature": {
+    "feature_id": "feat-login-oauth",
+    "branch": "feat/login-oauth",
+    "worktree_path": "/tmp/worktree",
+    "pull_request": {
+      "number": 99,
+      "url": "https://github.com/example/repo/pull/99"
+    },
+    "workflow_state": "implementation",
+    "gate_groups": [],
+    "active_sessions": [
+      {
+        "role": "engineer",
+        "session_id": "session_01",
+        "status": "running",
+        "output": [
+          { "stream": "stdout", "text": "Inspecting branch state\u2026" },
+          { "stream": "stdout", "text": "Waiting on operator guidance" }
+        ],
+        "pending_follow_ups": []
+      },
+      {
+        "role": "reviewer",
+        "session_id": "session_02",
+        "status": "completed",
+        "output": [
+          { "stream": "stdout", "text": "Review passed \u2014 no changes required" }
+        ],
+        "pending_follow_ups": []
+      },
+      {
+        "role": "validator",
+        "session_id": "session_03",
+        "status": "failed",
+        "output": [],
+        "pending_follow_ups": []
+      },
+      {
+        "role": "orchestrator",
+        "session_id": "session_04",
+        "status": "aborted",
+        "output": [],
+        "pending_follow_ups": []
+      },
+      {
+        "role": "architect",
+        "session_id": "session_05",
+        "status": "waiting-for-human",
+        "output": [],
+        "pending_follow_ups": ["What branch should I target?"]
+      }
+    ]
+  }
+}
