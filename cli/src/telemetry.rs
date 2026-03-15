@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogLevel {
+    Trace,
     Debug,
     Info,
     Warn,
@@ -22,8 +23,9 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Parse a level from the `CALYPSO_LOG` env-var value.
-    fn from_str(s: &str) -> Option<Self> {
+    pub fn from_str(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
+            "trace" => Some(Self::Trace),
             "debug" => Some(Self::Debug),
             "info" => Some(Self::Info),
             "warn" => Some(Self::Warn),
@@ -32,8 +34,9 @@ impl LogLevel {
         }
     }
 
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
+            Self::Trace => "trace",
             Self::Debug => "debug",
             Self::Info => "info",
             Self::Warn => "warn",
@@ -45,6 +48,127 @@ impl LogLevel {
 impl fmt::Display for LogLevel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+/// Identifies which subsystem produced a log entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Component {
+    Doctor,
+    StateMachine,
+    Gate,
+    Agent,
+    Github,
+    Git,
+    Init,
+    Cli,
+}
+
+impl Component {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Doctor => "doctor",
+            Self::StateMachine => "statemachine",
+            Self::Gate => "gate",
+            Self::Agent => "agent",
+            Self::Github => "github",
+            Self::Git => "git",
+            Self::Init => "init",
+            Self::Cli => "cli",
+        }
+    }
+}
+
+impl Serialize for Component {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl fmt::Display for Component {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LogEvent (structured event tag on a log entry)
+// ---------------------------------------------------------------------------
+
+/// A structured event tag that can be attached to a log entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogEvent {
+    StateTransition,
+    GateEvaluated,
+    AgentStarted,
+    AgentCompleted,
+    DoctorCheck,
+    DoctorFailed,
+    Startup,
+    Shutdown,
+}
+
+impl LogEvent {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::StateTransition => "state_transition",
+            Self::GateEvaluated => "gate_evaluated",
+            Self::AgentStarted => "agent_started",
+            Self::AgentCompleted => "agent_completed",
+            Self::DoctorCheck => "doctor_check",
+            Self::DoctorFailed => "doctor_failed",
+            Self::Startup => "startup",
+            Self::Shutdown => "shutdown",
+        }
+    }
+}
+
+impl Serialize for LogEvent {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl fmt::Display for LogEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Log format
+// ---------------------------------------------------------------------------
+
+/// Output format for the [`Logger`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogFormat {
+    /// JSON-lines (one JSON object per line).
+    Json,
+    /// Human-readable text lines with optional ANSI colours.
+    Text,
+}
+
+// ---------------------------------------------------------------------------
+// TTY detection
+// ---------------------------------------------------------------------------
+
+/// Returns `true` if stderr (fd 2) is a TTY.
+pub fn is_tty() -> bool {
+    #[cfg(unix)]
+    {
+        unsafe extern "C" {
+            fn isatty(fd: std::ffi::c_int) -> std::ffi::c_int;
+        }
+        // SAFETY: isatty is safe to call with any fd; returns 0 for non-TTY.
+        unsafe { isatty(2) != 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
     }
 }
 
@@ -114,11 +238,19 @@ impl CorrelationContext {
 // Log entry (internal serialisation shape)
 // ---------------------------------------------------------------------------
 
+fn str_is_empty(s: &&str) -> bool {
+    s.is_empty()
+}
+
 #[derive(Debug, Serialize)]
 struct LogEntry<'a> {
     level: &'a str,
     timestamp: String,
     message: &'a str,
+    #[serde(skip_serializing_if = "str_is_empty")]
+    component: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    event: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     feature_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -163,6 +295,23 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 }
 
 // ---------------------------------------------------------------------------
+// ANSI colour helpers (text format)
+// ---------------------------------------------------------------------------
+
+fn ansi_level_prefix(level: LogLevel, use_color: bool) -> (&'static str, &'static str) {
+    if !use_color {
+        return ("", "");
+    }
+    match level {
+        LogLevel::Error => ("\x1b[31m", "\x1b[0m"), // red
+        LogLevel::Warn => ("\x1b[33m", "\x1b[0m"),  // yellow
+        LogLevel::Info => ("\x1b[32m", "\x1b[0m"),   // green
+        LogLevel::Debug => ("\x1b[2m", "\x1b[0m"),   // dim/gray
+        LogLevel::Trace => ("\x1b[2m", "\x1b[0m"),   // dim
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Logger
 // ---------------------------------------------------------------------------
 
@@ -174,6 +323,7 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 #[derive(Clone)]
 pub struct Logger {
     min_level: LogLevel,
+    format: LogFormat,
     context: CorrelationContext,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
 }
@@ -182,6 +332,7 @@ impl fmt::Debug for Logger {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Logger")
             .field("min_level", &self.min_level)
+            .field("format", &self.format)
             .field("context", &self.context)
             .finish()
     }
@@ -202,6 +353,7 @@ impl Logger {
             .unwrap_or(LogLevel::Info);
         Self {
             min_level,
+            format: LogFormat::Json,
             context: CorrelationContext::default(),
             writer: Arc::new(Mutex::new(writer)),
         }
@@ -220,28 +372,98 @@ impl Logger {
         self
     }
 
+    /// Builder: set the output format.
+    pub fn with_format(mut self, format: LogFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Builder: set the minimum log level.
+    pub fn with_min_level(mut self, level: LogLevel) -> Self {
+        self.min_level = level;
+        self
+    }
+
     /// Emit a log entry if `level >= min_level`.
     pub fn log(&self, level: LogLevel, message: &str, fields: BTreeMap<String, serde_json::Value>) {
+        self.log_full(level, "", None, message, fields);
+    }
+
+    /// Emit a fully structured log entry with component and event.
+    pub fn log_event(
+        &self,
+        level: LogLevel,
+        component: Component,
+        event: LogEvent,
+        message: &str,
+        fields: BTreeMap<String, serde_json::Value>,
+    ) {
+        self.log_full(level, component.as_str(), Some(event.as_str()), message, fields);
+    }
+
+    /// Internal: emit a log entry with all fields.
+    fn log_full(
+        &self,
+        level: LogLevel,
+        component: &str,
+        event: Option<&str>,
+        message: &str,
+        fields: BTreeMap<String, serde_json::Value>,
+    ) {
         if level < self.min_level {
             return;
         }
 
-        let entry = LogEntry {
-            level: level.as_str(),
-            timestamp: rfc3339_now(),
-            message,
-            feature_id: self.context.feature_id.as_deref(),
-            session_id: self.context.session_id.as_deref(),
-            thread_id: self.context.thread_id.as_deref(),
-            fields,
-        };
+        let timestamp = rfc3339_now();
 
-        if let Ok(mut json) = serde_json::to_string(&entry) {
-            json.push('\n');
-            if let Ok(mut w) = self.writer.lock() {
-                let _ = w.write_all(json.as_bytes());
+        match self.format {
+            LogFormat::Json => {
+                let entry = LogEntry {
+                    level: level.as_str(),
+                    timestamp,
+                    message,
+                    component,
+                    event,
+                    feature_id: self.context.feature_id.as_deref(),
+                    session_id: self.context.session_id.as_deref(),
+                    thread_id: self.context.thread_id.as_deref(),
+                    fields,
+                };
+
+                if let Ok(mut json) = serde_json::to_string(&entry) {
+                    json.push('\n');
+                    if let Ok(mut w) = self.writer.lock() {
+                        let _ = w.write_all(json.as_bytes());
+                    }
+                }
+            }
+            LogFormat::Text => {
+                let use_color = is_tty();
+                let (pre, suf) = ansi_level_prefix(level, use_color);
+                let level_upper = level.as_str().to_ascii_uppercase();
+
+                let comp_display = if component.is_empty() { "-" } else { component };
+
+                let line = format!(
+                    "{ts} {pre}{lvl}{suf} [{comp}] {msg}\n",
+                    ts = timestamp,
+                    pre = pre,
+                    lvl = level_upper,
+                    suf = suf,
+                    comp = comp_display,
+                    msg = message,
+                );
+
+                if let Ok(mut w) = self.writer.lock() {
+                    let _ = w.write_all(line.as_bytes());
+                }
             }
         }
+    }
+
+    /// Convenience: log at `trace` level.
+    pub fn trace(&self, message: &str) {
+        self.log(LogLevel::Trace, message, BTreeMap::new());
     }
 
     /// Convenience: log at `debug` level.
@@ -264,6 +486,21 @@ impl Logger {
         self.log(LogLevel::Error, message, BTreeMap::new());
     }
 
+    /// Emit an info-level notice when the `CALYPSO_LOG` env var was set but
+    /// a CLI verbosity flag takes precedence.
+    pub fn log_level_override_notice(&self, env_value: &str, resolved: LogLevel) {
+        let msg = format!(
+            "verbosity flag overrides CALYPSO_LOG={env_value}; using {resolved}"
+        );
+        self.log_event(
+            LogLevel::Info,
+            Component::Cli,
+            LogEvent::Startup,
+            &msg,
+            BTreeMap::new(),
+        );
+    }
+
     /// Build a log entry with structured fields using the builder returned by
     /// this method.
     pub fn entry(&self, level: LogLevel, message: &str) -> LogEntryBuilder<'_> {
@@ -271,6 +508,8 @@ impl Logger {
             logger: self,
             level,
             message: message.to_string(),
+            component: None,
+            event: None,
             fields: BTreeMap::new(),
         }
     }
@@ -286,6 +525,7 @@ impl Logger {
     pub fn _with_level_and_writer(level: LogLevel, writer: Box<dyn Write + Send>) -> Self {
         Self {
             min_level: level,
+            format: LogFormat::Json,
             context: CorrelationContext::default(),
             writer: Arc::new(Mutex::new(writer)),
         }
@@ -307,6 +547,8 @@ pub struct LogEntryBuilder<'a> {
     logger: &'a Logger,
     level: LogLevel,
     message: String,
+    component: Option<Component>,
+    event: Option<LogEvent>,
     fields: BTreeMap<String, serde_json::Value>,
 }
 
@@ -326,9 +568,23 @@ impl<'a> LogEntryBuilder<'a> {
         self
     }
 
+    /// Set the component for this log entry.
+    pub fn component(mut self, component: Component) -> Self {
+        self.component = component.into();
+        self
+    }
+
+    /// Set the event tag for this log entry.
+    pub fn event(mut self, event: LogEvent) -> Self {
+        self.event = event.into();
+        self
+    }
+
     /// Emit the entry.
     pub fn emit(self) {
-        self.logger.log(self.level, &self.message, self.fields);
+        let comp = self.component.map(|c| c.as_str()).unwrap_or("");
+        let evt = self.event.map(|e| e.as_str());
+        self.logger.log_full(self.level, comp, evt, &self.message, self.fields);
     }
 }
 

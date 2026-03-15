@@ -14,6 +14,7 @@ pub mod policy;
 pub mod pr_checklist;
 pub mod report;
 pub mod runtime;
+pub mod signal;
 pub mod sm_audit;
 pub mod state;
 pub mod telemetry;
