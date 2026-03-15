@@ -800,3 +800,477 @@ impl EventStream {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A writer that captures output for test assertions.
+    #[derive(Clone)]
+    struct CaptureWriter {
+        buffer: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl CaptureWriter {
+        fn new() -> Self {
+            Self {
+                buffer: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+
+        fn contents(&self) -> String {
+            let buf = self.buffer.lock().unwrap();
+            String::from_utf8_lossy(&buf).to_string()
+        }
+    }
+
+    impl std::io::Write for CaptureWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.buffer.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn make_logger(writer: CaptureWriter, format: LogFormat) -> Logger {
+        Logger::_with_level_and_writer(LogLevel::Trace, Box::new(writer)).with_format(format)
+    }
+
+    // ---- Text format rendering ----
+
+    #[test]
+    fn text_format_renders_component_and_message() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Text);
+
+        logger.log_event(
+            LogLevel::Info,
+            Component::Doctor,
+            LogEvent::DoctorCheck,
+            "checking prerequisites",
+            BTreeMap::new(),
+        );
+
+        let output = writer.contents();
+        assert!(output.contains("INFO"), "expected INFO in: {output}");
+        assert!(
+            output.contains("[doctor]"),
+            "expected [doctor] in: {output}"
+        );
+        assert!(
+            output.contains("checking prerequisites"),
+            "expected message in: {output}"
+        );
+    }
+
+    #[test]
+    fn text_format_uses_dash_for_empty_component() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Text);
+
+        logger.log(LogLevel::Warn, "bare message", BTreeMap::new());
+
+        let output = writer.contents();
+        assert!(output.contains("[-]"), "expected [-] in: {output}");
+        assert!(output.contains("WARN"), "expected WARN in: {output}");
+    }
+
+    #[test]
+    fn text_format_all_levels() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Text);
+
+        logger.trace("t");
+        logger.debug("d");
+        logger.info("i");
+        logger.warn("w");
+        logger.error("e");
+
+        let output = writer.contents();
+        assert!(output.contains("TRACE"), "expected TRACE in: {output}");
+        assert!(output.contains("DEBUG"), "expected DEBUG in: {output}");
+        assert!(output.contains("INFO"), "expected INFO in: {output}");
+        assert!(output.contains("WARN"), "expected WARN in: {output}");
+        assert!(output.contains("ERROR"), "expected ERROR in: {output}");
+    }
+
+    // ---- with_context ----
+
+    #[test]
+    fn with_context_stamps_correlation_ids_on_json_output() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json).with_context(
+            CorrelationContext::new()
+                .with_feature_id("feat-123")
+                .with_session_id("sess-456")
+                .with_thread_id("thread-789"),
+        );
+
+        logger.info("correlated message");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"feature_id\":\"feat-123\""),
+            "expected feature_id in: {output}"
+        );
+        assert!(
+            output.contains("\"session_id\":\"sess-456\""),
+            "expected session_id in: {output}"
+        );
+        assert!(
+            output.contains("\"thread_id\":\"thread-789\""),
+            "expected thread_id in: {output}"
+        );
+    }
+
+    // ---- LogEntryBuilder ----
+
+    #[test]
+    fn entry_builder_with_event_tag() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json);
+
+        logger
+            .entry(LogLevel::Info, "transition happened")
+            .component(Component::StateMachine)
+            .event(LogEvent::StateTransition)
+            .field("from", "new")
+            .field("to", "in_progress")
+            .emit();
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"state_transition\""),
+            "expected event in: {output}"
+        );
+        assert!(
+            output.contains("\"component\":\"statemachine\""),
+            "expected component in: {output}"
+        );
+        assert!(
+            output.contains("\"from\":\"new\""),
+            "expected from field in: {output}"
+        );
+    }
+
+    #[test]
+    fn entry_builder_field_json() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json);
+
+        logger
+            .entry(LogLevel::Info, "with json field")
+            .field_json("count", serde_json::json!(42))
+            .emit();
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"count\":42"),
+            "expected count field in: {output}"
+        );
+    }
+
+    // ---- Redaction ----
+
+    #[test]
+    fn secret_fields_are_redacted() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json);
+
+        logger
+            .entry(LogLevel::Info, "auth check")
+            .field("api_key", "sk-1234567890")
+            .field("auth_token", "ghp_abc")
+            .field("password", "hunter2")
+            .field("safe_field", "visible")
+            .emit();
+
+        let output = writer.contents();
+        assert!(
+            output.contains("[REDACTED]"),
+            "expected redaction in: {output}"
+        );
+        assert!(
+            !output.contains("sk-1234567890"),
+            "api_key should be redacted"
+        );
+        assert!(!output.contains("ghp_abc"), "auth_token should be redacted");
+        assert!(!output.contains("hunter2"), "password should be redacted");
+        assert!(output.contains("visible"), "safe_field should be visible");
+    }
+
+    // ---- Level filtering ----
+
+    #[test]
+    fn below_min_level_is_suppressed() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json).with_min_level(LogLevel::Warn);
+
+        logger.info("should not appear");
+        logger.debug("also hidden");
+        logger.warn("should appear");
+
+        let output = writer.contents();
+        assert!(
+            !output.contains("should not appear"),
+            "info should be suppressed"
+        );
+        assert!(output.contains("should appear"), "warn should appear");
+    }
+
+    // ---- LogLevel ----
+
+    #[test]
+    fn log_level_from_str_coverage() {
+        assert_eq!(LogLevel::from_str("trace"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::from_str("DEBUG"), Some(LogLevel::Debug));
+        assert_eq!(LogLevel::from_str("Info"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::from_str("WARN"), Some(LogLevel::Warn));
+        assert_eq!(LogLevel::from_str("error"), Some(LogLevel::Error));
+        assert_eq!(LogLevel::from_str("bogus"), None);
+    }
+
+    #[test]
+    fn log_level_display() {
+        assert_eq!(format!("{}", LogLevel::Trace), "trace");
+        assert_eq!(format!("{}", LogLevel::Error), "error");
+    }
+
+    // ---- Component / LogEvent Display ----
+
+    #[test]
+    fn component_display_and_serialize() {
+        assert_eq!(format!("{}", Component::Agent), "agent");
+        assert_eq!(format!("{}", Component::Github), "github");
+        assert_eq!(format!("{}", Component::Git), "git");
+        assert_eq!(format!("{}", Component::Init), "init");
+
+        // Serialize
+        let json = serde_json::to_string(&Component::Gate).unwrap();
+        assert_eq!(json, "\"gate\"");
+    }
+
+    #[test]
+    fn log_event_display_and_serialize() {
+        assert_eq!(format!("{}", LogEvent::AgentStarted), "agent_started");
+        assert_eq!(format!("{}", LogEvent::AgentCompleted), "agent_completed");
+        assert_eq!(format!("{}", LogEvent::Shutdown), "shutdown");
+        assert_eq!(format!("{}", LogEvent::Startup), "startup");
+
+        let json = serde_json::to_string(&LogEvent::StateTransition).unwrap();
+        assert_eq!(json, "\"state_transition\"");
+    }
+
+    // ---- EventKind Display ----
+
+    #[test]
+    fn event_kind_display() {
+        assert_eq!(
+            format!("{}", EventKind::StateTransition),
+            "state_transition"
+        );
+        assert_eq!(format!("{}", EventKind::GateChanged), "gate_changed");
+        assert_eq!(format!("{}", EventKind::SessionStarted), "session_started");
+        assert_eq!(format!("{}", EventKind::SessionEnded), "session_ended");
+        assert_eq!(format!("{}", EventKind::GitOp), "git_op");
+        assert_eq!(format!("{}", EventKind::GithubApiCall), "github_api_call");
+    }
+
+    // ---- Event constructors ----
+
+    #[test]
+    fn event_state_transition_with_feature_id() {
+        let e = Event::state_transition("new", "in_progress", Some("feat-1"));
+        assert_eq!(e.kind, EventKind::StateTransition);
+        assert_eq!(e.payload.get("from").and_then(|v| v.as_str()), Some("new"));
+        assert_eq!(
+            e.payload.get("to").and_then(|v| v.as_str()),
+            Some("in_progress")
+        );
+        assert_eq!(
+            e.payload.get("feature_id").and_then(|v| v.as_str()),
+            Some("feat-1")
+        );
+    }
+
+    #[test]
+    fn event_state_transition_without_feature_id() {
+        let e = Event::state_transition("a", "b", None);
+        assert!(!e.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_gate_changed() {
+        let e = Event::gate_changed("g1", "passing", Some("feat-2"));
+        assert_eq!(e.kind, EventKind::GateChanged);
+        assert_eq!(
+            e.payload.get("gate_id").and_then(|v| v.as_str()),
+            Some("g1")
+        );
+        assert_eq!(
+            e.payload.get("status").and_then(|v| v.as_str()),
+            Some("passing")
+        );
+    }
+
+    #[test]
+    fn event_session_started_and_ended() {
+        let started = Event::session_started("s1", Some("feat-3"));
+        assert_eq!(started.kind, EventKind::SessionStarted);
+        assert_eq!(
+            started.payload.get("session_id").and_then(|v| v.as_str()),
+            Some("s1")
+        );
+
+        let ended = Event::session_ended("s1", "success", None);
+        assert_eq!(ended.kind, EventKind::SessionEnded);
+        assert_eq!(
+            ended.payload.get("outcome").and_then(|v| v.as_str()),
+            Some("success")
+        );
+        assert!(!ended.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_git_op() {
+        let e = Event::git_op("commit", Some("abc123"));
+        assert_eq!(e.kind, EventKind::GitOp);
+        assert_eq!(
+            e.payload.get("detail").and_then(|v| v.as_str()),
+            Some("abc123")
+        );
+
+        let e2 = Event::git_op("push", None);
+        assert!(!e2.payload.contains_key("detail"));
+    }
+
+    #[test]
+    fn event_github_api_call() {
+        let e = Event::github_api_call("/repos/owner/repo", Some(200));
+        assert_eq!(e.kind, EventKind::GithubApiCall);
+        assert_eq!(
+            e.payload.get("status_code").and_then(|v| v.as_u64()),
+            Some(200)
+        );
+
+        let e2 = Event::github_api_call("/repos/owner/repo", None);
+        assert!(!e2.payload.contains_key("status_code"));
+    }
+
+    // ---- EventStream ----
+
+    #[test]
+    fn event_stream_push_snapshot_drain() {
+        let stream = EventStream::new();
+        assert!(stream.snapshot().is_empty());
+
+        stream.push(Event::git_op("fetch", None));
+        stream.push(Event::git_op("pull", None));
+
+        let snap = stream.snapshot();
+        assert_eq!(snap.len(), 2);
+
+        let drained = stream.drain();
+        assert_eq!(drained.len(), 2);
+        assert!(stream.snapshot().is_empty());
+    }
+
+    // ---- ANSI colour helper ----
+
+    #[test]
+    fn ansi_level_prefix_no_color() {
+        let (pre, suf) = ansi_level_prefix(LogLevel::Error, false);
+        assert!(pre.is_empty());
+        assert!(suf.is_empty());
+    }
+
+    #[test]
+    fn ansi_level_prefix_with_color() {
+        let (pre, suf) = ansi_level_prefix(LogLevel::Error, true);
+        assert!(pre.contains("\x1b["), "expected ANSI escape in: {pre}");
+        assert!(!suf.is_empty());
+
+        let (pre_w, _) = ansi_level_prefix(LogLevel::Warn, true);
+        assert!(pre_w.contains("\x1b[33m"));
+
+        let (pre_i, _) = ansi_level_prefix(LogLevel::Info, true);
+        assert!(pre_i.contains("\x1b[32m"));
+
+        let (pre_d, _) = ansi_level_prefix(LogLevel::Debug, true);
+        assert!(pre_d.contains("\x1b[2m"));
+
+        let (pre_t, _) = ansi_level_prefix(LogLevel::Trace, true);
+        assert!(pre_t.contains("\x1b[2m"));
+    }
+
+    // ---- days_to_ymd ----
+
+    #[test]
+    fn days_to_ymd_epoch() {
+        let (y, m, d) = days_to_ymd(0);
+        assert_eq!((y, m, d), (1970, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_known_date() {
+        // 2024-01-01 = day 19723
+        let (y, m, d) = days_to_ymd(19723);
+        assert_eq!((y, m, d), (2024, 1, 1));
+    }
+
+    // ---- Logger Debug ----
+
+    #[test]
+    fn logger_debug_impl() {
+        let logger = Logger::_with_level_and_writer(LogLevel::Info, Box::new(std::io::sink()));
+        let debug = format!("{logger:?}");
+        assert!(debug.contains("Logger"));
+        assert!(debug.contains("min_level"));
+    }
+
+    // ---- log_level_override_notice ----
+
+    #[test]
+    fn log_level_override_notice_emits_startup_event() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Json);
+
+        logger.log_level_override_notice("debug", LogLevel::Info);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("CALYPSO_LOG=debug"),
+            "expected env var in: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"startup\""),
+            "expected startup event in: {output}"
+        );
+    }
+
+    // ---- CorrelationContext ----
+
+    #[test]
+    fn correlation_context_default_is_all_none() {
+        let ctx = CorrelationContext::new();
+        assert_eq!(ctx.feature_id, None);
+        assert_eq!(ctx.session_id, None);
+        assert_eq!(ctx.thread_id, None);
+    }
+
+    // ---- is_secret_key ----
+
+    #[test]
+    fn is_secret_key_coverage() {
+        assert!(is_secret_key("auth_token"));
+        assert!(is_secret_key("MY_SECRET"));
+        assert!(is_secret_key("credential_file"));
+        assert!(is_secret_key("API_KEY_ID"));
+        assert!(is_secret_key("db_password"));
+        assert!(!is_secret_key("username"));
+        assert!(!is_secret_key("count"));
+    }
+}
