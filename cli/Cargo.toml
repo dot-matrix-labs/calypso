@@ -26,5 +26,8 @@ name = "coverage-driver"
 path = "src/bin/coverage_driver.rs"
 required-features = ["__dev_only"]
 
+[dev-dependencies]
+expectrl = "0.7"
+
 [features]
 __dev_only = []

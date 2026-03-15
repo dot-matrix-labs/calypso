@@ -88,6 +88,22 @@ cargo test-e2e           # end-to-end tests (--nocapture)
 ### Code Quality
 
 ```bash
+cargo test --test e2e -- --nocapture
+```
+
+**Run PTY-based TUI end-to-end tests:**
+```bash
+cargo test --test e2e_tui -- --ignored --nocapture
+```
+
+PTY tests spawn the binary in a real pseudo-terminal using `expectrl`, send
+keystrokes, and assert on rendered screen output.  They are marked `#[ignore]`
+because they require a real TTY (not available under all CI runners or coverage
+tools) and are gated behind `#[cfg(unix)]`.
+
+### Code Quality
+
+```bash
 cargo lint         # clippy with strict warnings (-D warnings)
 cargo fmt-check    # verify formatting (rustfmt --check)
 cargo build-check  # ensure all targets compile
