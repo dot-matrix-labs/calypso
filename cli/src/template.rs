@@ -509,8 +509,10 @@ pub struct GateTemplate {
     pub pr_checklist_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allow_parallel_with: Option<Vec<String>>,
+    // FUTURE: #72 — parsed and validated but not yet enforced by the workflow engine
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blocking_scope: Option<String>,
+    // FUTURE: #72 — parsed and validated but not yet enforced by the workflow engine
     #[serde(skip_serializing_if = "Option::is_none")]
     pub applies_to: Option<Vec<String>>,
     // FUTURE: #72 — parsed but not yet enforced by the workflow engine
