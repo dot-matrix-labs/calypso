@@ -306,10 +306,7 @@ fn run_driver_loop(
             }
             DriverStepResult::Error(e) => {
                 let mut fields = BTreeMap::new();
-                fields.insert(
-                    "error".to_string(),
-                    serde_json::Value::String(e.clone()),
-                );
+                fields.insert("error".to_string(), serde_json::Value::String(e.clone()));
                 logger.log_event(
                     LogLevel::Error,
                     Component::StateMachine,
