@@ -1212,13 +1212,7 @@ impl DoctorSurface {
             &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
             w,
         )?;
-        write_at(
-            stdout,
-            0,
-            1,
-            &format!("│  Calypso Doctor  {summary}"),
-            w,
-        )?;
+        write_at(stdout, 0, 1, &format!("│  Calypso Doctor  {summary}"), w)?;
         write_at(
             stdout,
             0,
