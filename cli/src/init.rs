@@ -189,8 +189,7 @@ impl InitProgress {
             return Ok(None);
         }
         let json = fs::read_to_string(&state_path).map_err(InitError::Io)?;
-        let progress: Self =
-            serde_json::from_str(&json).map_err(InitError::StateSerialize)?;
+        let progress: Self = serde_json::from_str(&json).map_err(InitError::StateSerialize)?;
         Ok(Some(progress))
     }
 }
@@ -751,18 +750,16 @@ pub fn run_init_step(
     step_name: &str,
     env: &impl InitEnvironment,
 ) -> Result<InitProgress, InitError> {
-    let target = InitStep::parse(step_name).ok_or_else(|| {
-        InitError::GitCommandFailed {
-            action: "init --step".to_string(),
-            details: format!(
-                "unknown step '{step_name}'; valid steps: {}",
-                InitStep::all_steps()
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            ),
-        }
+    let target = InitStep::parse(step_name).ok_or_else(|| InitError::GitCommandFailed {
+        action: "init --step".to_string(),
+        details: format!(
+            "unknown step '{step_name}'; valid steps: {}",
+            InitStep::all_steps()
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
     })?;
 
     let mut progress = InitProgress::load(repo_path)?
@@ -1294,10 +1291,7 @@ mod tests {
             InitStep::parse("configure-local"),
             Some(InitStep::ConfigureLocal)
         );
-        assert_eq!(
-            InitStep::parse("verify-setup"),
-            Some(InitStep::VerifySetup)
-        );
+        assert_eq!(InitStep::parse("verify-setup"), Some(InitStep::VerifySetup));
         assert_eq!(InitStep::parse("complete"), Some(InitStep::Complete));
     }
 

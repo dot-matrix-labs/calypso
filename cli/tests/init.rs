@@ -200,10 +200,7 @@ impl InitEnvironment for FakeEnv {
         Ok(())
     }
 
-    fn load_init_state(
-        &self,
-        _repo_root: &Path,
-    ) -> Result<Option<InitProgress>, InitError> {
+    fn load_init_state(&self, _repo_root: &Path) -> Result<Option<InitProgress>, InitError> {
         Ok(None)
     }
 }
