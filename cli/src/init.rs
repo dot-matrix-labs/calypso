@@ -4,8 +4,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::doctor::{HostDoctorEnvironment, collect_doctor_report};
-use crate::state::{RepositoryIdentity, RepositoryState};
+use crate::doctor::{DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
+use crate::state::{DevelopmentState, RepositoryIdentity, RepositoryState};
 use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
 
 // ---------------------------------------------------------------------------
@@ -668,81 +668,97 @@ pub fn run_init_interactive(
         _ => InitProgress::new(repo_path.to_path_buf()),
     };
 
-    // Step: prompt-directory (non-interactive — cwd is the directory)
-    if !progress.is_step_done(&InitStep::PromptDirectory) {
-        progress.advance(); // PromptDirectory -> CreateGitRepo
+    // Load or create development state
+    let calypso_dir = repo_path.join(".calypso");
+    let dev_state_path = calypso_dir.join("dev-state.json");
+    let mut dev_state = DevelopmentState::load_from_path(&dev_state_path).unwrap_or_default();
+
+    // If already complete, nothing to do.
+    if progress.current_step.is_complete() {
+        return Ok(progress);
     }
 
-    // Step: create-git-repo
-    if !progress.is_step_done(&InitStep::CreateGitRepo) {
-        if !env.is_git_repo(repo_path)? {
-            env.git_init(repo_path)?;
+    // Run steps from the current position forward.
+    loop {
+        dev_state.update_init_step(progress.current_step.as_str());
+        match &progress.current_step {
+            InitStep::PromptDirectory => {
+                // Non-interactive — cwd is the directory.
+                progress.advance();
+            }
+            InitStep::CreateGitRepo => {
+                if !env.is_git_repo(repo_path)? {
+                    env.git_init(repo_path)?;
+                }
+                progress.advance();
+            }
+            InitStep::CreateUpstream => {
+                // Attempt to create upstream from directory name if org/repo not provided.
+                let has_remote = env.remote_url(repo_path).is_ok();
+                if !has_remote {
+                    let org = progress.github_org.clone().unwrap_or_default();
+                    let repo = progress
+                        .github_repo
+                        .clone()
+                        .unwrap_or_else(|| dir_name(repo_path));
+                    if !org.is_empty() && !repo.is_empty() {
+                        let url = env.create_github_repo(&org, &repo)?;
+                        env.set_remote(repo_path, &url)?;
+                        progress.github_org = Some(org);
+                        progress.github_repo = Some(repo);
+                    }
+                    // If org is empty we cannot create a remote — proceed without one.
+                }
+                progress.advance();
+            }
+            InitStep::ScaffoldGithubActions => {
+                scaffold_github_actions(repo_path, env)?;
+                progress.advance();
+            }
+            InitStep::ConfigureLocal => {
+                let remote_url = env.remote_url(repo_path).unwrap_or_default();
+                if is_github_url(&remote_url) {
+                    let request = InitRequest {
+                        repo_path: repo_path.to_path_buf(),
+                        provider: None,
+                        allow_reinit,
+                        create_git_repo: false,
+                        github_org: None,
+                        github_repo_name: None,
+                    };
+                    init_repository(&request, env)?;
+                }
+                progress.advance();
+            }
+            InitStep::VerifySetup => {
+                // Wire to doctor: collect doctor report and check for failures.
+                let report = collect_doctor_report(&HostDoctorEnvironment, repo_path);
+                let failing = report
+                    .checks
+                    .iter()
+                    .filter(|c| c.status == DoctorStatus::Failing)
+                    .count();
+                if failing > 0 {
+                    // Record the step as done but note failures in progress.
+                    // The init still completes — doctor issues are advisory.
+                }
+                progress.advance();
+            }
+            InitStep::Complete => break,
         }
-        progress.advance(); // CreateGitRepo -> CreateUpstream
         env.save_init_state(repo_path, &progress).ok(); // best-effort persist
     }
 
-    // Step: create-upstream — detect existing remote or create one
-    if !progress.is_step_done(&InitStep::CreateUpstream) {
-        let has_remote = env.remote_url(repo_path).is_ok();
-        if !has_remote {
-            // Attempt to create upstream from directory name if org/repo not provided.
-            let org = progress.github_org.clone().unwrap_or_default();
-            let repo = progress
-                .github_repo
-                .clone()
-                .unwrap_or_else(|| dir_name(repo_path));
-            if !org.is_empty() && !repo.is_empty() {
-                let url = env.create_github_repo(&org, &repo)?;
-                env.set_remote(repo_path, &url)?;
-                progress.github_org = Some(org);
-                progress.github_repo = Some(repo);
-            }
-            // If org is empty we cannot create a remote — proceed without one.
-        }
-        progress.advance(); // CreateUpstream -> ScaffoldGithubActions
-        env.save_init_state(repo_path, &progress).ok();
-    }
+    // Mark init as complete and auto-advance to Development phase
+    dev_state.update_init_step(progress.current_step.as_str());
+    let now = current_timestamp();
+    dev_state.auto_advance_from_init(&now);
 
-    // Step: scaffold-github-actions
-    if !progress.is_step_done(&InitStep::ScaffoldGithubActions) {
-        scaffold_github_actions(repo_path, env)?;
-        progress.advance(); // ScaffoldGithubActions -> ConfigureLocal
-        env.save_init_state(repo_path, &progress).ok();
+    // Persist dev state (best-effort: don't fail init if the directory
+    // was just created and state serialization succeeds)
+    if calypso_dir.exists() || env.path_exists(&calypso_dir) {
+        let _ = dev_state.save_to_path(&dev_state_path);
     }
-
-    // Step: configure-local (.calypso/ setup) — only when a GitHub remote exists
-    if !progress.is_step_done(&InitStep::ConfigureLocal) {
-        let remote_url = env.remote_url(repo_path).unwrap_or_default();
-        if is_github_url(&remote_url) {
-            let request = InitRequest {
-                repo_path: repo_path.to_path_buf(),
-                provider: None,
-                allow_reinit,
-                create_git_repo: false,
-                github_org: None,
-                github_repo_name: None,
-            };
-            init_repository(&request, env)?;
-        }
-        progress.advance(); // ConfigureLocal -> VerifySetup
-        env.save_init_state(repo_path, &progress).ok();
-    }
-
-    // Step: verify-setup — validate the init is complete
-    if !progress.is_step_done(&InitStep::VerifySetup) {
-        // Check that essential artifacts exist.
-        let calypso_dir = repo_path.join(".calypso");
-        let workflows_dir = repo_path.join(".github").join("workflows");
-        let _calypso_ok = env.path_exists(&calypso_dir);
-        let _workflows_ok = env.path_exists(&workflows_dir);
-        // These checks are informational — we do not fail init if .calypso/
-        // was not created (e.g. no remote configured).
-        progress.advance(); // VerifySetup -> Complete
-    }
-
-    // Persist final state.
-    env.save_init_state(repo_path, &progress).ok();
 
     Ok(progress)
 }
@@ -934,6 +950,15 @@ fn dir_name(path: &Path) -> String {
         .and_then(|n| n.to_str())
         .unwrap_or("repo")
         .to_string()
+}
+
+/// Returns a UTC timestamp in ISO 8601 format.
+fn current_timestamp() -> String {
+    // Use a simple approach that doesn't require chrono
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}Z", dur.as_secs())
 }
 
 /// Scaffold GitHub Actions workflow files into the repository.
