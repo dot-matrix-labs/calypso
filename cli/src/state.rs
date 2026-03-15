@@ -1659,8 +1659,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("already in this phase"),
-            "expected 'already in this phase': {}",
-            err
+            "expected 'already in this phase': {err}",
         );
     }
 
@@ -1670,8 +1669,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("already in this phase"),
-            "expected 'already in this phase': {}",
-            err
+            "expected 'already in this phase': {err}",
         );
     }
 
@@ -1681,8 +1679,7 @@ mod tests {
         let err = result.unwrap_err();
         assert!(
             err.to_string().contains("is not permitted"),
-            "expected generic fallback message: {}",
-            err
+            "expected generic fallback message: {err}",
         );
     }
 
@@ -1693,8 +1690,7 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("init must complete before entering testing"),
-            "expected init-to-testing reason: {}",
-            err
+            "expected init-to-testing reason: {err}",
         );
     }
 
