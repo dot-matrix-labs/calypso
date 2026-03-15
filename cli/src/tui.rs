@@ -1172,23 +1172,23 @@ impl DoctorSurface {
                 write_at(stdout, 0, row, &format!("  {status_icon}  {}", check.id), w)?;
                 row += 1;
             }
-            if let Some(detail) = &check.detail {
-                if row < content_rows {
-                    write_at(stdout, 0, row, &format!("     Detail: {detail}"), w)?;
-                    row += 1;
-                }
+            if let Some(detail) = &check.detail
+                && row < content_rows
+            {
+                write_at(stdout, 0, row, &format!("     Detail: {detail}"), w)?;
+                row += 1;
             }
-            if let Some(remediation) = &check.remediation {
-                if row < content_rows {
-                    write_at(stdout, 0, row, &format!("     Fix: {remediation}"), w)?;
-                    row += 1;
-                }
+            if let Some(remediation) = &check.remediation
+                && row < content_rows
+            {
+                write_at(stdout, 0, row, &format!("     Fix: {remediation}"), w)?;
+                row += 1;
             }
-            if let Some(output) = &self.fix_output {
-                if row < content_rows {
-                    write_at(stdout, 0, row, &format!("     Output: {output}"), w)?;
-                    row += 1;
-                }
+            if let Some(output) = &self.fix_output
+                && row < content_rows
+            {
+                write_at(stdout, 0, row, &format!("     Output: {output}"), w)?;
+                row += 1;
             }
         }
 
