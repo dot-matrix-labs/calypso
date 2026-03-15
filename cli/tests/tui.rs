@@ -560,6 +560,17 @@ fn sample_doctor_checks() -> Vec<DoctorCheckView> {
             ),
             fix: None,
         },
+        DoctorCheckView {
+            id: "codex-installed".to_string(),
+            status: DoctorStatus::Warning,
+            detail: None,
+            remediation: Some(
+                "Install Codex CLI and ensure `codex` is available on PATH.".to_string(),
+            ),
+            fix: Some(DoctorFix::Manual {
+                instructions: "Install codex from https://openai.com/codex".to_string(),
+            }),
+        },
     ]
 }
 
@@ -572,7 +583,9 @@ fn doctor_surface_renders_check_list_with_pass_fail_indicators() {
     assert!(rendered.contains("✓  gh-installed"));
     assert!(rendered.contains("✗  gh-authenticated"));
     assert!(rendered.contains("✗  required-workflows-present"));
+    assert!(rendered.contains("⚠  codex-installed"));
     assert!(rendered.contains("[auto-fix]"));
+    assert!(rendered.contains("1 warning(s)"));
 }
 
 #[test]
@@ -600,15 +613,20 @@ fn doctor_surface_navigation_updates_selected_index() {
     surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
     assert_eq!(surface.selected(), 2);
 
+    // Navigate down to last item (warning check)
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
+    assert_eq!(surface.selected(), 3);
+
     // Can't go past end
     surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
-    assert_eq!(surface.selected(), 2);
+    assert_eq!(surface.selected(), 3);
 
     // Navigate up
     surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
-    assert_eq!(surface.selected(), 1);
+    assert_eq!(surface.selected(), 2);
 
     // Can't go before start
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
     surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
     surface.handle_key_event(KeyEvent::from(KeyCode::Up), cwd);
     assert_eq!(surface.selected(), 0);
@@ -661,7 +679,7 @@ fn doctor_surface_renders_selected_check_detail_after_navigation() {
 #[test]
 fn doctor_surface_check_count_matches_input() {
     let surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
-    assert_eq!(surface.check_count(), 3);
+    assert_eq!(surface.check_count(), 4);
 
     let empty_surface = DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
     assert_eq!(empty_surface.check_count(), 0);

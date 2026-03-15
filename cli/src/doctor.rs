@@ -37,7 +37,27 @@ pub enum DoctorCheckId {
     StateMachineIntegrity,
 }
 
+/// Severity of a failing check — determines whether a non-passing result is
+/// classified as a hard `Failing` or a softer `Warning`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckSeverity {
+    /// The check is critical; failure blocks normal operation.
+    Required,
+    /// The check is advisory; failure is surfaced but does not block.
+    Advisory,
+}
+
 impl DoctorCheckId {
+    /// Returns the severity of this check when it is not passing.
+    pub fn severity(self) -> CheckSeverity {
+        match self {
+            // Optional tooling — nice-to-have, not required for core workflow.
+            DoctorCheckId::CodexInstalled => CheckSeverity::Advisory,
+            // All other checks are hard requirements.
+            _ => CheckSeverity::Required,
+        }
+    }
+
     fn builtin_key(self) -> &'static str {
         match self {
             DoctorCheckId::GitInitialized => "builtin.doctor.git_initialized",
@@ -74,6 +94,7 @@ impl DoctorCheckId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DoctorStatus {
     Passing,
+    Warning,
     Failing,
 }
 
@@ -128,6 +149,20 @@ impl DoctorReport {
                     check.status == DoctorStatus::Passing,
                 )
             })
+    }
+
+    /// Returns `true` if any check has a hard `Failing` status (excludes warnings).
+    pub fn has_failures(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|check| check.status == DoctorStatus::Failing)
+    }
+
+    /// Returns `true` if any check has a `Warning` status.
+    pub fn has_warnings(&self) -> bool {
+        self.checks
+            .iter()
+            .any(|check| check.status == DoctorStatus::Warning)
     }
 }
 
@@ -388,11 +423,14 @@ pub fn collect_doctor_report(
     }
 }
 
-fn status_from_bool(passing: bool) -> DoctorStatus {
+fn status_from_bool(passing: bool, severity: CheckSeverity) -> DoctorStatus {
     if passing {
         DoctorStatus::Passing
     } else {
-        DoctorStatus::Failing
+        match severity {
+            CheckSeverity::Required => DoctorStatus::Failing,
+            CheckSeverity::Advisory => DoctorStatus::Warning,
+        }
     }
 }
 
@@ -409,11 +447,12 @@ fn make_check(
     repo_root: &Path,
     extra: Option<String>,
 ) -> DoctorCheck {
-    let status = status_from_bool(passing);
-    let remediation = (status == DoctorStatus::Failing)
+    let status = status_from_bool(passing, id.severity());
+    let is_not_passing = status != DoctorStatus::Passing;
+    let remediation = is_not_passing
         .then(|| failing_fix(id, detail.as_deref(), extra.as_deref()))
         .flatten();
-    let fix = (status == DoctorStatus::Failing)
+    let fix = is_not_passing
         .then(|| failing_doctor_fix(id, detail.as_deref(), repo_root, extra.as_deref()))
         .flatten();
 
@@ -431,10 +470,10 @@ pub fn render_doctor_report(report: &DoctorReport) -> String {
     let mut lines = vec!["Doctor checks".to_string()];
 
     for check in &report.checks {
-        let status = if matches!(check.status, DoctorStatus::Passing) {
-            "PASS"
-        } else {
-            "FAIL"
+        let status = match check.status {
+            DoctorStatus::Passing => "PASS",
+            DoctorStatus::Warning => "WARN",
+            DoctorStatus::Failing => "FAIL",
         };
         lines.push(format!("- [{status}] {}", check.id.label()));
 
@@ -455,10 +494,10 @@ pub fn render_doctor_report_verbose(report: &DoctorReport) -> String {
     let mut lines = vec!["Doctor checks (verbose)".to_string()];
 
     for check in &report.checks {
-        let status = if matches!(check.status, DoctorStatus::Passing) {
-            "PASS"
-        } else {
-            "FAIL"
+        let status = match check.status {
+            DoctorStatus::Passing => "PASS",
+            DoctorStatus::Warning => "WARN",
+            DoctorStatus::Failing => "FAIL",
         };
         lines.push(format!("- [{status}] {}", check.id.label()));
 

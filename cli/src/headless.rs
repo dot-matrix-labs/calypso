@@ -171,6 +171,7 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
     for check in &report.checks {
         let status_str = match check.status {
             DoctorStatus::Passing => "pass",
+            DoctorStatus::Warning => "warn",
             DoctorStatus::Failing => "fail",
         };
 
@@ -192,6 +193,7 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
 
         let level = match check.status {
             DoctorStatus::Passing => LogLevel::Info,
+            DoctorStatus::Warning => LogLevel::Warn,
             DoctorStatus::Failing => LogLevel::Warn,
         };
 
