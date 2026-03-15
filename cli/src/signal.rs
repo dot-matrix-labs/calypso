@@ -51,6 +51,12 @@ pub struct ShutdownSignal {
 }
 
 impl ShutdownSignal {
+    /// Create a `ShutdownSignal` from a raw receiver (test-only).
+    #[cfg(test)]
+    pub(crate) fn from_receiver(receiver: mpsc::Receiver<SignalKind>) -> Self {
+        Self { receiver }
+    }
+
     /// Non-blocking check — returns `Some(kind)` if a signal has been received.
     pub fn try_recv(&self) -> Option<SignalKind> {
         self.receiver.try_recv().ok()

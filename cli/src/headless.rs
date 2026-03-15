@@ -9,6 +9,8 @@ use std::path::Path;
 
 use crate::app::{gate_status_label, resolve_repo_root};
 use crate::doctor::{DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
+use crate::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+use crate::execution::ExecutionConfig;
 use crate::github::{HostGithubEnvironment, collect_github_report};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
@@ -150,9 +152,28 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     }
 
     // 7. Evaluate gates (single-pass)
-    let exit_code = evaluate_gates_headless(logger, &repo_root, &state);
+    let gate_exit = evaluate_gates_headless(logger, &repo_root, &state);
 
-    // 8. Log completion
+    if gate_exit != 0 {
+        return gate_exit;
+    }
+
+    // Check for shutdown between phases
+    if let Some(signal) = shutdown.try_recv() {
+        logger.log_event(
+            LogLevel::Warn,
+            Component::Cli,
+            LogEvent::Shutdown,
+            &format!("received {signal}, shutting down"),
+            BTreeMap::new(),
+        );
+        return signal.exit_code();
+    }
+
+    // 8. Enter orchestrator loop (state machine driver)
+    let exit_code = run_driver_loop(logger, &state_path, &shutdown);
+
+    // 9. Log completion
     logger.log_event(
         LogLevel::Info,
         Component::Cli,
@@ -162,6 +183,141 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     );
 
     exit_code
+}
+
+/// Run the state machine driver in auto mode, logging each step result.
+///
+/// Exit codes follow the headless convention:
+/// - 0: completed successfully (terminal state reached)
+/// - 2: state machine error (invalid state, transition failure, persistence error)
+/// - 3: agent failure (provider error, agent aborted, unrecoverable execution failure)
+fn run_driver_loop(
+    logger: &Logger,
+    state_path: &Path,
+    shutdown: &crate::signal::ShutdownSignal,
+) -> i32 {
+    let template = match load_embedded_template_set() {
+        Ok(t) => t,
+        Err(e) => {
+            logger
+                .entry(LogLevel::Error, "failed to load embedded templates")
+                .component(Component::StateMachine)
+                .field("error", e.to_string())
+                .emit();
+            return 2;
+        }
+    };
+
+    let driver = StateMachineDriver {
+        mode: DriverMode::Auto,
+        state_path: state_path.to_path_buf(),
+        template,
+        config: ExecutionConfig::default(),
+        executor: None,
+    };
+
+    logger.log_event(
+        LogLevel::Info,
+        Component::StateMachine,
+        LogEvent::StateTransition,
+        "entering orchestrator loop",
+        BTreeMap::new(),
+    );
+
+    loop {
+        // Check for shutdown before each step
+        if let Some(signal) = shutdown.try_recv() {
+            logger.log_event(
+                LogLevel::Warn,
+                Component::Cli,
+                LogEvent::Shutdown,
+                &format!("received {signal}, shutting down"),
+                BTreeMap::new(),
+            );
+            return signal.exit_code();
+        }
+
+        let result = driver.step();
+
+        match &result {
+            DriverStepResult::Advanced(state) => {
+                let mut fields = BTreeMap::new();
+                fields.insert(
+                    "to_state".to_string(),
+                    serde_json::Value::String(state.as_str().to_string()),
+                );
+                logger.log_event(
+                    LogLevel::Warn,
+                    Component::StateMachine,
+                    LogEvent::StateTransition,
+                    &format!("advanced to {}", state.as_str()),
+                    fields,
+                );
+            }
+            DriverStepResult::Terminal => {
+                logger.log_event(
+                    LogLevel::Warn,
+                    Component::StateMachine,
+                    LogEvent::StateTransition,
+                    "state machine reached terminal state",
+                    BTreeMap::new(),
+                );
+                return 0;
+            }
+            DriverStepResult::Unchanged => {
+                logger.log_event(
+                    LogLevel::Info,
+                    Component::StateMachine,
+                    LogEvent::StateTransition,
+                    "state unchanged after step",
+                    BTreeMap::new(),
+                );
+                return 0;
+            }
+            DriverStepResult::ClarificationRequired(question) => {
+                let mut fields = BTreeMap::new();
+                fields.insert(
+                    "question".to_string(),
+                    serde_json::Value::String(question.clone()),
+                );
+                logger.log_event(
+                    LogLevel::Error,
+                    Component::Agent,
+                    LogEvent::AgentCompleted,
+                    "clarification required (non-interactive — failing)",
+                    fields,
+                );
+                return 3;
+            }
+            DriverStepResult::Failed { reason } => {
+                let mut fields = BTreeMap::new();
+                fields.insert(
+                    "reason".to_string(),
+                    serde_json::Value::String(reason.clone()),
+                );
+                logger.log_event(
+                    LogLevel::Error,
+                    Component::Agent,
+                    LogEvent::AgentCompleted,
+                    &format!("step failed: {reason}"),
+                    fields,
+                );
+                return 3;
+            }
+            DriverStepResult::Error(e) => {
+                let mut fields = BTreeMap::new();
+                fields.insert("error".to_string(), serde_json::Value::String(e.clone()));
+                logger.log_event(
+                    LogLevel::Error,
+                    Component::StateMachine,
+                    LogEvent::StateTransition,
+                    &format!("driver error: {e}"),
+                    fields,
+                );
+                return 2;
+            }
+        }
+    }
 }
 
 /// Log each doctor check result. Returns 0 if all pass, 1 if any fail.
@@ -214,7 +370,7 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
 }
 
 /// Evaluate gates for the current feature state and log each result.
-/// Returns 0 on success.
+/// Returns 0 on success, 2 on state machine error.
 fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &RepositoryState) -> i32 {
     let template = match load_embedded_template_set() {
         Ok(t) => t,
@@ -224,7 +380,7 @@ fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &Repository
                 .component(Component::StateMachine)
                 .field("error", e.to_string())
                 .emit();
-            return 1;
+            return 2;
         }
     };
 
@@ -260,7 +416,7 @@ fn evaluate_and_log_gates(
             .component(Component::Gate)
             .field("error", e.to_string())
             .emit();
-        return 1;
+        return 2;
     }
 
     // Log each gate result
@@ -622,7 +778,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluate_and_log_gates_unknown_task_returns_1() {
+    fn evaluate_and_log_gates_unknown_task_returns_2() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
         let template = phony_template();
@@ -642,7 +798,7 @@ mod tests {
 
         let evidence = crate::state::BuiltinEvidence::new();
         let exit = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
-        assert_eq!(exit, 1);
+        assert_eq!(exit, 2);
 
         let output = writer.contents();
         assert!(
@@ -722,5 +878,51 @@ mod tests {
         assert_eq!(a, b);
         let debug = format!("{a:?}");
         assert!(debug.contains("HeadlessConfig"));
+    }
+
+    /// Helper: create a ShutdownSignal with no signal queued.
+    fn quiet_shutdown() -> (
+        crate::signal::ShutdownSignal,
+        std::sync::mpsc::Sender<crate::signal::SignalKind>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (crate::signal::ShutdownSignal::from_receiver(rx), tx)
+    }
+
+    #[test]
+    fn run_driver_loop_returns_2_on_invalid_state_path() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
+        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        assert_eq!(exit, 2, "expected exit code 2 for invalid state path");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("driver error"),
+            "expected driver error in output: {output}"
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_returns_signal_exit_code_on_shutdown() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, tx) = quiet_shutdown();
+
+        // Send a signal before calling run_driver_loop
+        tx.send(crate::signal::SignalKind::Terminate).unwrap();
+
+        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
+        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        assert_eq!(exit, 143, "expected SIGTERM exit code 143");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("shutting down"),
+            "expected shutdown message in output: {output}"
+        );
     }
 }

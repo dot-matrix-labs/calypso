@@ -50,6 +50,9 @@ Options:
   -p, --path <dir>    Project directory (default: current working directory)
   -h, --help          Show this help output
   -v, --version       Show build version information
+  --headless          Run the orchestrator without the TUI (CI / daemon mode)
+  -v, -vv             Verbosity in headless mode: -v = info, -vv = debug
+  --log-format <fmt>  Log format in headless mode: json (default) or text
 
 Positional:
   [path]              Project directory (alternative to --path); starts TUI
@@ -126,5 +129,13 @@ mod tests {
         assert!(output.contains("Commands:"));
         assert!(output.contains("--path"));
         assert!(output.contains("-h, --help"));
+    }
+
+    #[test]
+    fn help_output_documents_headless_mode() {
+        let output = render_help(sample_info());
+
+        assert!(output.contains("--headless"), "missing --headless flag");
+        assert!(output.contains("--log-format"), "missing --log-format flag");
     }
 }
