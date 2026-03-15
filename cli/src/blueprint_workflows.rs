@@ -462,7 +462,7 @@ mod tests {
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
         assert_eq!(
             wf.initial_state.as_deref(),
-            Some("feature-definition"),
+            Some("create-worktree"),
             "unexpected initial_state"
         );
     }
@@ -491,12 +491,12 @@ mod tests {
     fn next_spec_target_for_resolves_on_success() {
         let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
-        let state = wf.states.get("feature-definition").unwrap();
+        let state = wf.states.get("write-failing-tests").unwrap();
         let next = state.next.as_ref().unwrap();
         assert_eq!(
             next.target_for("on_success"),
-            Some("pr-template-review"),
-            "expected on_success → pr-template-review"
+            Some("implementation-loop"),
+            "expected on_success → implementation-loop"
         );
     }
 
@@ -504,12 +504,12 @@ mod tests {
     fn next_spec_target_for_resolves_on_event() {
         let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
-        let state = wf.states.get("implementation").unwrap();
+        let state = wf.states.get("write-failing-tests").unwrap();
         let next = state.next.as_ref().unwrap();
         assert_eq!(
-            next.target_for("implementation-complete"),
-            Some("deterministic-validation"),
-            "expected implementation-complete → deterministic-validation"
+            next.target_for("on_failure"),
+            Some("blocked"),
+            "expected on_failure → blocked"
         );
     }
 }
