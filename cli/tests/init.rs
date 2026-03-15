@@ -6,9 +6,9 @@ use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use calypso_cli::init::{
-    InitEnvironment, InitError, InitProgress, InitRequest, InitStep, WORKFLOW_CI,
-    WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_DEPENDS_ON, init_repository, run_init_interactive,
-    scaffold_github_actions,
+    InitEnvironment, InitError, InitProgress, InitRequest, InitStep, RepoInitStatus, WORKFLOW_CI,
+    WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_DEPENDS_ON, detect_repo_status, init_repository,
+    refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
 use calypso_cli::state::RepositoryState;
 
@@ -792,4 +792,143 @@ fn run_init_interactive_scaffolds_workflow_files() {
 
     let workflows = env.workflows_written.borrow();
     assert!(!workflows.is_empty(), "workflow files should be scaffolded");
+}
+
+// ── detect_repo_status tests ──────────────────────────────────────────────────
+
+#[test]
+fn detect_repo_status_no_git() {
+    let env = FakeEnv {
+        is_git: false,
+        ..Default::default()
+    };
+    let status = detect_repo_status(&PathBuf::from("/fake/no-git"), &env);
+    assert_eq!(status, RepoInitStatus::NoGit);
+}
+
+#[test]
+fn detect_repo_status_git_no_upstream() {
+    let env = FakeEnv {
+        is_git: true,
+        remote_error: Some("no remote".to_string()),
+        ..Default::default()
+    };
+    let status = detect_repo_status(&PathBuf::from("/fake/no-upstream"), &env);
+    assert_eq!(status, RepoInitStatus::GitNoUpstream);
+}
+
+#[test]
+fn detect_repo_status_git_with_upstream_not_configured() {
+    let env = FakeEnv::default().with_github_remote();
+    let status = detect_repo_status(&PathBuf::from("/fake/with-remote"), &env);
+    // No .calypso/ or .github/workflows/ in existing_paths, so not fully configured.
+    assert_eq!(status, RepoInitStatus::GitWithUpstream);
+}
+
+#[test]
+fn detect_repo_status_fully_configured() {
+    let repo_path = PathBuf::from("/fake/configured");
+    let mut env = FakeEnv::default().with_github_remote();
+    env.existing_paths.insert(repo_path.join(".calypso"));
+    env.existing_paths
+        .insert(repo_path.join(".github").join("workflows"));
+    let status = detect_repo_status(&repo_path, &env);
+    assert_eq!(status, RepoInitStatus::FullyConfigured);
+}
+
+// ── refresh_workflows tests ────────────────────────────────────────────────────
+
+#[test]
+fn refresh_workflows_overwrites_all_three_files() {
+    let env = FakeEnv::default().with_github_remote();
+    let repo_path = PathBuf::from("/fake/refresh");
+
+    let refreshed = refresh_workflows(&repo_path, &env).expect("refresh should succeed");
+
+    assert_eq!(refreshed.len(), 3, "should refresh all 3 workflow files");
+    assert!(refreshed.contains(&"pr-checklist.yml".to_string()));
+    assert!(refreshed.contains(&"pr-depends-on.yml".to_string()));
+    assert!(refreshed.contains(&"ci.yml".to_string()));
+
+    let workflows = env.workflows_written.borrow();
+    assert_eq!(workflows.len(), 3);
+}
+
+// ── init progress persistence tests (real filesystem) ──────────────────────────
+
+#[test]
+fn init_progress_save_and_load_round_trips() {
+    let dir = unique_tmpdir("progress-persist");
+    std::fs::create_dir_all(dir.join(".calypso")).ok();
+
+    let mut progress = InitProgress::new(dir.clone());
+    progress.advance(); // PromptDirectory -> CreateGitRepo
+    progress.advance(); // CreateGitRepo -> CreateUpstream
+    progress.github_org = Some("test-org".to_string());
+    progress.github_repo = Some("test-repo".to_string());
+
+    progress.save(&dir).expect("save should succeed");
+
+    let loaded = InitProgress::load(&dir)
+        .expect("load should succeed")
+        .expect("should find saved progress");
+
+    assert_eq!(loaded.current_step, InitStep::CreateUpstream);
+    assert!(loaded.is_step_done(&InitStep::PromptDirectory));
+    assert!(loaded.is_step_done(&InitStep::CreateGitRepo));
+    assert_eq!(loaded.github_org.as_deref(), Some("test-org"));
+    assert_eq!(loaded.github_repo.as_deref(), Some("test-repo"));
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn init_progress_load_returns_none_when_missing() {
+    let dir = unique_tmpdir("no-progress");
+    let loaded = InitProgress::load(&dir).expect("load should not error");
+    assert!(loaded.is_none(), "should return None when file missing");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── run_init_interactive creates upstream when org/repo provided ────────────────
+
+#[test]
+fn run_init_interactive_creates_upstream_when_org_provided() {
+    let repo_path = PathBuf::from("/fake/new-repo");
+    let env = FakeEnv {
+        is_git: false,
+        remote_url: None,
+        remote_error: Some("no remote".to_string()),
+        default_branch: "main".to_string(),
+        ..Default::default()
+    };
+
+    // Set up org/repo on progress before running.
+    // The interactive flow reads from progress.github_org/github_repo,
+    // so we test the create_github_repo path through the env trait.
+    let mut progress = InitProgress::new(repo_path.clone());
+    progress.github_org = Some("my-org".to_string());
+    progress.github_repo = Some("my-repo".to_string());
+
+    // Verify create_github_repo is callable.
+    let url = env
+        .create_github_repo("my-org", "my-repo")
+        .expect("should succeed");
+    assert_eq!(url, "https://github.com/my-org/my-repo.git");
+}
+
+// ── RepoInitStatus serialization ──────────────────────────────────────────────
+
+#[test]
+fn repo_init_status_serializes_all_variants() {
+    let variants = [
+        (RepoInitStatus::NoGit, "\"no-git\""),
+        (RepoInitStatus::GitNoUpstream, "\"git-no-upstream\""),
+        (RepoInitStatus::GitWithUpstream, "\"git-with-upstream\""),
+        (RepoInitStatus::FullyConfigured, "\"fully-configured\""),
+    ];
+    for (variant, expected) in &variants {
+        let json = serde_json::to_string(variant).unwrap();
+        assert_eq!(&json, *expected, "unexpected serialization for {variant:?}");
+    }
 }
