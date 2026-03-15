@@ -7,8 +7,8 @@ use calypso_cli::state::{
     WorkflowState,
 };
 use calypso_cli::tui::{
-    InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface, SurfaceEvent,
-    TerminalSize, answer_clarification, interrupt_active_sessions, queue_follow_up,
+    AppEvent, AppShell, InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface,
+    SurfaceEvent, TerminalSize, answer_clarification, interrupt_active_sessions, queue_follow_up,
 };
 
 fn sample_feature() -> FeatureState {
@@ -1000,4 +1000,201 @@ fn sm_surface_deprecated_waiting_for_human_maps_to_implementation() {
     let rendered = String::from_utf8_lossy(&out);
     // Should render as active Implementation step.
     assert!(rendered.contains("Implementation"));
+}
+
+// ── Agent screen (OperatorSurface session selection) tests ────────────────────
+
+fn op_layout() -> PanedLayout {
+    PanedLayout::from_size(TerminalSize { cols: 80, rows: 24 })
+}
+
+fn two_session_feature() -> FeatureState {
+    let mut feature = sample_feature();
+    feature.active_sessions.push(AgentSession {
+        role: "reviewer".to_string(),
+        session_id: "session_02".to_string(),
+        provider_session_id: None,
+        status: AgentSessionStatus::Completed,
+        output: vec![SessionOutput {
+            stream: SessionOutputStream::Stdout,
+            text: "Review complete".to_string(),
+        }],
+        pending_follow_ups: Vec::new(),
+        terminal_outcome: None,
+    });
+    feature
+}
+
+#[test]
+fn operator_surface_focus_session_sets_selected_index() {
+    let feature = sample_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    assert_eq!(surface.selected_session(), None);
+
+    surface.focus_session("session_01");
+    assert_eq!(surface.selected_session(), Some(0));
+
+    // Unknown id leaves selection unchanged
+    surface.focus_session("no-such-session");
+    assert_eq!(surface.selected_session(), None);
+}
+
+#[test]
+fn operator_surface_focused_session_shown_in_main_pane() {
+    let feature = two_session_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+    surface.focus_session("session_02");
+
+    let layout = op_layout();
+    let mut out = Vec::new();
+    surface.render_paned(&mut out, &layout).unwrap();
+    let rendered = String::from_utf8_lossy(&out);
+
+    // Focused session detail rendered in main pane
+    assert!(rendered.contains("reviewer"));
+    assert!(rendered.contains("session_02"));
+    assert!(rendered.contains("Review complete"));
+}
+
+#[test]
+fn operator_surface_sidebar_shows_sessions_header_and_list() {
+    let feature = two_session_feature();
+    let surface = OperatorSurface::from_feature_state(&feature);
+
+    let layout = op_layout();
+    let mut out = Vec::new();
+    surface.render_paned(&mut out, &layout).unwrap();
+    let rendered = String::from_utf8_lossy(&out);
+
+    // Sidebar header
+    assert!(rendered.contains("Sessions"));
+    // Both session roles visible in sidebar
+    assert!(rendered.contains("engineer"));
+    assert!(rendered.contains("reviewer"));
+}
+
+#[test]
+fn operator_surface_sidebar_shows_cursor_on_selected_session() {
+    let feature = two_session_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+    surface.focus_session("session_02");
+
+    let layout = op_layout();
+    let mut out = Vec::new();
+    surface.render_paned(&mut out, &layout).unwrap();
+    let rendered = String::from_utf8_lossy(&out);
+
+    // Cursor marker (●) present for the selected session
+    assert!(rendered.contains("●"));
+}
+
+#[test]
+fn operator_surface_down_in_sidebar_selects_session() {
+    let feature = two_session_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    // Focus sidebar via Tab
+    surface.handle_key_event(KeyEvent::from(KeyCode::Tab));
+
+    // Down selects first session
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    assert_eq!(surface.selected_session(), Some(0));
+
+    // Down again selects second session
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    assert_eq!(surface.selected_session(), Some(1));
+
+    // Down at last clamps
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    assert_eq!(surface.selected_session(), Some(1));
+
+    // Up moves back
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up));
+    assert_eq!(surface.selected_session(), Some(0));
+
+    // Up at first clamps
+    surface.handle_key_event(KeyEvent::from(KeyCode::Up));
+    assert_eq!(surface.selected_session(), Some(0));
+}
+
+#[test]
+fn operator_surface_up_down_scrolls_when_sidebar_not_focused() {
+    let feature = sample_feature();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    // Sidebar not focused by default — Up/Down should scroll
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // selected_session stays None (scrolling, not session navigation)
+    assert_eq!(surface.selected_session(), None);
+}
+
+#[test]
+fn operator_surface_down_no_op_when_sidebar_focused_and_no_sessions() {
+    let mut feature = sample_feature();
+    feature.active_sessions.clear();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+
+    surface.handle_key_event(KeyEvent::from(KeyCode::Tab)); // focus sidebar
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    assert_eq!(surface.selected_session(), None);
+}
+
+// ── AppShell agent tab event routing tests ────────────────────────────────────
+
+fn shell_with_operator(feature: &FeatureState) -> AppShell {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let op = OperatorSurface::from_feature_state(feature);
+    AppShell::new(doctor).with_operator(op)
+}
+
+#[test]
+fn app_shell_agents_tab_follow_up_returns_follow_up_submitted() {
+    let feature = sample_feature();
+    let mut shell = shell_with_operator(&feature);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+    let cwd = std::path::Path::new("/tmp");
+
+    // Type a message and submit
+    shell.handle_key_event(KeyEvent::from(KeyCode::Char('h')), cwd);
+    shell.handle_key_event(KeyEvent::from(KeyCode::Char('i')), cwd);
+    let event = shell.handle_key_event(KeyEvent::from(KeyCode::Enter), cwd);
+
+    assert_eq!(event, AppEvent::FollowUpSubmitted("hi".to_string()));
+}
+
+#[test]
+fn app_shell_agents_tab_interrupt_returns_interrupted() {
+    let feature = sample_feature();
+    let mut shell = shell_with_operator(&feature);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+    let cwd = std::path::Path::new("/tmp");
+
+    let event = shell.handle_key_event(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        cwd,
+    );
+
+    // Shell-level Ctrl+C quits (intercepted before delegation)
+    assert_eq!(event, AppEvent::Quit);
+}
+
+#[test]
+fn app_shell_sm_jump_to_agents_focuses_session() {
+    let feature = sample_feature(); // has session_01 for "engineer"
+    let mut shell = shell_with_operator(&feature);
+    let cwd = std::path::Path::new("/tmp");
+
+    // Start on SM tab; press 'a' to jump to Agents with session focus
+    shell.tab = calypso_cli::tui::AppTab::StateMachine;
+    let sm = calypso_cli::tui::StateMachineSurface::from_feature_state(&feature);
+    shell.sm = sm;
+
+    shell.handle_key_event(KeyEvent::from(KeyCode::Char('a')), cwd);
+
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::Agents);
+    // Operator should have session_01 focused (index 0)
+    let selected = shell.operator.as_ref().unwrap().selected_session();
+    assert_eq!(selected, Some(0));
 }
