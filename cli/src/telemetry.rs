@@ -451,15 +451,8 @@ impl Logger {
 
                 let comp_display = if component.is_empty() { "-" } else { component };
 
-                let line = format!(
-                    "{ts} {pre}{lvl}{suf} [{comp}] {msg}\n",
-                    ts = timestamp,
-                    pre = pre,
-                    lvl = level_upper,
-                    suf = suf,
-                    comp = comp_display,
-                    msg = message,
-                );
+                let line =
+                    format!("{timestamp} {pre}{level_upper}{suf} [{comp_display}] {message}\n",);
 
                 if let Ok(mut w) = self.writer.lock() {
                     let _ = w.write_all(line.as_bytes());
@@ -937,9 +930,15 @@ mod tests {
         logger.info("hello world");
         let output = buf_to_string(&buf);
         assert!(output.contains("INFO"), "expected INFO in: {output}");
-        assert!(output.contains("hello world"), "expected message in: {output}");
+        assert!(
+            output.contains("hello world"),
+            "expected message in: {output}"
+        );
         // Component should be "-" when not set
-        assert!(output.contains("[-]"), "expected [-] for no component in: {output}");
+        assert!(
+            output.contains("[-]"),
+            "expected [-] for no component in: {output}"
+        );
     }
 
     #[test]
@@ -953,7 +952,10 @@ mod tests {
             BTreeMap::new(),
         );
         let output = buf_to_string(&buf);
-        assert!(output.contains("[doctor]"), "expected [doctor] in: {output}");
+        assert!(
+            output.contains("[doctor]"),
+            "expected [doctor] in: {output}"
+        );
         assert!(output.contains("checking"), "expected message in: {output}");
     }
 
@@ -1024,7 +1026,10 @@ mod tests {
         assert_eq!(parsed["component"], "cli");
         assert_eq!(parsed["event"], "startup");
         let msg = parsed["message"].as_str().unwrap();
-        assert!(msg.contains("CALYPSO_LOG=debug"), "expected env ref in: {msg}");
+        assert!(
+            msg.contains("CALYPSO_LOG=debug"),
+            "expected env ref in: {msg}"
+        );
         assert!(msg.contains("warn"), "expected resolved level in: {msg}");
     }
 
@@ -1050,12 +1055,13 @@ mod tests {
     #[test]
     fn entry_builder_without_component_omits_field() {
         let (logger, buf) = json_logger(LogLevel::Debug);
-        logger
-            .entry(LogLevel::Info, "no comp")
-            .emit();
+        logger.entry(LogLevel::Info, "no comp").emit();
         let output = buf_to_string(&buf);
         let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-        assert!(parsed.get("component").is_none(), "component should be omitted");
+        assert!(
+            parsed.get("component").is_none(),
+            "component should be omitted"
+        );
         assert!(parsed.get("event").is_none(), "event should be omitted");
     }
 
@@ -1198,7 +1204,10 @@ mod tests {
 
     #[test]
     fn event_kind_display() {
-        assert_eq!(format!("{}", EventKind::StateTransition), "state_transition");
+        assert_eq!(
+            format!("{}", EventKind::StateTransition),
+            "state_transition"
+        );
         assert_eq!(format!("{}", EventKind::GateChanged), "gate_changed");
         assert_eq!(format!("{}", EventKind::SessionStarted), "session_started");
         assert_eq!(format!("{}", EventKind::SessionEnded), "session_ended");
