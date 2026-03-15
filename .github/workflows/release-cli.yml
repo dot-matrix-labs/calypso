@@ -32,7 +32,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: true
+          submodules: false
+      - name: Init submodules (non-recursive)
+        run: git submodule update --init
         with:
           fetch-depth: 0
 
@@ -96,7 +98,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: true
+          submodules: false
+      - name: Init submodules (non-recursive)
+        run: git submodule update --init
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}

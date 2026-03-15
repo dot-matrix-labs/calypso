@@ -16,7 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: true
+          submodules: false
+      - name: Init submodules (non-recursive)
+        run: git submodule update --init
 
       - name: Set up Rust
         # Integration coverage is expected to stay green on the current stable

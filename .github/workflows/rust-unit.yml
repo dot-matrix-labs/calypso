@@ -16,7 +16,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          submodules: true
+          submodules: false
+      - name: Init submodules (non-recursive)
+        run: git submodule update --init
 
       - name: Set up Rust
         # Tests are expected to pass on the current stable toolchain even while
