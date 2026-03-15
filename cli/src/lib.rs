@@ -44,12 +44,15 @@ pub fn render_help(info: BuildInfo<'_>) -> String {
 calypso-cli {}
 
 Usage:
-  calypso [OPTIONS] [COMMAND]
+  calypso [OPTIONS] [path] [COMMAND]
 
 Options:
   -p, --path <dir>    Project directory (default: current working directory)
   -h, --help          Show this help output
   -v, --version       Show build version information
+
+Positional:
+  [path]              Project directory (alternative to --path); starts TUI
 
 Commands:
   (none)              Drive the state machine for the project directory
