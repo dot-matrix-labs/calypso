@@ -15,6 +15,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
 
       - name: Set up Rust
         # Tests are expected to pass on the current stable toolchain even while

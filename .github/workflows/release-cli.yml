@@ -32,6 +32,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          submodules: true
+        with:
           fetch-depth: 0
 
       - name: Set up Rust
@@ -93,6 +95,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          submodules: true
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
