@@ -8,7 +8,8 @@ use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_s
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::headless::{HeadlessConfig, run_headless};
 use calypso_cli::init::{
-    HostInitEnvironment, InitProgress, render_init_status, run_init_interactive, run_init_step,
+    HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
+    render_init_status, run_init_interactive, run_init_step,
 };
 use calypso_cli::state::RepositoryState;
 use calypso_cli::telemetry::{LogFormat, LogLevel};
@@ -81,19 +82,54 @@ fn main() {
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
         [command] if command == "init" => {
-            run_calypso_init(&cwd, false);
+            run_calypso_init(&cwd, false, None, None);
         }
         [command, flag] if command == "init" && flag == "--reinit" => {
-            run_calypso_init(&cwd, true);
+            run_calypso_init(&cwd, true, None, None);
+        }
+        [command, flag] if command == "init" && flag == "--json" => {
+            run_calypso_init_json(&cwd, false, None, None);
         }
         [command, flag] if command == "init" && flag == "--status" => {
             run_init_status(&cwd);
+        }
+        [command, flag] if command == "init" && flag == "--refresh" => {
+            run_init_refresh(&cwd);
         }
         [command, flag, step_name] if command == "init" && flag == "--step" => {
             run_init_step_cmd(&cwd, step_name);
         }
         [command, flag] if command == "init" && flag == "--state" => {
             run_init_state_show(&cwd);
+        }
+        // calypso init --org <org> --repo <name>
+        args if args.first().is_some_and(|c| c == "init") && args.len() >= 2 => {
+            let mut allow_reinit = false;
+            let mut org: Option<String> = None;
+            let mut repo_name: Option<String> = None;
+            let mut json = false;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--reinit" => allow_reinit = true,
+                    "--json" => json = true,
+                    "--org" if i + 1 < args.len() => {
+                        org = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                    "--repo" if i + 1 < args.len() => {
+                        repo_name = Some(args[i + 1].clone());
+                        i += 1;
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+            if json {
+                run_calypso_init_json(&cwd, allow_reinit, org, repo_name);
+            } else {
+                run_calypso_init(&cwd, allow_reinit, org, repo_name);
+            }
         }
         // calypso state (no subcommand) — alias for `calypso state status`
         [command] if command == "state" => match run_state_status_plain(&cwd) {
@@ -399,32 +435,145 @@ fn build_headless_config(flags: &HeadlessFlags) -> HeadlessConfig {
     }
 }
 
-fn run_calypso_init(cwd: &std::path::Path, allow_reinit: bool) {
-    match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment) {
-        Ok(progress) => {
-            println!("Init complete: {}", progress.current_step);
-            println!("Completed steps:");
-            for step in &progress.completed_steps {
-                println!("  [x] {step}");
-            }
-        }
+fn run_calypso_init(
+    cwd: &std::path::Path,
+    allow_reinit: bool,
+    org: Option<String>,
+    repo_name: Option<String>,
+) {
+    // Print detected status.
+    let status = detect_repo_status(cwd, &HostInitEnvironment);
+    println!("Detected: {status}");
+
+    // For fully configured repos without --reinit, just validate.
+    if status == RepoInitStatus::FullyConfigured && !allow_reinit {
+        println!("Repository is already fully configured.");
+        println!(
+            "Use `calypso init --reinit` to re-initialise or `calypso init --refresh` to update workflows."
+        );
+        return;
+    }
+
+    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment) {
+        Ok(p) => p,
         Err(error) => {
             eprintln!("init error: {error}");
             std::process::exit(1);
         }
+    };
+
+    // Store org/repo if provided (used for upstream creation).
+    if org.is_some() {
+        progress.github_org = org;
+    }
+    if repo_name.is_some() {
+        progress.github_repo = repo_name;
+    }
+
+    println!("Init complete: {}", progress.current_step);
+    println!("Completed steps:");
+    for step in &progress.completed_steps {
+        println!("  [x] {step}");
     }
 }
 
+fn run_calypso_init_json(
+    cwd: &std::path::Path,
+    allow_reinit: bool,
+    org: Option<String>,
+    repo_name: Option<String>,
+) {
+    let status = detect_repo_status(cwd, &HostInitEnvironment);
+
+    // For fully configured repos without --reinit, report and exit.
+    if status == RepoInitStatus::FullyConfigured && !allow_reinit {
+        let report = serde_json::json!({
+            "status": status,
+            "message": "already configured",
+            "completed": true
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report).expect("json serialization")
+        );
+        return;
+    }
+
+    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment) {
+        Ok(p) => p,
+        Err(error) => {
+            let report = serde_json::json!({
+                "status": status,
+                "error": error.to_string(),
+                "completed": false
+            });
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).expect("json serialization")
+            );
+            std::process::exit(1);
+        }
+    };
+
+    if org.is_some() {
+        progress.github_org = org;
+    }
+    if repo_name.is_some() {
+        progress.github_repo = repo_name;
+    }
+
+    let report = serde_json::json!({
+        "status": status,
+        "current_step": progress.current_step.as_str(),
+        "completed_steps": progress.completed_steps.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
+        "completed": progress.current_step.is_complete()
+    });
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&report).expect("json serialization")
+    );
+}
+
 fn run_init_status(cwd: &std::path::Path) {
+    let status = detect_repo_status(cwd, &HostInitEnvironment);
+    println!("Repository status: {status}");
+
+    // Show saved init progress if available.
     match InitProgress::load(cwd) {
         Ok(Some(progress)) => {
             println!("{}", render_init_status(&progress));
+            if let Some(ref org) = progress.github_org {
+                println!("GitHub org: {org}");
+            }
+            if let Some(ref repo) = progress.github_repo {
+                println!("GitHub repo: {repo}");
+            }
         }
         Ok(None) => {
-            println!("No init state found — run `calypso-cli init` to set up this repository.");
+            println!("No init state found — run `calypso init` to set up this repository.");
         }
         Err(error) => {
-            eprintln!("init status error: {error}");
+            eprintln!("Error loading init state: {error}");
+        }
+    }
+}
+
+fn run_init_refresh(cwd: &std::path::Path) {
+    let status = detect_repo_status(cwd, &HostInitEnvironment);
+    if status == RepoInitStatus::NoGit {
+        eprintln!("Cannot refresh: not a git repository.");
+        std::process::exit(1);
+    }
+
+    match refresh_workflows(cwd, &HostInitEnvironment) {
+        Ok(refreshed) => {
+            println!("Refreshed {} workflow files:", refreshed.len());
+            for name in &refreshed {
+                println!("  {name}");
+            }
+        }
+        Err(error) => {
+            eprintln!("refresh error: {error}");
             std::process::exit(1);
         }
     }
