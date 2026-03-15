@@ -1168,7 +1168,7 @@ mod tests {
     #[test]
     fn logger_debug_impl() {
         let (logger, _) = json_logger(LogLevel::Info);
-        let debug = format!("{:?}", logger);
+        let debug = format!("{logger:?}");
         assert!(debug.contains("Logger"));
         assert!(debug.contains("min_level"));
     }
