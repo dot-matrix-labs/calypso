@@ -229,7 +229,7 @@ fn run_doctor_fix(check_id: &str, cwd: &std::path::Path) {
                     eprintln!("No fix available for '{check_id}'.");
                     std::process::exit(1);
                 }
-                Some(fix) => match apply_fix(fix) {
+                Some(fix) => match apply_fix(fix, &repo_root) {
                     Ok(output) => {
                         if matches!(fix, DoctorFix::Manual { .. }) {
                             println!("Manual fix required:");

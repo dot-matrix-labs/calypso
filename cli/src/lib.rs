@@ -16,6 +16,7 @@ pub mod state;
 pub mod telemetry;
 pub mod template;
 pub mod tui;
+pub mod workflows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {

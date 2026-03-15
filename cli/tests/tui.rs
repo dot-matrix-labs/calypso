@@ -529,13 +529,14 @@ use calypso_cli::doctor::DoctorStatus;
 use calypso_cli::tui::{DoctorCheckView, DoctorSurface, DoctorSurfaceEvent};
 
 fn sample_doctor_checks() -> Vec<DoctorCheckView> {
+    use calypso_cli::doctor::DoctorFix;
     vec![
         DoctorCheckView {
             id: "gh-installed".to_string(),
             status: DoctorStatus::Passing,
             detail: None,
             remediation: None,
-            has_auto_fix: false,
+            fix: None,
         },
         DoctorCheckView {
             id: "gh-authenticated".to_string(),
@@ -545,33 +546,38 @@ fn sample_doctor_checks() -> Vec<DoctorCheckView> {
                 "Run `gh auth login` and confirm the active account can access this repository."
                     .to_string(),
             ),
-            has_auto_fix: true,
+            fix: Some(DoctorFix::RunCommand {
+                command: "gh".to_string(),
+                args: vec!["auth".to_string(), "login".to_string()],
+            }),
         },
         DoctorCheckView {
-            id: "feature-binding-resolved".to_string(),
+            id: "required-workflows-present".to_string(),
             status: DoctorStatus::Failing,
-            detail: Some("branch not mapped to pull request".to_string()),
-            remediation: Some("Run calypso init to initialize the repository".to_string()),
-            has_auto_fix: false,
+            detail: Some("rust-unit.yml".to_string()),
+            remediation: Some(
+                "Missing workflow files will be written and pushed: rust-unit.yml".to_string(),
+            ),
+            fix: None,
         },
     ]
 }
 
 #[test]
 fn doctor_surface_renders_check_list_with_pass_fail_indicators() {
-    let surface = DoctorSurface::new(sample_doctor_checks());
+    let surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let rendered = surface.render();
 
     assert!(rendered.contains("Calypso Doctor"));
     assert!(rendered.contains("✓  gh-installed"));
     assert!(rendered.contains("✗  gh-authenticated"));
-    assert!(rendered.contains("✗  feature-binding-resolved"));
+    assert!(rendered.contains("✗  required-workflows-present"));
     assert!(rendered.contains("[auto-fix]"));
 }
 
 #[test]
 fn doctor_surface_renders_selected_check_detail() {
-    let surface = DoctorSurface::new(sample_doctor_checks());
+    let surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let rendered = surface.render();
 
     // First item (index 0) is selected by default — shown in detail panel
@@ -580,7 +586,7 @@ fn doctor_surface_renders_selected_check_detail() {
 
 #[test]
 fn doctor_surface_navigation_updates_selected_index() {
-    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let mut surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let cwd = std::path::Path::new("/tmp");
 
     assert_eq!(surface.selected(), 0);
@@ -610,7 +616,7 @@ fn doctor_surface_navigation_updates_selected_index() {
 
 #[test]
 fn doctor_surface_quit_on_q_and_esc() {
-    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let mut surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let cwd = std::path::Path::new("/tmp");
 
     assert_eq!(
@@ -618,7 +624,7 @@ fn doctor_surface_quit_on_q_and_esc() {
         DoctorSurfaceEvent::Quit
     );
 
-    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let mut surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     assert_eq!(
         surface.handle_key_event(KeyEvent::from(KeyCode::Esc), cwd),
         DoctorSurfaceEvent::Quit
@@ -627,7 +633,7 @@ fn doctor_surface_quit_on_q_and_esc() {
 
 #[test]
 fn doctor_surface_quit_on_ctrl_c() {
-    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let mut surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let cwd = std::path::Path::new("/tmp");
 
     let event = surface.handle_key_event(
@@ -640,30 +646,30 @@ fn doctor_surface_quit_on_ctrl_c() {
 
 #[test]
 fn doctor_surface_renders_selected_check_detail_after_navigation() {
-    let mut surface = DoctorSurface::new(sample_doctor_checks());
+    let mut surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let cwd = std::path::Path::new("/tmp");
 
     surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
     surface.handle_key_event(KeyEvent::from(KeyCode::Down), cwd);
 
     let rendered = surface.render();
-    assert!(rendered.contains("Selected: feature-binding-resolved"));
-    assert!(rendered.contains("Detail: branch not mapped to pull request"));
-    assert!(rendered.contains("Fix: Run calypso init to initialize the repository"));
+    assert!(rendered.contains("Selected: required-workflows-present"));
+    assert!(rendered.contains("Detail: rust-unit.yml"));
+    assert!(rendered.contains("Fix: Missing workflow files will be written and pushed"));
 }
 
 #[test]
 fn doctor_surface_check_count_matches_input() {
-    let surface = DoctorSurface::new(sample_doctor_checks());
+    let surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     assert_eq!(surface.check_count(), 3);
 
-    let empty_surface = DoctorSurface::new(vec![]);
+    let empty_surface = DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
     assert_eq!(empty_surface.check_count(), 0);
 }
 
 #[test]
 fn doctor_surface_renders_keybinding_help() {
-    let surface = DoctorSurface::new(sample_doctor_checks());
+    let surface = DoctorSurface::new(sample_doctor_checks(), std::path::PathBuf::from("/tmp"));
     let rendered = surface.render();
 
     assert!(rendered.contains("[r] Refresh"));

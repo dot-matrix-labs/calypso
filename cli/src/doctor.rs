@@ -1,8 +1,9 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::claude::{ClaudeConfig, ClaudeSession};
 use crate::state::BuiltinEvidence;
+use crate::workflows;
 
 const REQUIRED_WORKFLOW_FILES: [&str; 6] = [
     "rust-quality.yml",
@@ -15,6 +16,7 @@ const REQUIRED_WORKFLOW_FILES: [&str; 6] = [
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DoctorCheckId {
+    GitInitialized,
     GhInstalled,
     CodexInstalled,
     ClaudeInstalled,
@@ -26,6 +28,7 @@ pub enum DoctorCheckId {
 impl DoctorCheckId {
     fn builtin_key(self) -> &'static str {
         match self {
+            DoctorCheckId::GitInitialized => "builtin.doctor.git_initialized",
             DoctorCheckId::GhInstalled => "builtin.doctor.gh_installed",
             DoctorCheckId::CodexInstalled => "builtin.doctor.codex_installed",
             DoctorCheckId::ClaudeInstalled => "builtin.doctor.claude_installed",
@@ -39,6 +42,7 @@ impl DoctorCheckId {
 
     pub fn label(self) -> &'static str {
         match self {
+            DoctorCheckId::GitInitialized => "git-initialized",
             DoctorCheckId::GhInstalled => "gh-installed",
             DoctorCheckId::CodexInstalled => "codex-installed",
             DoctorCheckId::ClaudeInstalled => "claude-installed",
@@ -64,10 +68,21 @@ pub enum DoctorCheckScope {
 /// An automated or manual fix for a failing doctor check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DoctorFix {
-    /// Execute a command to resolve the issue.
+    /// Execute a single command to resolve the issue.
     RunCommand { command: String, args: Vec<String> },
+    /// Write a file at the given absolute path with the given content.
+    WriteFile { path: PathBuf, content: String },
+    /// Run multiple fix steps in order; stops on first failure.
+    Sequence(Vec<DoctorFix>),
     /// Provide human-readable instructions only; no automated action available.
     Manual { instructions: String },
+}
+
+impl DoctorFix {
+    /// Returns `true` for all variants that can be applied automatically.
+    pub fn is_automatic(&self) -> bool {
+        !matches!(self, DoctorFix::Manual { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,17 +114,27 @@ impl DoctorReport {
 }
 
 pub trait DoctorEnvironment {
+    fn is_git_repo(&self, repo_root: &Path) -> bool;
     fn command_exists(&self, command: &str) -> bool;
     fn claude_reachable(&self) -> bool;
     fn gh_authenticated(&self) -> bool;
     fn has_github_remote(&self, repo_root: &Path) -> bool;
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String>;
+    /// Returns the GitHub username of the currently authenticated user, if available.
+    fn github_user(&self) -> Option<String>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct HostDoctorEnvironment;
 
 impl DoctorEnvironment for HostDoctorEnvironment {
+    fn is_git_repo(&self, repo_root: &Path) -> bool {
+        Command::new("git")
+            .args(["-C", &repo_root.to_string_lossy(), "rev-parse", "--git-dir"])
+            .output()
+            .is_ok_and(|output| output.status.success())
+    }
+
     fn command_exists(&self, command: &str) -> bool {
         Command::new("which")
             .arg(command)
@@ -146,21 +171,56 @@ impl DoctorEnvironment for HostDoctorEnvironment {
         missing.sort();
         missing
     }
+
+    fn github_user(&self) -> Option<String> {
+        let output = Command::new("gh")
+            .args(["api", "user", "--jq", ".login"])
+            .output()
+            .ok()?;
+        if output.status.success() {
+            let user = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if user.is_empty() { None } else { Some(user) }
+        } else {
+            None
+        }
+    }
 }
 
 pub fn collect_doctor_report(
     environment: &impl DoctorEnvironment,
     repo_root: &Path,
 ) -> DoctorReport {
+    let is_git = environment.is_git_repo(repo_root);
     let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
     missing_workflow_files.sort();
+    // Only fetch the github user when it may be needed for fix construction.
+    let github_user = if !environment.has_github_remote(repo_root) {
+        environment.github_user()
+    } else {
+        None
+    };
+
+    let repo_name = repo_root
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "repo".to_string());
 
     DoctorReport {
         checks: vec![
             make_check(
+                DoctorCheckId::GitInitialized,
+                DoctorCheckScope::LocalConfiguration,
+                is_git,
+                None,
+                repo_root,
+                None,
+            ),
+            make_check(
                 DoctorCheckId::GhInstalled,
                 DoctorCheckScope::LocalConfiguration,
                 environment.command_exists("gh"),
+                None,
+                repo_root,
                 None,
             ),
             make_check(
@@ -168,11 +228,15 @@ pub fn collect_doctor_report(
                 DoctorCheckScope::LocalConfiguration,
                 environment.command_exists("codex"),
                 None,
+                repo_root,
+                None,
             ),
             make_check(
                 DoctorCheckId::ClaudeInstalled,
                 DoctorCheckScope::LocalConfiguration,
                 environment.claude_reachable(),
+                None,
+                repo_root,
                 None,
             ),
             make_check(
@@ -180,18 +244,24 @@ pub fn collect_doctor_report(
                 DoctorCheckScope::ExternalAuth,
                 environment.gh_authenticated(),
                 None,
+                repo_root,
+                None,
             ),
             make_check(
                 DoctorCheckId::GithubRemoteConfigured,
                 DoctorCheckScope::LocalConfiguration,
                 environment.has_github_remote(repo_root),
                 None,
+                repo_root,
+                github_user.as_deref().map(|u| format!("{u}/{repo_name}")),
             ),
             make_check(
                 DoctorCheckId::RequiredWorkflowFilesPresent,
                 DoctorCheckScope::LocalConfiguration,
                 missing_workflow_files.is_empty(),
                 (!missing_workflow_files.is_empty()).then_some(missing_workflow_files.join(", ")),
+                repo_root,
+                None,
             ),
         ],
     }
@@ -205,18 +275,24 @@ fn status_from_bool(passing: bool) -> DoctorStatus {
     }
 }
 
+/// `extra` carries fix-construction context that varies per check:
+/// - For `GithubRemoteConfigured`: `Some("<user>/<repo>")` when a gh user is known.
+/// - For `RequiredWorkflowFilesPresent`: the `detail` field carries the missing file list.
+/// - For all others: `None`.
 fn make_check(
     id: DoctorCheckId,
     scope: DoctorCheckScope,
     passing: bool,
     detail: Option<String>,
+    repo_root: &Path,
+    extra: Option<String>,
 ) -> DoctorCheck {
     let status = status_from_bool(passing);
     let remediation = (status == DoctorStatus::Failing)
-        .then(|| failing_fix(id, detail.as_deref()))
+        .then(|| failing_fix(id, detail.as_deref(), extra.as_deref()))
         .flatten();
     let fix = (status == DoctorStatus::Failing)
-        .then(|| failing_doctor_fix(id, detail.as_deref()))
+        .then(|| failing_doctor_fix(id, detail.as_deref(), repo_root, extra.as_deref()))
         .flatten();
 
     DoctorCheck {
@@ -273,52 +349,95 @@ pub fn render_doctor_report_verbose(report: &DoctorReport) -> String {
         }
 
         if let Some(doctor_fix) = &check.fix {
-            match doctor_fix {
-                DoctorFix::RunCommand { command, args } => {
-                    lines.push(format!("  auto-fix: {command} {}", args.join(" ")));
-                }
-                DoctorFix::Manual { instructions } => {
-                    lines.push(format!("  manual-fix: {instructions}"));
-                }
-            }
+            render_fix_verbose(doctor_fix, &mut lines, "  ");
         }
     }
 
     lines.join("\n")
 }
 
-/// Apply a `DoctorFix`, executing automated fixes or returning manual instructions.
-///
-/// Returns `Ok(output)` on success (with command stdout for `RunCommand`, or the
-/// instructions text for `Manual`).  Returns `Err(message)` if a `RunCommand` fix
-/// fails to execute or exits with a non-zero status.
-pub fn apply_fix(fix: &DoctorFix) -> Result<String, String> {
+fn render_fix_verbose(fix: &DoctorFix, lines: &mut Vec<String>, indent: &str) {
     match fix {
-        DoctorFix::Manual { instructions } => Ok(instructions.clone()),
         DoctorFix::RunCommand { command, args } => {
-            let output = Command::new(command)
-                .args(args)
-                .output()
-                .map_err(|error| format!("failed to spawn `{command}`: {error}"))?;
-
-            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-
-            if output.status.success() {
-                Ok(if stdout.is_empty() { stderr } else { stdout })
-            } else {
-                Err(if stderr.is_empty() {
-                    format!("`{command}` exited with status {}", output.status)
-                } else {
-                    stderr
-                })
+            lines.push(format!("  auto-fix: {command} {}", args.join(" ")));
+        }
+        DoctorFix::Manual { instructions } => {
+            lines.push(format!("  manual-fix: {instructions}"));
+        }
+        DoctorFix::WriteFile { path, .. } => {
+            lines.push(format!("  auto-fix: write {}", path.display()));
+        }
+        DoctorFix::Sequence(steps) => {
+            lines.push(format!("{indent}auto-fix (sequence):"));
+            for step in steps {
+                render_fix_verbose(step, lines, &format!("{indent}  "));
             }
         }
     }
 }
 
-fn failing_doctor_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<DoctorFix> {
+/// Apply a `DoctorFix` in the given working directory.
+///
+/// Returns `Ok(output)` on success.  Returns `Err(message)` on failure.
+pub fn apply_fix(fix: &DoctorFix, cwd: &Path) -> Result<String, String> {
+    match fix {
+        DoctorFix::Manual { instructions } => Ok(instructions.clone()),
+        DoctorFix::RunCommand { command, args } => run_command(command, args, cwd),
+        DoctorFix::WriteFile { path, content } => {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| format!("failed to create directory {}: {e}", parent.display()))?;
+            }
+            std::fs::write(path, content)
+                .map_err(|e| format!("failed to write {}: {e}", path.display()))?;
+            Ok(format!("wrote {}", path.display()))
+        }
+        DoctorFix::Sequence(steps) => {
+            let mut outputs = Vec::new();
+            for step in steps {
+                match apply_fix(step, cwd) {
+                    Ok(out) => {
+                        if !out.is_empty() {
+                            outputs.push(out);
+                        }
+                    }
+                    Err(err) => return Err(err),
+                }
+            }
+            Ok(outputs.join("\n"))
+        }
+    }
+}
+
+fn run_command(command: &str, args: &[String], cwd: &Path) -> Result<String, String> {
+    let output = Command::new(command)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|error| format!("failed to spawn `{command}`: {error}"))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if output.status.success() {
+        Ok(if stdout.is_empty() { stderr } else { stdout })
+    } else {
+        Err(if stderr.is_empty() {
+            format!("`{command}` exited with status {}", output.status)
+        } else {
+            stderr
+        })
+    }
+}
+
+fn failing_doctor_fix(
+    id: DoctorCheckId,
+    detail: Option<&str>,
+    repo_root: &Path,
+    extra: Option<&str>,
+) -> Option<DoctorFix> {
     match id {
+        // Binary installs are manual — no auto-download.
         DoctorCheckId::GhInstalled => Some(DoctorFix::Manual {
             instructions: "Install gh from https://cli.github.com".to_string(),
         }),
@@ -328,26 +447,99 @@ fn failing_doctor_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<DoctorF
         DoctorCheckId::ClaudeInstalled => Some(DoctorFix::Manual {
             instructions: "Install claude from https://claude.ai/code".to_string(),
         }),
+
+        // `git init` in the target directory.
+        DoctorCheckId::GitInitialized => Some(DoctorFix::RunCommand {
+            command: "git".to_string(),
+            args: vec![
+                "-C".to_string(),
+                repo_root.to_string_lossy().into_owned(),
+                "init".to_string(),
+            ],
+        }),
+
+        // Authentication can be triggered automatically.
         DoctorCheckId::GhAuthenticated => Some(DoctorFix::RunCommand {
             command: "gh".to_string(),
             args: vec!["auth".to_string(), "login".to_string()],
         }),
-        DoctorCheckId::GithubRemoteConfigured => Some(DoctorFix::Manual {
-            instructions:
-                "Add a GitHub remote: git remote add origin https://github.com/org/repo.git"
-                    .to_string(),
-        }),
-        DoctorCheckId::RequiredWorkflowFilesPresent => Some(DoctorFix::Manual {
-            instructions: format!(
-                "Run calypso init to scaffold required GitHub Actions workflows (missing: {})",
-                detail.unwrap_or("unknown")
-            ),
-        }),
+
+        // Create the GitHub repo and wire up the remote.
+        // `extra` carries "<user>/<repo>" when a gh user is known at collection time.
+        DoctorCheckId::GithubRemoteConfigured => {
+            if let Some(slug) = extra {
+                Some(DoctorFix::RunCommand {
+                    command: "gh".to_string(),
+                    args: vec![
+                        "repo".to_string(),
+                        "create".to_string(),
+                        slug.to_string(),
+                        "--private".to_string(),
+                        "--source=.".to_string(),
+                        "--remote=origin".to_string(),
+                    ],
+                })
+            } else {
+                Some(DoctorFix::Manual {
+                    instructions:
+                        "Authenticate with `gh auth login`, then re-run doctor to auto-create the repository."
+                            .to_string(),
+                })
+            }
+        }
+
+        // Write every missing workflow file then commit and push.
+        DoctorCheckId::RequiredWorkflowFilesPresent => {
+            let workflows_dir = repo_root.join(".github").join("workflows");
+            let missing: Vec<&str> = detail
+                .unwrap_or("")
+                .split(", ")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            if missing.is_empty() {
+                return None;
+            }
+
+            let mut steps: Vec<DoctorFix> = missing
+                .iter()
+                .filter_map(|filename| {
+                    workflows::content_for(filename).map(|content| DoctorFix::WriteFile {
+                        path: workflows_dir.join(filename),
+                        content: content.to_string(),
+                    })
+                })
+                .collect();
+
+            // Stage, commit, and push the new workflow files.
+            steps.push(DoctorFix::RunCommand {
+                command: "git".to_string(),
+                args: vec!["add".to_string(), ".github/workflows/".to_string()],
+            });
+            steps.push(DoctorFix::RunCommand {
+                command: "git".to_string(),
+                args: vec![
+                    "commit".to_string(),
+                    "-m".to_string(),
+                    "chore: add required GitHub Actions workflows".to_string(),
+                ],
+            });
+            steps.push(DoctorFix::RunCommand {
+                command: "git".to_string(),
+                args: vec!["push".to_string()],
+            });
+
+            Some(DoctorFix::Sequence(steps))
+        }
     }
 }
 
-fn failing_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<String> {
+fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> Option<String> {
     match id {
+        DoctorCheckId::GitInitialized => {
+            Some("Run `git init` to initialise a git repository in this directory.".to_string())
+        }
         DoctorCheckId::GhInstalled => {
             Some("Install GitHub CLI and ensure `gh` is available on PATH.".to_string())
         }
@@ -360,12 +552,20 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>) -> Option<String> {
         DoctorCheckId::GhAuthenticated => {
             Some("Run `gh auth login` and confirm the active account can access this repository.".to_string())
         }
-        DoctorCheckId::GithubRemoteConfigured => Some(
-            "Add a GitHub remote such as `git remote add origin git@github.com:<owner>/<repo>.git`."
-                .to_string(),
-        ),
+        DoctorCheckId::GithubRemoteConfigured => {
+            if let Some(slug) = extra {
+                Some(format!(
+                    "Will create private GitHub repository `{slug}` and configure it as the `origin` remote."
+                ))
+            } else {
+                Some(
+                    "Authenticate with `gh auth login` first, then re-run doctor to auto-create the repository."
+                        .to_string(),
+                )
+            }
+        }
         DoctorCheckId::RequiredWorkflowFilesPresent => Some(format!(
-            "Add the missing workflow files under .github/workflows: {}",
+            "Missing workflow files will be written and pushed: {}",
             detail.unwrap_or("unknown")
         )),
     }
@@ -410,5 +610,68 @@ mod tests {
         );
 
         std::fs::remove_dir_all(repo_root).expect("temp dir should be removed");
+    }
+
+    #[test]
+    fn doctor_fix_is_automatic_for_non_manual_variants() {
+        assert!(
+            DoctorFix::RunCommand {
+                command: "git".to_string(),
+                args: vec!["init".to_string()]
+            }
+            .is_automatic()
+        );
+        assert!(
+            DoctorFix::WriteFile {
+                path: PathBuf::from("/tmp/foo"),
+                content: "x".to_string()
+            }
+            .is_automatic()
+        );
+        assert!(DoctorFix::Sequence(vec![]).is_automatic());
+        assert!(
+            !DoctorFix::Manual {
+                instructions: "do it manually".to_string()
+            }
+            .is_automatic()
+        );
+    }
+
+    #[test]
+    fn apply_fix_write_file_creates_parent_and_writes_content() {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("calypso-apply-fix-{nanos}"));
+        let file_path = dir.join("sub").join("file.txt");
+        let fix = DoctorFix::WriteFile {
+            path: file_path.clone(),
+            content: "hello".to_string(),
+        };
+        let result = apply_fix(&fix, &dir);
+        assert!(result.is_ok(), "write fix should succeed: {result:?}");
+        assert_eq!(
+            std::fs::read_to_string(&file_path).expect("file should exist"),
+            "hello"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn apply_fix_sequence_stops_on_first_error() {
+        let dir = std::env::temp_dir();
+        let fix = DoctorFix::Sequence(vec![
+            DoctorFix::RunCommand {
+                command: "false".to_string(),
+                args: vec![],
+            },
+            // This second step should never run.
+            DoctorFix::Manual {
+                instructions: "should not appear".to_string(),
+            },
+        ]);
+        let result = apply_fix(&fix, &dir);
+        assert!(result.is_err(), "sequence should fail on first error");
     }
 }

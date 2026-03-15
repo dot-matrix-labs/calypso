@@ -7,14 +7,21 @@ use calypso_cli::doctor::{
 
 #[derive(Default)]
 struct FakeEnvironment {
+    is_git: bool,
     commands: BTreeSet<String>,
     claude_reachable: bool,
     gh_authenticated: bool,
     github_remote_roots: BTreeSet<PathBuf>,
     missing_workflow_files: BTreeMap<PathBuf, Vec<String>>,
+    github_user: Option<String>,
 }
 
 impl FakeEnvironment {
+    fn with_git(mut self) -> Self {
+        self.is_git = true;
+        self
+    }
+
     fn with_command(mut self, command: &str) -> Self {
         self.commands.insert(command.to_string());
         self
@@ -37,9 +44,18 @@ impl FakeEnvironment {
         );
         self
     }
+
+    fn with_github_user(mut self, user: &str) -> Self {
+        self.github_user = Some(user.to_string());
+        self
+    }
 }
 
 impl DoctorEnvironment for FakeEnvironment {
+    fn is_git_repo(&self, _repo_root: &Path) -> bool {
+        self.is_git
+    }
+
     fn command_exists(&self, command: &str) -> bool {
         self.commands.contains(command)
     }
@@ -61,6 +77,10 @@ impl DoctorEnvironment for FakeEnvironment {
             .get(repo_root)
             .cloned()
             .unwrap_or_default()
+    }
+
+    fn github_user(&self) -> Option<String> {
+        self.github_user.clone()
     }
 }
 
@@ -88,6 +108,7 @@ fn doctor_report_collects_expected_check_results() {
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(
         &FakeEnvironment::default()
+            .with_git()
             .with_command("gh")
             .with_command("codex")
             .with_gh_authenticated(true)
@@ -97,6 +118,10 @@ fn doctor_report_collects_expected_check_results() {
 
     let statuses = status_map(&report);
 
+    assert_eq!(
+        statuses[&DoctorCheckId::GitInitialized],
+        DoctorStatus::Passing
+    );
     assert_eq!(statuses[&DoctorCheckId::GhInstalled], DoctorStatus::Passing);
     assert_eq!(
         statuses[&DoctorCheckId::CodexInstalled],
@@ -121,6 +146,10 @@ fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
     let report = collect_doctor_report(&FakeEnvironment::default(), Path::new("/tmp/calypso"));
     let statuses = status_map(&report);
 
+    assert_eq!(
+        statuses[&DoctorCheckId::GitInitialized],
+        DoctorStatus::Failing
+    );
     assert_eq!(statuses[&DoctorCheckId::GhInstalled], DoctorStatus::Failing);
     assert_eq!(
         statuses[&DoctorCheckId::CodexInstalled],
@@ -145,6 +174,7 @@ fn doctor_report_converts_check_results_into_builtin_evidence() {
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(
         &FakeEnvironment::default()
+            .with_git()
             .with_command("gh")
             .with_gh_authenticated(true)
             .with_github_remote_root(repo_root),
@@ -153,6 +183,10 @@ fn doctor_report_converts_check_results_into_builtin_evidence() {
 
     let evidence = report.to_builtin_evidence();
 
+    assert_eq!(
+        evidence.result_for("builtin.doctor.git_initialized"),
+        Some(true)
+    );
     assert_eq!(
         evidence.result_for("builtin.doctor.gh_installed"),
         Some(true)
@@ -225,7 +259,7 @@ fn doctor_report_render_includes_actionable_fix_for_missing_workflows() {
 
     assert!(rendered.contains("required-workflows-present"));
     assert!(rendered.contains(
-        "Add the missing workflow files under .github/workflows: release-cli.yml, rust-quality.yml"
+        "Missing workflow files will be written and pushed: release-cli.yml, rust-quality.yml"
     ));
 }
 
@@ -262,6 +296,12 @@ fn doctor_fix_is_populated_for_failing_checks() {
         })
     );
 
+    // GitInitialized should have an auto RunCommand fix
+    let git_init = check_for(&report, DoctorCheckId::GitInitialized);
+    assert!(
+        matches!(&git_init.fix, Some(DoctorFix::RunCommand { command, .. }) if command == "git")
+    );
+
     // GhInstalled should have a Manual fix
     let gh_installed = check_for(&report, DoctorCheckId::GhInstalled);
     assert!(matches!(gh_installed.fix, Some(DoctorFix::Manual { .. })));
@@ -275,12 +315,88 @@ fn apply_fix_returns_instructions_for_manual_fix() {
         instructions: "Install gh from https://cli.github.com".to_string(),
     };
 
-    let result = apply_fix(&fix);
+    let result = apply_fix(&fix, Path::new("/tmp"));
 
     assert_eq!(
         result,
         Ok("Install gh from https://cli.github.com".to_string())
     );
+}
+
+#[test]
+fn doctor_github_remote_fix_uses_gh_user_and_dirname_when_user_is_known() {
+    use calypso_cli::doctor::DoctorFix;
+
+    let repo_root = Path::new("/tmp/myproject");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git()
+            .with_gh_authenticated(true)
+            .with_github_user("acme"),
+        repo_root,
+    );
+
+    let check = check_for(&report, DoctorCheckId::GithubRemoteConfigured);
+    assert!(
+        matches!(&check.fix, Some(DoctorFix::RunCommand { command, args })
+            if command == "gh" && args.iter().any(|a| a == "acme/myproject")),
+        "fix should contain acme/myproject slug: {:?}",
+        check.fix
+    );
+}
+
+#[test]
+fn doctor_github_remote_fix_falls_back_to_manual_when_no_user() {
+    use calypso_cli::doctor::DoctorFix;
+
+    let repo_root = Path::new("/tmp/myproject");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git()
+            .with_gh_authenticated(true),
+        repo_root,
+    );
+
+    let check = check_for(&report, DoctorCheckId::GithubRemoteConfigured);
+    assert!(
+        matches!(&check.fix, Some(DoctorFix::Manual { .. })),
+        "should fall back to Manual when no gh user: {:?}",
+        check.fix
+    );
+}
+
+#[test]
+fn doctor_workflow_fix_is_a_sequence_with_write_and_git_steps() {
+    use calypso_cli::doctor::DoctorFix;
+
+    let repo_root = Path::new("/tmp/myproject");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git()
+            .with_missing_workflow_files(repo_root, &["rust-unit.yml"]),
+        repo_root,
+    );
+
+    let check = check_for(&report, DoctorCheckId::RequiredWorkflowFilesPresent);
+    assert!(
+        matches!(&check.fix, Some(DoctorFix::Sequence(_))),
+        "workflow fix should be a Sequence: {:?}",
+        check.fix
+    );
+    if let Some(DoctorFix::Sequence(steps)) = &check.fix {
+        assert!(
+            steps
+                .iter()
+                .any(|s| matches!(s, DoctorFix::WriteFile { .. })),
+            "sequence should include WriteFile steps"
+        );
+        assert!(
+            steps
+                .iter()
+                .any(|s| matches!(s, DoctorFix::RunCommand { command, .. } if command == "git")),
+            "sequence should include git commands"
+        );
+    }
 }
 
 #[test]
