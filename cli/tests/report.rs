@@ -329,7 +329,7 @@ fn state_status_json_fixture_file_round_trip() {
     assert_eq!(value["branch"], "feat/login-oauth");
     assert_eq!(value["pr_number"], 42);
     assert_eq!(value["workflow_state"], "implementation");
-    assert!(value["gate_groups"].as_array().unwrap().len() > 0);
+    assert!(!value["gate_groups"].as_array().unwrap().is_empty());
     assert!(value["blocking_gate_ids"].as_array().is_some());
     assert_eq!(value["active_session_count"], 1);
 
