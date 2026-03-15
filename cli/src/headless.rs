@@ -877,4 +877,50 @@ mod tests {
         let debug = format!("{a:?}");
         assert!(debug.contains("HeadlessConfig"));
     }
+
+    /// Helper: create a ShutdownSignal with no signal queued.
+    fn quiet_shutdown() -> (
+        crate::signal::ShutdownSignal,
+        std::sync::mpsc::Sender<crate::signal::SignalKind>,
+    ) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (crate::signal::ShutdownSignal::from_receiver(rx), tx)
+    }
+
+    #[test]
+    fn run_driver_loop_returns_2_on_invalid_state_path() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
+        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        assert_eq!(exit, 2, "expected exit code 2 for invalid state path");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("driver error"),
+            "expected driver error in output: {output}"
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_returns_signal_exit_code_on_shutdown() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, tx) = quiet_shutdown();
+
+        // Send a signal before calling run_driver_loop
+        tx.send(crate::signal::SignalKind::Terminate).unwrap();
+
+        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
+        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        assert_eq!(exit, 143, "expected SIGTERM exit code 143");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("shutting down"),
+            "expected shutdown message in output: {output}"
+        );
+    }
 }
