@@ -1649,4 +1649,82 @@ mod tests {
             DevelopmentState::load_from_path(std::path::Path::new("/nonexistent/path.json"));
         assert!(result.is_err());
     }
+
+    // ── validate_transition error branches ────────────────────────────────
+
+    #[test]
+    fn validate_transition_same_phase_development_says_already() {
+        let result =
+            DevelopmentPhase::Development.validate_transition(&DevelopmentPhase::Development);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("already in this phase"),
+            "expected 'already in this phase': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_transition_same_phase_testing_says_already() {
+        let result = DevelopmentPhase::Testing.validate_transition(&DevelopmentPhase::Testing);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("already in this phase"),
+            "expected 'already in this phase': {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_transition_init_to_init_generic_fallback() {
+        let result = DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Init);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string().contains("is not permitted"),
+            "expected generic fallback message: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn validate_transition_init_to_testing_specific_reason() {
+        let result = DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Testing);
+        let err = result.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("init must complete before entering testing"),
+            "expected init-to-testing reason: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn development_transition_error_is_std_error() {
+        let err: Box<dyn std::error::Error> = Box::new(DevelopmentTransitionError::Rejected {
+            from: DevelopmentPhase::Init,
+            to: DevelopmentPhase::Testing,
+            reason: "test".to_string(),
+        });
+        assert!(err.to_string().contains("cannot transition"));
+    }
+
+    // ── DevelopmentState re-entry to init clears init_step ────────────────
+
+    #[test]
+    fn development_state_re_entry_to_init_clears_init_step() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("verify-setup");
+        state
+            .transition_to(DevelopmentPhase::Development, "t1")
+            .unwrap();
+        assert!(
+            state.init_step.is_none(),
+            "init_step should be cleared after leaving Init"
+        );
+        state.transition_to(DevelopmentPhase::Init, "t2").unwrap();
+        assert!(
+            state.init_step.is_none(),
+            "init_step should be None on re-entry to Init"
+        );
+    }
 }

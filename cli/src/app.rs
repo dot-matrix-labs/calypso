@@ -891,4 +891,209 @@ mod tests {
             "expected APPLIED tag: {output}"
         );
     }
+
+    // ── render_dev_status tests ───────────────────────────────────────────
+
+    #[test]
+    fn render_dev_status_shows_phase() {
+        let state = DevelopmentState::new();
+        let output = render_dev_status(&state);
+        assert!(
+            output.contains("Development phase: init"),
+            "expected phase line: {output}"
+        );
+    }
+
+    #[test]
+    fn render_dev_status_shows_init_step_when_present() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("verify-setup");
+        let output = render_dev_status(&state);
+        assert!(
+            output.contains("Init sub-state:    verify-setup"),
+            "expected init step: {output}"
+        );
+    }
+
+    #[test]
+    fn render_dev_status_hides_init_step_when_absent() {
+        let state = DevelopmentState::new();
+        let output = render_dev_status(&state);
+        assert!(
+            !output.contains("Init sub-state"),
+            "should not contain init sub-state: {output}"
+        );
+    }
+
+    #[test]
+    fn render_dev_status_shows_last_transition_timestamp() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(
+                crate::state::DevelopmentPhase::Development,
+                "2026-03-15T00:00:00Z",
+            )
+            .unwrap();
+        let output = render_dev_status(&state);
+        assert!(
+            output.contains("Last transition:   2026-03-15T00:00:00Z"),
+            "expected timestamp: {output}"
+        );
+    }
+
+    #[test]
+    fn render_dev_status_shows_transition_history() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(
+                crate::state::DevelopmentPhase::Development,
+                "2026-03-15T00:00:00Z",
+            )
+            .unwrap();
+        let output = render_dev_status(&state);
+        assert!(
+            output.contains("Transition history"),
+            "expected history header: {output}"
+        );
+        assert!(
+            output.contains("init -> development"),
+            "expected transition entry: {output}"
+        );
+    }
+
+    #[test]
+    fn render_dev_status_no_history_when_empty() {
+        let state = DevelopmentState::new();
+        let output = render_dev_status(&state);
+        assert!(
+            !output.contains("Transition history"),
+            "should not contain history section: {output}"
+        );
+    }
+
+    // ── run_dev_status / run_dev_status_json tests ────────────────────────
+
+    #[test]
+    fn run_dev_status_returns_error_for_missing_dir() {
+        let result = run_dev_status(std::path::Path::new("/nonexistent/project"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_dev_status_json_returns_error_for_missing_dir() {
+        let result = run_dev_status_json(std::path::Path::new("/nonexistent/project"));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn run_dev_status_loads_from_file() {
+        let tmp = std::env::temp_dir().join("calypso-app-dev-status-test");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(
+                crate::state::DevelopmentPhase::Development,
+                "2026-03-15T00:00:00Z",
+            )
+            .unwrap();
+        state
+            .save_to_path(&calypso_dir.join("dev-state.json"))
+            .unwrap();
+
+        let output = run_dev_status(&tmp).unwrap();
+        assert!(
+            output.contains("Development phase: development"),
+            "expected development phase: {output}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn run_dev_status_json_returns_valid_json() {
+        let tmp = std::env::temp_dir().join("calypso-app-dev-status-json-test");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+
+        let state = DevelopmentState::new();
+        state
+            .save_to_path(&calypso_dir.join("dev-state.json"))
+            .unwrap();
+
+        let json_str = run_dev_status_json(&tmp).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["phase"], "init");
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── render_feature_status dev phase integration ───────────────────────
+
+    fn make_minimal_feature() -> FeatureState {
+        use crate::state::{PullRequestRef, WorkflowState};
+        FeatureState {
+            feature_id: "test-feat".to_string(),
+            branch: "main".to_string(),
+            worktree_path: "/tmp/test".to_string(),
+            pull_request: PullRequestRef {
+                number: 1,
+                url: "https://github.com/test/test/pull/1".to_string(),
+            },
+            github_snapshot: None,
+            github_error: None,
+            workflow_state: WorkflowState::New,
+            gate_groups: vec![],
+            active_sessions: vec![],
+            feature_type: crate::state::FeatureType::Feat,
+            roles: vec![],
+            scheduling: crate::state::SchedulingMeta::default(),
+            artifact_refs: vec![],
+            transcript_refs: vec![],
+            clarification_history: vec![],
+        }
+    }
+
+    #[test]
+    fn render_feature_status_shows_unknown_dev_phase_when_no_state_file() {
+        let tmp = std::env::temp_dir().join("calypso-feat-status-no-dev-state");
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let feature = make_minimal_feature();
+        let output = render_feature_status(&tmp, "main", None, &feature);
+        assert!(
+            output.contains("Development phase: unknown"),
+            "expected unknown phase: {output}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn render_feature_status_shows_dev_phase_from_state_file() {
+        let tmp = std::env::temp_dir().join("calypso-feat-status-with-dev-state");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(
+                crate::state::DevelopmentPhase::Development,
+                "2026-03-15T00:00:00Z",
+            )
+            .unwrap();
+        state
+            .save_to_path(&calypso_dir.join("dev-state.json"))
+            .unwrap();
+
+        let feature = make_minimal_feature();
+        let output = render_feature_status(&tmp, "feat-branch", None, &feature);
+        assert!(
+            output.contains("Development phase: development"),
+            "expected development phase: {output}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }
