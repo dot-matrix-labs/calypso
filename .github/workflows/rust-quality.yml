@@ -16,8 +16,8 @@ jobs:
         include:
           - name: stable / rust stable
             toolchain: stable
-          - name: msrv / rust 1.85.0
-            toolchain: "1.85.0"
+          - name: msrv / rust 1.88.0
+            toolchain: "1.88.0"
           - name: coverage-pinned / rust 1.94.0
             toolchain: "1.94.0"
 
@@ -54,8 +54,8 @@ jobs:
         include:
           - name: stable / rust stable
             toolchain: stable
-          - name: msrv / rust 1.85.0
-            toolchain: "1.85.0"
+          - name: msrv / rust 1.88.0
+            toolchain: "1.88.0"
           - name: coverage-pinned / rust 1.94.0
             toolchain: "1.94.0"
 
@@ -92,8 +92,8 @@ jobs:
         include:
           - name: stable / rust stable
             toolchain: stable
-          - name: msrv / rust 1.85.0
-            toolchain: "1.85.0"
+          - name: msrv / rust 1.88.0
+            toolchain: "1.88.0"
           - name: coverage-pinned / rust 1.94.0
             toolchain: "1.94.0"
 
