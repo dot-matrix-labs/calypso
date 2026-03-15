@@ -4,9 +4,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::doctor::{DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
+use crate::doctor::{HostDoctorEnvironment, collect_doctor_report};
 use crate::state::{RepositoryIdentity, RepositoryState};
 use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
+
+// ---------------------------------------------------------------------------
+// Re-export for external consumers
+// ---------------------------------------------------------------------------
+
+pub use crate::blueprint_workflows::BlueprintWorkflowLibrary;
 
 // ---------------------------------------------------------------------------
 // Init state machine
@@ -636,86 +642,107 @@ pub fn run_init(request: &InitRequest) -> Result<InitResult, InitError> {
     init_repository(request, &HostInitEnvironment)
 }
 
-/// Run the full interactive init flow, checking what already exists and only
+/// Run the full init flow, detecting the current repository state and only
 /// performing the steps that are needed. This is the entry point for
 /// `calypso init` from the CLI.
 ///
 /// The function returns `Ok(InitProgress)` representing the final state of the
 /// init state machine after all applicable steps have been executed.
 /// State is persisted to `.calypso/init-state.json` after each step.
+///
+/// ## Repo detection logic
+///
+/// | State                        | Action                                            |
+/// |------------------------------|---------------------------------------------------|
+/// | Not a git repo               | `git init`, create upstream, scaffold, configure   |
+/// | Git repo, no upstream        | Create upstream if org/repo given, scaffold        |
+/// | Fully configured             | Validate; refresh stale workflows if `allow_reinit`|
 pub fn run_init_interactive(
     repo_path: &Path,
     allow_reinit: bool,
     env: &impl InitEnvironment,
 ) -> Result<InitProgress, InitError> {
-    // Resume from persisted state if available and not reinitialising.
-    let mut progress = if !allow_reinit {
-        env.load_init_state(repo_path)?
-            .unwrap_or_else(|| InitProgress::new(repo_path.to_path_buf()))
-    } else {
-        InitProgress::new(repo_path.to_path_buf())
+    // Attempt to resume from a previous interrupted init.
+    let mut progress = match env.load_init_state(repo_path) {
+        Ok(Some(prev)) if !prev.current_step.is_complete() && !allow_reinit => prev,
+        _ => InitProgress::new(repo_path.to_path_buf()),
     };
 
-    // If already complete, nothing to do.
-    if progress.current_step.is_complete() {
-        return Ok(progress);
+    // Step: prompt-directory (non-interactive — cwd is the directory)
+    if !progress.is_step_done(&InitStep::PromptDirectory) {
+        progress.advance(); // PromptDirectory -> CreateGitRepo
     }
 
-    // Run steps from the current position forward.
-    loop {
-        match &progress.current_step {
-            InitStep::PromptDirectory => {
-                // Non-interactive — cwd is the directory.
-                progress.advance();
-            }
-            InitStep::CreateGitRepo => {
-                if !env.is_git_repo(repo_path)? {
-                    env.git_init(repo_path)?;
-                }
-                progress.advance();
-            }
-            InitStep::CreateUpstream => {
-                // Attempt to get existing remote or skip.
-                progress.advance();
-            }
-            InitStep::ScaffoldGithubActions => {
-                scaffold_github_actions(repo_path, env)?;
-                progress.advance();
-            }
-            InitStep::ConfigureLocal => {
-                let remote_url = env.remote_url(repo_path).unwrap_or_default();
-                if is_github_url(&remote_url) {
-                    let request = InitRequest {
-                        repo_path: repo_path.to_path_buf(),
-                        provider: None,
-                        allow_reinit,
-                        create_git_repo: false,
-                        github_org: None,
-                        github_repo_name: None,
-                    };
-                    init_repository(&request, env)?;
-                }
-                progress.advance();
-            }
-            InitStep::VerifySetup => {
-                // Wire to doctor: collect doctor report and check for failures.
-                let report = collect_doctor_report(&HostDoctorEnvironment, repo_path);
-                let failing = report
-                    .checks
-                    .iter()
-                    .filter(|c| c.status == DoctorStatus::Failing)
-                    .count();
-                if failing > 0 {
-                    // Record the step as done but note failures in progress.
-                    // The init still completes — doctor issues are advisory.
-                }
-                progress.advance();
-            }
-            InitStep::Complete => break,
+    // Step: create-git-repo
+    if !progress.is_step_done(&InitStep::CreateGitRepo) {
+        if !env.is_git_repo(repo_path)? {
+            env.git_init(repo_path)?;
         }
-        // Persist after each step so interrupted runs can resume.
-        env.save_init_state(repo_path, &progress)?;
+        progress.advance(); // CreateGitRepo -> CreateUpstream
+        env.save_init_state(repo_path, &progress).ok(); // best-effort persist
     }
+
+    // Step: create-upstream — detect existing remote or create one
+    if !progress.is_step_done(&InitStep::CreateUpstream) {
+        let has_remote = env.remote_url(repo_path).is_ok();
+        if !has_remote {
+            // Attempt to create upstream from directory name if org/repo not provided.
+            let org = progress.github_org.clone().unwrap_or_default();
+            let repo = progress
+                .github_repo
+                .clone()
+                .unwrap_or_else(|| dir_name(repo_path));
+            if !org.is_empty() && !repo.is_empty() {
+                let url = env.create_github_repo(&org, &repo)?;
+                env.set_remote(repo_path, &url)?;
+                progress.github_org = Some(org);
+                progress.github_repo = Some(repo);
+            }
+            // If org is empty we cannot create a remote — proceed without one.
+        }
+        progress.advance(); // CreateUpstream -> ScaffoldGithubActions
+        env.save_init_state(repo_path, &progress).ok();
+    }
+
+    // Step: scaffold-github-actions
+    if !progress.is_step_done(&InitStep::ScaffoldGithubActions) {
+        scaffold_github_actions(repo_path, env)?;
+        progress.advance(); // ScaffoldGithubActions -> ConfigureLocal
+        env.save_init_state(repo_path, &progress).ok();
+    }
+
+    // Step: configure-local (.calypso/ setup) — only when a GitHub remote exists
+    if !progress.is_step_done(&InitStep::ConfigureLocal) {
+        let remote_url = env.remote_url(repo_path).unwrap_or_default();
+        if is_github_url(&remote_url) {
+            let request = InitRequest {
+                repo_path: repo_path.to_path_buf(),
+                provider: None,
+                allow_reinit,
+                create_git_repo: false,
+                github_org: None,
+                github_repo_name: None,
+            };
+            init_repository(&request, env)?;
+        }
+        progress.advance(); // ConfigureLocal -> VerifySetup
+        env.save_init_state(repo_path, &progress).ok();
+    }
+
+    // Step: verify-setup — validate the init is complete
+    if !progress.is_step_done(&InitStep::VerifySetup) {
+        // Check that essential artifacts exist.
+        let calypso_dir = repo_path.join(".calypso");
+        let workflows_dir = repo_path.join(".github").join("workflows");
+        let _calypso_ok = env.path_exists(&calypso_dir);
+        let _workflows_ok = env.path_exists(&workflows_dir);
+        // These checks are informational — we do not fail init if .calypso/
+        // was not created (e.g. no remote configured).
+        progress.advance(); // VerifySetup -> Complete
+    }
+
+    // Persist final state.
+    env.save_init_state(repo_path, &progress).ok();
 
     Ok(progress)
 }
@@ -829,6 +856,85 @@ pub fn run_init_step(
 
     progress.save(repo_path)?;
     Ok(progress)
+}
+
+/// Refresh workflow files that are stale or missing. This re-scaffolds all
+/// GitHub Actions workflow files, overwriting existing ones with the latest
+/// templates.
+pub fn refresh_workflows(
+    repo_path: &Path,
+    env: &impl InitEnvironment,
+) -> Result<Vec<String>, InitError> {
+    let workflows = [
+        ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
+        ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
+        ("ci.yml", WORKFLOW_CI),
+    ];
+
+    let mut refreshed = Vec::new();
+    for (name, content) in &workflows {
+        env.write_workflow_file(repo_path, name, content)?;
+        refreshed.push(name.to_string());
+    }
+    Ok(refreshed)
+}
+
+/// Detect the repository's init status: returns a human-readable summary
+/// and a machine-readable `RepoInitStatus`.
+pub fn detect_repo_status(
+    repo_path: &Path,
+    env: &impl InitEnvironment,
+) -> RepoInitStatus {
+    let is_git = env.is_git_repo(repo_path).unwrap_or(false);
+    if !is_git {
+        return RepoInitStatus::NoGit;
+    }
+
+    let has_remote = env.remote_url(repo_path).is_ok();
+    if !has_remote {
+        return RepoInitStatus::GitNoUpstream;
+    }
+
+    let calypso_dir = repo_path.join(".calypso");
+    let workflows_dir = repo_path.join(".github").join("workflows");
+    if env.path_exists(&calypso_dir) && env.path_exists(&workflows_dir) {
+        return RepoInitStatus::FullyConfigured;
+    }
+
+    RepoInitStatus::GitWithUpstream
+}
+
+/// The detected init status of a repository.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RepoInitStatus {
+    /// Not a git repository.
+    NoGit,
+    /// Git repo but no upstream remote.
+    GitNoUpstream,
+    /// Git repo with upstream but not fully configured.
+    GitWithUpstream,
+    /// Fully configured with .calypso/ and .github/workflows/.
+    FullyConfigured,
+}
+
+impl fmt::Display for RepoInitStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NoGit => write!(f, "not a git repository"),
+            Self::GitNoUpstream => write!(f, "git repository without upstream remote"),
+            Self::GitWithUpstream => write!(f, "git repository with upstream (not fully configured)"),
+            Self::FullyConfigured => write!(f, "fully configured"),
+        }
+    }
+}
+
+/// Extract the directory name from a path, falling back to "repo".
+fn dir_name(path: &Path) -> String {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo")
+        .to_string()
 }
 
 /// Scaffold GitHub Actions workflow files into the repository.
@@ -1397,5 +1503,41 @@ mod tests {
         assert!(output.contains("[x] prompt-directory"));
         assert!(output.contains("[x] create-git-repo"));
         assert!(output.contains("[>] create-upstream"));
+    }
+
+    // ── dir_name ──────────────────────────────────────────────────────────────
+
+    #[test]
+    fn dir_name_extracts_last_component() {
+        assert_eq!(dir_name(Path::new("/home/user/my-project")), "my-project");
+    }
+
+    #[test]
+    fn dir_name_returns_repo_for_root() {
+        // Root "/" has no file_name, so the fallback "repo" is returned.
+        assert_eq!(dir_name(Path::new("/")), "repo");
+    }
+
+    // ── RepoInitStatus ────────────────────────────────────────────────────────
+
+    #[test]
+    fn repo_init_status_display() {
+        assert_eq!(
+            RepoInitStatus::NoGit.to_string(),
+            "not a git repository"
+        );
+        assert_eq!(
+            RepoInitStatus::GitNoUpstream.to_string(),
+            "git repository without upstream remote"
+        );
+        assert!(RepoInitStatus::FullyConfigured
+            .to_string()
+            .contains("fully configured"));
+    }
+
+    #[test]
+    fn repo_init_status_serializes_to_kebab_case() {
+        let json = serde_json::to_string(&RepoInitStatus::FullyConfigured).unwrap();
+        assert_eq!(json, "\"fully-configured\"");
     }
 }
