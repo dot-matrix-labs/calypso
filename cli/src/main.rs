@@ -1,7 +1,7 @@
 use calypso_cli::app::{
-    run_agents_json, run_agents_plain, run_doctor, run_doctor_json, run_state_status_json,
-    run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
-    run_workflows_validate,
+    run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json, run_doctor,
+    run_doctor_json, run_state_status_json, run_state_status_plain, run_status,
+    run_workflows_list, run_workflows_show, run_workflows_validate,
 };
 use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
@@ -78,6 +78,23 @@ fn main() {
             render_status(path)
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
+        // calypso dev-status [--json]
+        [command] if command == "dev-status" => match run_dev_status(&cwd) {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("dev-status error: {error}");
+                std::process::exit(1);
+            }
+        },
+        [command, flag] if command == "dev-status" && flag == "--json" => {
+            match run_dev_status_json(&cwd) {
+                Ok(json) => println!("{json}"),
+                Err(error) => {
+                    eprintln!("dev-status error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         [command] if command == "init" => {
             run_calypso_init(&cwd, false);
         }

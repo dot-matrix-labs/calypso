@@ -66,6 +66,8 @@ Commands:
   watch               Open the interactive operator surface (live TUI)
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
+  dev-status          Show the current development lifecycle phase
+  dev-status --json   Output development lifecycle phase as JSON
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
