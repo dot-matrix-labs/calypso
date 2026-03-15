@@ -262,30 +262,30 @@ impl TemplateSet {
                 }
 
                 // Check blocking_scope references a known state if set
-                if let Some(scope) = &gate.blocking_scope {
-                    if !known_states.contains(scope.as_str()) {
-                        errors.push(format!(
-                            "gate '{}' blocking_scope references non-existent state '{}'",
-                            gate.id, scope
-                        ));
-                    }
+                if let Some(scope) = &gate.blocking_scope
+                    && !known_states.contains(scope.as_str())
+                {
+                    errors.push(format!(
+                        "gate '{}' blocking_scope references non-existent state '{}'",
+                        gate.id, scope
+                    ));
                 }
             }
         }
 
         // Check builtin keyword references
         for task in &self.agents.tasks {
-            if task.kind == AgentTaskKind::Builtin {
-                if let Some(builtin) = &task.builtin {
-                    let recognized = KNOWN_BUILTIN_PREFIXES
-                        .iter()
-                        .any(|prefix| builtin.starts_with(prefix));
-                    if !recognized {
-                        errors.push(format!(
-                            "task '{}' uses unrecognized builtin keyword '{}'",
-                            task.name, builtin
-                        ));
-                    }
+            if task.kind == AgentTaskKind::Builtin
+                && let Some(builtin) = &task.builtin
+            {
+                let recognized = KNOWN_BUILTIN_PREFIXES
+                    .iter()
+                    .any(|prefix| builtin.starts_with(prefix));
+                if !recognized {
+                    errors.push(format!(
+                        "task '{}' uses unrecognized builtin keyword '{}'",
+                        task.name, builtin
+                    ));
                 }
             }
         }
