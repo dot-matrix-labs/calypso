@@ -1097,9 +1097,27 @@ impl DoctorSurface {
         let total = self.checks.len();
 
         // Header
-        write_at(stdout, 0, 0, &format!("┌{}┐", "─".repeat(w.saturating_sub(2))), w)?;
-        write_at(stdout, 0, 1, &format!("│  Calypso Doctor  {passing}/{total} passing"), w)?;
-        write_at(stdout, 0, 2, &format!("└{}┘", "─".repeat(w.saturating_sub(2))), w)?;
+        write_at(
+            stdout,
+            0,
+            0,
+            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(
+            stdout,
+            0,
+            1,
+            &format!("│  Calypso Doctor  {passing}/{total} passing"),
+            w,
+        )?;
+        write_at(
+            stdout,
+            0,
+            2,
+            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
         write_at(stdout, 0, 3, "", w)?;
 
         // Check list
@@ -1109,9 +1127,23 @@ impl DoctorSurface {
                 break;
             }
             let pointer = if index == self.selected { "▶" } else { " " };
-            let status_icon = if matches!(check.status, DoctorStatus::Passing) { "✓" } else { "✗" };
-            let fix_tag = if check.has_auto_fix() { "  [auto-fix]" } else { "" };
-            write_at(stdout, 0, row, &format!("  {pointer} {status_icon}  {}{fix_tag}", check.id), w)?;
+            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
+                "✓"
+            } else {
+                "✗"
+            };
+            let fix_tag = if check.has_auto_fix() {
+                "  [auto-fix]"
+            } else {
+                ""
+            };
+            write_at(
+                stdout,
+                0,
+                row,
+                &format!("  {pointer} {status_icon}  {}{fix_tag}", check.id),
+                w,
+            )?;
             row += 1;
         }
 
@@ -1122,11 +1154,21 @@ impl DoctorSurface {
                 row += 1;
             }
             if row < content_rows {
-                write_at(stdout, 0, row, &format!("  {}", "─".repeat(w.saturating_sub(4))), w)?;
+                write_at(
+                    stdout,
+                    0,
+                    row,
+                    &format!("  {}", "─".repeat(w.saturating_sub(4))),
+                    w,
+                )?;
                 row += 1;
             }
             if row < content_rows {
-                let status_icon = if matches!(check.status, DoctorStatus::Passing) { "✓" } else { "✗" };
+                let status_icon = if matches!(check.status, DoctorStatus::Passing) {
+                    "✓"
+                } else {
+                    "✗"
+                };
                 write_at(stdout, 0, row, &format!("  {status_icon}  {}", check.id), w)?;
                 row += 1;
             }
@@ -1458,11 +1500,7 @@ impl AppShell {
         self
     }
 
-    pub fn handle_key_event(
-        &mut self,
-        event: KeyEvent,
-        cwd: &std::path::Path,
-    ) -> AppEvent {
+    pub fn handle_key_event(&mut self, event: KeyEvent, cwd: &std::path::Path) -> AppEvent {
         // Ctrl+C always exits at the app level.
         if event.code == KeyCode::Char('c') && event.modifiers.contains(KeyModifiers::CONTROL) {
             return AppEvent::Quit;
@@ -1533,7 +1571,10 @@ fn render_app_ribbon(
         tabs.push(' ');
         tabs.push_str(tab.label());
     }
-    let ribbon = format!("  {tabs}    {}  [←/→] Switch  [Esc] Quit", active.screen_hints());
+    let ribbon = format!(
+        "  {tabs}    {}  [←/→] Switch  [Esc] Quit",
+        active.screen_hints()
+    );
     write_at(stdout, 0, layout.ribbon_row, &ribbon, layout.cols as usize)
 }
 
@@ -1553,9 +1594,21 @@ fn render_placeholder_screen(
     body: &str,
 ) -> io::Result<()> {
     let w = layout.cols as usize;
-    write_at(stdout, 0, 0, &format!("┌{}┐", "─".repeat(w.saturating_sub(2))), w)?;
+    write_at(
+        stdout,
+        0,
+        0,
+        &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+        w,
+    )?;
     write_at(stdout, 0, 1, &format!("│  {title}"), w)?;
-    write_at(stdout, 0, 2, &format!("└{}┘", "─".repeat(w.saturating_sub(2))), w)?;
+    write_at(
+        stdout,
+        0,
+        2,
+        &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+        w,
+    )?;
     write_at(stdout, 0, 3, "", w)?;
     write_at(stdout, 0, 4, &format!("  {body}"), w)?;
     for row in 5..layout.content_rows {
@@ -1564,15 +1617,22 @@ fn render_placeholder_screen(
     Ok(())
 }
 
-fn render_state_machine_scaffold(
-    stdout: &mut impl Write,
-    layout: &PanedLayout,
-) -> io::Result<()> {
-    render_placeholder_screen(stdout, layout, "State Machine", "Pipeline and gate view — coming soon.")
+fn render_state_machine_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+    render_placeholder_screen(
+        stdout,
+        layout,
+        "State Machine",
+        "Pipeline and gate view — coming soon.",
+    )
 }
 
 fn render_agents_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
-    render_placeholder_screen(stdout, layout, "Active Agents", "No active feature — run calypso doctor to initialize.")
+    render_placeholder_screen(
+        stdout,
+        layout,
+        "Active Agents",
+        "No active feature — run calypso doctor to initialize.",
+    )
 }
 
 /// Run the interactive app shell (three-tab TUI) from the given working directory.
@@ -1658,8 +1718,12 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
         // Exercise doctor-specific keys while on Doctor tab.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Down))),
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Up))),
-        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char('f')))),
-        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char('r')))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char(
+            'f',
+        )))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char(
+            'r',
+        )))),
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Esc))),
     ];
 
