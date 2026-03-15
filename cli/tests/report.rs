@@ -3,13 +3,13 @@
 //!   2. `calypso state status --json`  (Feature 2)
 //!   3. `calypso agents --json`  (Feature 3)
 
-use calypso_cli::app::{agents_json_report, doctor_json_report, state_status_json_report};
+use calypso_cli::app::{agents_json_report, doctor_json_report, render_agents, state_status_json_report};
 use calypso_cli::doctor::{
     DoctorCheck, DoctorCheckId, DoctorCheckScope, DoctorReport, DoctorStatus,
 };
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
-    SessionOutput, SessionOutputStream, WorkflowState,
+    RepositoryState, SessionOutput, SessionOutputStream, WorkflowState,
 };
 
 // ---------------------------------------------------------------------------
@@ -364,6 +364,67 @@ fn agents_json_completed_session_status_string() {
 }
 
 #[test]
+fn agents_json_failed_session_status_string() {
+    let mut feature = minimal_feature_state();
+    feature.active_sessions[0].status = AgentSessionStatus::Failed;
+
+    let report = agents_json_report(&feature);
+    assert_eq!(report.sessions[0].status, "failed");
+}
+
+#[test]
+fn agents_json_aborted_session_status_string() {
+    let mut feature = minimal_feature_state();
+    feature.active_sessions[0].status = AgentSessionStatus::Aborted;
+
+    let report = agents_json_report(&feature);
+    assert_eq!(report.sessions[0].status, "aborted");
+}
+
+#[test]
+fn agents_json_waiting_for_human_session_status_string() {
+    let mut feature = minimal_feature_state();
+    feature.active_sessions[0].status = AgentSessionStatus::WaitingForHuman;
+    feature.active_sessions[0].pending_follow_ups =
+        vec!["What branch should I target?".to_string()];
+
+    let report = agents_json_report(&feature);
+    assert_eq!(report.sessions[0].status, "waiting-for-human");
+    assert_eq!(
+        report.sessions[0].pending_follow_ups,
+        vec!["What branch should I target?"]
+    );
+}
+
+#[test]
+fn agents_json_all_status_variants_serialize_correctly() {
+    let statuses = vec![
+        (AgentSessionStatus::Running, "running"),
+        (AgentSessionStatus::WaitingForHuman, "waiting-for-human"),
+        (AgentSessionStatus::Completed, "completed"),
+        (AgentSessionStatus::Failed, "failed"),
+        (AgentSessionStatus::Aborted, "aborted"),
+    ];
+
+    for (status, expected_str) in statuses {
+        let mut feature = minimal_feature_state();
+        feature.active_sessions[0].status = status;
+
+        let report = agents_json_report(&feature);
+        let json = serde_json::to_string_pretty(&report).expect("must serialize");
+        let value: serde_json::Value =
+            serde_json::from_str(&json).expect("must be valid JSON");
+        let session_status = value["sessions"][0]["status"]
+            .as_str()
+            .expect("status must be a string");
+        assert_eq!(
+            session_status, expected_str,
+            "status variant should serialize to '{expected_str}'"
+        );
+    }
+}
+
+#[test]
 fn agents_json_multiple_sessions_all_present() {
     let mut feature = minimal_feature_state();
     feature.active_sessions.push(AgentSession {
@@ -380,4 +441,82 @@ fn agents_json_multiple_sessions_all_present() {
     assert_eq!(report.sessions.len(), 2);
     assert_eq!(report.sessions[1].role, "reviewer");
     assert_eq!(report.sessions[1].status, "completed");
+}
+
+// ---------------------------------------------------------------------------
+// Integration test — agents command against a fixture state file
+// ---------------------------------------------------------------------------
+
+#[test]
+fn agents_json_from_fixture_file_with_multiple_sessions() {
+    let fixture_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agents/multi-session-state.json");
+
+    let state = RepositoryState::load_from_path(&fixture_path).expect("fixture state should load");
+    let report = agents_json_report(&state.current_feature);
+
+    assert_eq!(report.feature_id, "feat-login-oauth");
+    assert_eq!(report.sessions.len(), 5);
+
+    // Verify each session role and status
+    assert_eq!(report.sessions[0].role, "engineer");
+    assert_eq!(report.sessions[0].status, "running");
+    assert_eq!(report.sessions[0].output.len(), 2);
+    assert_eq!(report.sessions[0].output[0], "Inspecting branch state\u{2026}");
+
+    assert_eq!(report.sessions[1].role, "reviewer");
+    assert_eq!(report.sessions[1].status, "completed");
+
+    assert_eq!(report.sessions[2].role, "validator");
+    assert_eq!(report.sessions[2].status, "failed");
+
+    assert_eq!(report.sessions[3].role, "orchestrator");
+    assert_eq!(report.sessions[3].status, "aborted");
+
+    assert_eq!(report.sessions[4].role, "architect");
+    assert_eq!(report.sessions[4].status, "waiting-for-human");
+    assert_eq!(
+        report.sessions[4].pending_follow_ups,
+        vec!["What branch should I target?"]
+    );
+
+    // Verify the full report serializes to valid JSON
+    let json = serde_json::to_string_pretty(&report).expect("must serialize");
+    let value: serde_json::Value = serde_json::from_str(&json).expect("must be valid JSON");
+    assert_eq!(
+        value["sessions"].as_array().expect("sessions must be array").len(),
+        5
+    );
+}
+
+#[test]
+fn agents_plain_from_fixture_file_uses_correct_status_icons() {
+    let fixture_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agents/multi-session-state.json");
+
+    let state = RepositoryState::load_from_path(&fixture_path).expect("fixture state should load");
+    let rendered = render_agents(&state.current_feature);
+
+    // Verify feature ID header
+    assert!(
+        rendered.contains("Active sessions for feat-login-oauth"),
+        "should show feature ID in header"
+    );
+
+    // Verify status icons per the spec
+    assert!(rendered.contains("▶"), "running session should use ▶ icon");
+    assert!(rendered.contains("✓"), "completed session should use ✓ icon");
+    assert!(rendered.contains("✗"), "failed session should use ✗ icon");
+    assert!(rendered.contains("⊗"), "aborted session should use ⊗ icon");
+    assert!(rendered.contains("⏸"), "waiting-for-human session should use ⏸ icon");
+
+    // Verify output lines appear
+    assert!(
+        rendered.contains("Inspecting branch state"),
+        "engineer output should appear"
+    );
+    assert!(
+        rendered.contains("Waiting on operator guidance"),
+        "engineer second output line should appear"
+    );
 }
