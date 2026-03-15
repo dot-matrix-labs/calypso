@@ -671,8 +671,7 @@ pub fn run_init_interactive(
     // Load or create development state
     let calypso_dir = repo_path.join(".calypso");
     let dev_state_path = calypso_dir.join("dev-state.json");
-    let mut dev_state = DevelopmentState::load_from_path(&dev_state_path)
-        .unwrap_or_default();
+    let mut dev_state = DevelopmentState::load_from_path(&dev_state_path).unwrap_or_default();
 
     // If already complete, nothing to do.
     if progress.current_step.is_complete() {

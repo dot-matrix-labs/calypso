@@ -1220,10 +1220,7 @@ impl DevelopmentPhase {
 
     /// Validates that transitioning to `target` is permitted.
     /// Returns `Err` with a reason string when the transition is not allowed.
-    pub fn validate_transition(
-        &self,
-        target: &Self,
-    ) -> Result<(), DevelopmentTransitionError> {
+    pub fn validate_transition(&self, target: &Self) -> Result<(), DevelopmentTransitionError> {
         if self.can_transition_to(target) {
             return Ok(());
         }
@@ -1359,9 +1356,7 @@ impl DevelopmentState {
     ///
     /// Returns `true` if the auto-transition occurred.
     pub fn auto_advance_from_init(&mut self, timestamp: &str) -> bool {
-        if self.phase == DevelopmentPhase::Init
-            && self.init_step.as_deref() == Some("complete")
-        {
+        if self.phase == DevelopmentPhase::Init && self.init_step.as_deref() == Some("complete") {
             // This transition is always valid (Init -> Development)
             let _ = self.transition_to(DevelopmentPhase::Development, timestamp);
             true
@@ -1372,8 +1367,7 @@ impl DevelopmentState {
 
     /// Atomically saves state by writing to a `.tmp` file then renaming into place.
     pub fn save_to_path(&self, path: &Path) -> Result<(), StateError> {
-        let json =
-            serde_json::to_string_pretty(self).map_err(StateError::Json)?;
+        let json = serde_json::to_string_pretty(self).map_err(StateError::Json)?;
         let tmp_path = path.with_extension("tmp");
         fs::write(&tmp_path, &json).map_err(StateError::Io)?;
         fs::rename(&tmp_path, path).map_err(StateError::Io)
@@ -1458,15 +1452,13 @@ mod tests {
 
     #[test]
     fn development_phase_validate_transition_ok() {
-        let result =
-            DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Development);
+        let result = DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Development);
         assert!(result.is_ok());
     }
 
     #[test]
     fn development_phase_validate_transition_rejected() {
-        let result =
-            DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Testing);
+        let result = DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Testing);
         assert!(result.is_err());
         let err = result.unwrap_err();
         assert!(err.to_string().contains("cannot transition"));
@@ -1596,9 +1588,7 @@ mod tests {
         state
             .transition_to(DevelopmentPhase::Development, "t1")
             .unwrap();
-        state
-            .transition_to(DevelopmentPhase::Init, "t2")
-            .unwrap();
+        state.transition_to(DevelopmentPhase::Init, "t2").unwrap();
         assert_eq!(state.phase, DevelopmentPhase::Init);
         assert_eq!(state.transition_log.len(), 2);
     }
@@ -1612,9 +1602,7 @@ mod tests {
         state
             .transition_to(DevelopmentPhase::Testing, "t2")
             .unwrap();
-        state
-            .transition_to(DevelopmentPhase::Init, "t3")
-            .unwrap();
+        state.transition_to(DevelopmentPhase::Init, "t3").unwrap();
         assert_eq!(state.phase, DevelopmentPhase::Init);
         assert_eq!(state.transition_log.len(), 3);
     }

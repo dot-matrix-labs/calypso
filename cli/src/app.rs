@@ -801,16 +801,14 @@ pub fn render_dev_status(dev_state: &DevelopmentState) -> String {
 /// Load development state from `.calypso/dev-state.json` and render a plain-text summary.
 pub fn run_dev_status(cwd: &Path) -> Result<String, String> {
     let dev_state_path = cwd.join(".calypso").join("dev-state.json");
-    let dev_state =
-        DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
+    let dev_state = DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
     Ok(render_dev_status(&dev_state))
 }
 
 /// Load development state from `.calypso/dev-state.json` and return as JSON.
 pub fn run_dev_status_json(cwd: &Path) -> Result<String, String> {
     let dev_state_path = cwd.join(".calypso").join("dev-state.json");
-    let dev_state =
-        DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
+    let dev_state = DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
     serde_json::to_string_pretty(&dev_state).map_err(|e| format!("serialization error: {e}"))
 }
 
