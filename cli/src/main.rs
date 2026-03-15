@@ -7,7 +7,9 @@ use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_rep
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::headless::{HeadlessConfig, run_headless};
-use calypso_cli::init::{HostInitEnvironment, run_init_interactive};
+use calypso_cli::init::{
+    HostInitEnvironment, InitProgress, render_init_status, run_init_interactive, run_init_step,
+};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::telemetry::{LogFormat, LogLevel};
 use calypso_cli::template::TemplateSet;
@@ -83,6 +85,12 @@ fn main() {
         }
         [command, flag] if command == "init" && flag == "--reinit" => {
             run_calypso_init(&cwd, true);
+        }
+        [command, flag] if command == "init" && flag == "--status" => {
+            run_init_status(&cwd);
+        }
+        [command, flag, step_name] if command == "init" && flag == "--step" => {
+            run_init_step_cmd(&cwd, step_name);
         }
         [command, flag] if command == "init" && flag == "--state" => {
             run_init_state_show(&cwd);
@@ -385,6 +393,33 @@ fn run_calypso_init(cwd: &std::path::Path, allow_reinit: bool) {
         }
         Err(error) => {
             eprintln!("init error: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_init_status(cwd: &std::path::Path) {
+    match InitProgress::load(cwd) {
+        Ok(Some(progress)) => {
+            println!("{}", render_init_status(&progress));
+        }
+        Ok(None) => {
+            println!("No init state found — run `calypso-cli init` to set up this repository.");
+        }
+        Err(error) => {
+            eprintln!("init status error: {error}");
+            std::process::exit(1);
+        }
+    }
+}
+
+fn run_init_step_cmd(cwd: &std::path::Path, step_name: &str) {
+    match run_init_step(cwd, step_name, &HostInitEnvironment) {
+        Ok(progress) => {
+            println!("{}", render_init_status(&progress));
+        }
+        Err(error) => {
+            eprintln!("init step error: {error}");
             std::process::exit(1);
         }
     }
