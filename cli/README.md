@@ -68,40 +68,33 @@ cargo install --path .
 
 ## Development
 
-### Common Tasks
+The project defines cargo aliases in `.cargo/config.toml` for common tasks.
+All commands below should be run from the `cli/` directory.
 
-**Run unit tests:**
+### Testing
+
 ```bash
-cargo test --lib
+cargo test               # run all tests
+cargo test-unit          # unit tests only (--lib)
+cargo test-integration   # integration tests (cli, doctor, github, state, templates)
+cargo test-e2e           # end-to-end tests (--nocapture)
 ```
 
-**Run integration tests:**
-```bash
-cargo test --test '*'
-```
+### Code Quality
 
-**Run end-to-end tests:**
 ```bash
-cargo test --test e2e -- --nocapture
-```
-
-**Run all tests:**
-```bash
-cargo test
-```
-
-**Check code quality:**
-```bash
-cargo lint    # clippy with strict warnings
-cargo fmt-check  # format check
+cargo lint         # clippy with strict warnings (-D warnings)
+cargo fmt-check    # verify formatting (rustfmt --check)
 cargo build-check  # ensure all targets compile
 ```
 
-**Code coverage:**
+### Code Coverage
+
 ```bash
 cargo coverage
 ```
 
+This runs the `coverage-driver` binary (requires the `__dev_only` feature).
 Coverage reports are saved to `lcov.info`.
 
 ### Debugging
