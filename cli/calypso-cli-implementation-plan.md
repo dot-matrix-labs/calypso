@@ -290,6 +290,39 @@ Next overall step outside PR #19:
 - [x] Check that required GitHub workflow files are present in the repository.
 - [x] Emit actionable fixes for missing or invalid local setup.
 
+## Phase 4.6: Doctor state machine audit (#123)
+
+Doctor should audit the state machine and blueprint workflows for correctness by cross-referencing all GHA workflow references against the actual `.github/workflows/` directory.
+
+### Phase 4.6.1: Reference integrity
+
+- [ ] Collect all `workflow:` paths from blueprint workflow checks, `ci_workflows`, `github_actions.current_required`, and policy gate `paths`.
+- [ ] Verify each referenced file exists on disk relative to repo root.
+- [ ] When a file is missing, scan `.github/workflows/` for the closest filename match and suggest it.
+
+### Phase 4.6.2: Workflow name and job graph validation
+
+- [ ] Parse referenced GHA YAML files to extract the `name:` field and `jobs:` keys.
+- [ ] Validate `workflow_name` matches the actual `name:` field in the GHA file.
+- [ ] Validate `check_names` job keys exist in the referenced GHA workflow's `jobs:` map.
+
+### Phase 4.6.3: Merged graph coherence
+
+- [ ] Verify every check referenced in state `checks:` lists exists in the checks map.
+- [ ] Detect orphan checks (defined but never referenced by any state).
+- [ ] Verify the combined state machine + inherited GHA jobs form a valid graph with no dangling references.
+
+### Phase 4.6.4: Drift detection
+
+- [ ] Compare last-modified timestamps of referenced GHA workflow files vs. blueprint workflow YAML.
+- [ ] Emit a non-blocking warning when GHA files are newer than the referencing blueprint YAML.
+
+### Phase 4.6.5: Integration
+
+- [ ] Add `StateMachineIntegrity` as a new check category in `doctor.rs`.
+- [ ] Include state machine audit results in `doctor --json` output.
+- [ ] Existing doctor checks unaffected.
+
 ## Phase 4.75: Hook and checklist integration
 
 - [ ] Implement evaluation for hook-driven rules such as merge drift and PRD-to-implementation-plan reconciliation.
@@ -360,6 +393,71 @@ Current progress notes:
 - `status` now resolves the current repo/branch, queries the active PR through `gh` when available, merges doctor/GitHub evidence, and renders grouped gate state.
 - No remaining gaps are currently known in the doctor/GitHub runtime slice.
 
+## Phase 8: Workspace crate refactor (#121)
+
+Refactor the single `calypso-cli` crate into a Cargo workspace with the `nightshift` crate as the core orchestration runtime and separate crates for loosely-coupled subsystems.
+
+### Phase 8.1: Workspace scaffold
+
+- [ ] Convert the repository to a Cargo workspace with a root `Cargo.toml`.
+- [ ] Create the `nightshift` crate containing the core orchestration runtime:
+  - state machine driver (`driver.rs`, `state.rs`)
+  - init flow (`init.rs`)
+  - git and branch context (`feature_start.rs`, git-related logic)
+  - GitHub integration (`github.rs`)
+  - TUI operator surface (`tui.rs`)
+  - orchestrator loop and command dispatch (`main.rs`, `app.rs`)
+  - error types (`error.rs`)
+- [ ] All existing tests pass after restructuring.
+
+### Phase 8.2: Extract provider crate
+
+- [ ] Move provider adapters (`claude.rs`, `codex.rs`, `execution.rs`) into a `calypso-providers` crate.
+- [ ] Define a provider trait boundary between `nightshift` and `calypso-providers`.
+
+### Phase 8.3: Extract template and policy crate
+
+- [ ] Move template engine (`template.rs`, `blueprint_workflows.rs`, `workflows.rs`) into a `calypso-templates` crate.
+- [ ] Move policy and gate evaluation (`policy.rs`, `runtime.rs`, `pr_checklist.rs`) into a `calypso-policy` crate or keep with templates if tightly coupled.
+
+### Phase 8.4: Extract supporting crates
+
+- [ ] Move telemetry (`telemetry.rs`) into a `calypso-telemetry` crate.
+- [ ] Move doctor/diagnostics (`doctor.rs`) into a `calypso-doctor` crate.
+- [ ] Move report types (`report.rs`) into a shared `calypso-types` or keep with telemetry.
+
+## Phase 9: Headless mode (#122)
+
+Add `--headless` flag to run the orchestrator loop without the TUI, emitting structured logs instead.
+
+### Phase 9.1: Verbosity and log format flags
+
+- [ ] Add `-v` (info) and `-vv` (debug) flags to CLI argument parsing.
+- [ ] `-v`/`-vv` take precedence over `CALYPSO_LOG` env var when both present. When both are set, emit a benign info-level log at startup: `"verbosity flag overrides CALYPSO_LOG={value}; using {resolved level}"`.
+- [ ] Add `--log-format text|json` flag (default: `json` in headless).
+- [ ] Extend `LogEntry` in `telemetry.rs` with `component` and `event` fields.
+- [ ] Define component identifiers: `doctor`, `state-machine`, `gate`, `agent`, `github`, `git`, `init`.
+- [ ] Define event types: `state_transition`, `gate_evaluated`, `agent_started`, `agent_completed`, `doctor_check`, `doctor_failed`.
+
+### Phase 9.2: Headless orchestrator loop
+
+- [ ] Add `--headless` branch in `main.rs` command dispatch that skips TUI setup.
+- [ ] Startup sequence: parse args → run doctor → load state → enter driver loop.
+- [ ] Doctor failure exits with code 1 and structured error log.
+- [ ] State machine errors exit with code 2.
+- [ ] Agent failures exit with code 3.
+- [ ] No interactive prompts — all decision points resolve automatically or fail.
+
+### Phase 9.3: Human-readable text output
+
+- [ ] Implement `--log-format text` rendering: `timestamp level [component] message`.
+- [ ] ANSI color output when stderr is a TTY, plain text otherwise.
+
+### Phase 9.4: Signal handling
+
+- [ ] SIGINT/SIGTERM trigger graceful shutdown: persist state, log shutdown event, exit.
+- [ ] No interactive confirmation on signal — clean up and exit.
+
 ## Recommended build order
 
 1. Phase 0
@@ -370,10 +468,13 @@ Current progress notes:
 6. Phase 3.5
 7. Phase 4
 8. Phase 4.5
-9. Phase 4.75
-10. Phase 5
-11. Phase 6
-12. Phase 7
+9. Phase 4.6 (doctor state machine audit)
+10. Phase 4.75
+11. Phase 5
+12. Phase 6
+13. Phase 7
+14. Phase 9 (headless mode — enables testing the orchestrator loop without TUI)
+15. Phase 8 (workspace crate refactor)
 
 ## Prototype note
 
