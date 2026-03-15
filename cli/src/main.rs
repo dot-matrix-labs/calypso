@@ -1,9 +1,9 @@
 use calypso_cli::app::{
-    run_agents_json, run_agents_plain, run_doctor, run_doctor_json, run_state_status_json,
-    run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
-    run_workflows_validate,
+    render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
+    run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
+    run_state_status_json, run_state_status_plain, run_status, run_workflows_list,
+    run_workflows_show, run_workflows_validate,
 };
-use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::headless::{HeadlessConfig, run_headless};
@@ -58,6 +58,9 @@ fn main() {
         [command] if command == "doctor" => {
             println!("{}", run_doctor(&cwd));
         }
+        [command, flag] if command == "doctor" && flag == "--verbose" => {
+            println!("{}", run_doctor_verbose(&cwd));
+        }
         [command, flag] if command == "doctor" && flag == "--json" => match run_doctor_json(&cwd) {
             Ok(json) => println!("{json}"),
             Err(json) => {
@@ -65,6 +68,14 @@ fn main() {
                 std::process::exit(1);
             }
         },
+        [command, flag] if command == "doctor" && flag == "--fix" => {
+            let results = run_doctor_fix_all(&cwd);
+            println!("{}", render_fix_results(&results));
+            let any_failed = results.iter().any(|r| r.validated == Some(false));
+            if any_failed {
+                std::process::exit(1);
+            }
+        }
         [command, flag, check_id] if command == "doctor" && flag == "--fix" => {
             run_doctor_fix(check_id, &cwd);
         }
@@ -81,6 +92,23 @@ fn main() {
             render_status(path)
         }
         [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
+        // calypso dev-status [--json]
+        [command] if command == "dev-status" => match run_dev_status(&cwd) {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("dev-status error: {error}");
+                std::process::exit(1);
+            }
+        },
+        [command, flag] if command == "dev-status" && flag == "--json" => {
+            match run_dev_status_json(&cwd) {
+                Ok(json) => println!("{json}"),
+                Err(error) => {
+                    eprintln!("dev-status error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         [command] if command == "init" => {
             run_calypso_init(&cwd, false, None, None);
         }
@@ -609,45 +637,31 @@ fn looks_like_path(arg: &str) -> bool {
 }
 
 fn run_doctor_fix(check_id: &str, cwd: &std::path::Path) {
-    let repo_root = calypso_cli::app::resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
-    let report = collect_doctor_report(&calypso_cli::doctor::HostDoctorEnvironment, &repo_root);
-
-    let check = report
-        .checks
-        .iter()
-        .find(|check| check.id.label() == check_id);
-
-    match check {
-        None => {
-            eprintln!("doctor fix: unknown check id '{check_id}'");
-            std::process::exit(1);
-        }
-        Some(check) => {
-            if check.status == DoctorStatus::Passing {
+    match run_doctor_fix_single(cwd, check_id) {
+        Ok(result) => {
+            if !result.applied {
                 println!("Check '{check_id}' is already passing — no fix needed.");
                 return;
             }
-            match &check.fix {
-                None => {
-                    eprintln!("No fix available for '{check_id}'.");
+
+            println!("{}", result.output);
+
+            match result.validated {
+                Some(true) => {
+                    println!("Validation: check '{check_id}' is now passing.");
+                }
+                Some(false) => {
+                    eprintln!("Validation: check '{check_id}' is still failing after fix.");
                     std::process::exit(1);
                 }
-                Some(fix) => match apply_fix(fix, &repo_root) {
-                    Ok(output) => {
-                        if matches!(fix, DoctorFix::Manual { .. }) {
-                            println!("Manual fix required:");
-                            println!("{output}");
-                        } else {
-                            println!("Fix applied successfully:");
-                            println!("{output}");
-                        }
-                    }
-                    Err(error) => {
-                        eprintln!("Fix failed: {error}");
-                        std::process::exit(1);
-                    }
-                },
+                None => {
+                    println!("Manual fix — re-run `calypso doctor` to verify.");
+                }
             }
+        }
+        Err(error) => {
+            eprintln!("doctor fix: {error}");
+            std::process::exit(1);
         }
     }
 }
