@@ -1081,21 +1081,14 @@ fn render_keybinding_ribbon_operator(
 // ── DoctorSurface paned rendering ────────────────────────────────────────────
 
 impl DoctorSurface {
-    /// Render the doctor surface into a multi-pane layout.
+    /// Render the doctor surface as a single full-width panel.
+    ///
+    /// The check list is followed inline by the detail section for the selected check.
+    /// No vertical divider or sidebar — the detail travels with the list.
     pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
-        render_vertical_divider(stdout, layout)?;
-        self.render_doctor_check_list(stdout, layout)?;
-        self.render_doctor_detail_pane(stdout, layout)?;
-        render_keybinding_ribbon_doctor(stdout, layout)?;
-        Ok(())
-    }
+        let w = layout.cols as usize;
+        let content_rows = layout.content_rows; // u16 — used as row boundary throughout
 
-    fn render_doctor_check_list(
-        &self,
-        stdout: &mut impl Write,
-        layout: &PanedLayout,
-    ) -> io::Result<()> {
-        let w = layout.main_width as usize;
         let passing = self
             .checks
             .iter()
@@ -1103,178 +1096,68 @@ impl DoctorSurface {
             .count();
         let total = self.checks.len();
 
-        write_at(
-            stdout,
-            0,
-            0,
-            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
-            w,
-        )?;
-        write_at(
-            stdout,
-            0,
-            1,
-            &format!("│ Calypso Doctor  {passing}/{total} passing"),
-            w,
-        )?;
-        write_at(
-            stdout,
-            0,
-            2,
-            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
-            w,
-        )?;
+        // Header
+        write_at(stdout, 0, 0, &format!("┌{}┐", "─".repeat(w.saturating_sub(2))), w)?;
+        write_at(stdout, 0, 1, &format!("│  Calypso Doctor  {passing}/{total} passing"), w)?;
+        write_at(stdout, 0, 2, &format!("└{}┘", "─".repeat(w.saturating_sub(2))), w)?;
         write_at(stdout, 0, 3, "", w)?;
 
+        // Check list
+        let mut row: u16 = 4;
         for (index, check) in self.checks.iter().enumerate() {
-            let row = 4 + index as u16;
-            if row >= layout.content_rows {
+            if row >= content_rows {
                 break;
             }
             let pointer = if index == self.selected { "▶" } else { " " };
-            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
-                "✓"
-            } else {
-                "✗"
-            };
-            let fix_tag = if check.has_auto_fix() {
-                "  [auto-fix]"
-            } else {
-                ""
-            };
-            write_at(
-                stdout,
-                0,
-                row,
-                &format!("  {pointer} {status_icon}  {}{fix_tag}", check.id),
-                w,
-            )?;
+            let status_icon = if matches!(check.status, DoctorStatus::Passing) { "✓" } else { "✗" };
+            let fix_tag = if check.has_auto_fix() { "  [auto-fix]" } else { "" };
+            write_at(stdout, 0, row, &format!("  {pointer} {status_icon}  {}{fix_tag}", check.id), w)?;
+            row += 1;
+        }
+
+        // Inline detail for the selected check
+        if let Some(check) = self.checks.get(self.selected) {
+            if row + 1 < content_rows {
+                write_at(stdout, 0, row, "", w)?;
+                row += 1;
+            }
+            if row < content_rows {
+                write_at(stdout, 0, row, &format!("  {}", "─".repeat(w.saturating_sub(4))), w)?;
+                row += 1;
+            }
+            if row < content_rows {
+                let status_icon = if matches!(check.status, DoctorStatus::Passing) { "✓" } else { "✗" };
+                write_at(stdout, 0, row, &format!("  {status_icon}  {}", check.id), w)?;
+                row += 1;
+            }
+            if let Some(detail) = &check.detail {
+                if row < content_rows {
+                    write_at(stdout, 0, row, &format!("     Detail: {detail}"), w)?;
+                    row += 1;
+                }
+            }
+            if let Some(remediation) = &check.remediation {
+                if row < content_rows {
+                    write_at(stdout, 0, row, &format!("     Fix: {remediation}"), w)?;
+                    row += 1;
+                }
+            }
+            if let Some(output) = &self.fix_output {
+                if row < content_rows {
+                    write_at(stdout, 0, row, &format!("     Output: {output}"), w)?;
+                    row += 1;
+                }
+            }
         }
 
         // Clear remaining rows
-        let first_empty = 4 + self.checks.len() as u16;
-        for row in first_empty..layout.content_rows {
+        while row < content_rows {
             write_at(stdout, 0, row, "", w)?;
+            row += 1;
         }
 
         Ok(())
     }
-
-    fn render_doctor_detail_pane(
-        &self,
-        stdout: &mut impl Write,
-        layout: &PanedLayout,
-    ) -> io::Result<()> {
-        let col = layout.sidebar_col;
-        let w = layout.sidebar_width as usize;
-        let content_rows = layout.content_rows as usize;
-
-        write_at(
-            stdout,
-            col,
-            0,
-            &format!("┌─ Detail {}", "─".repeat(w.saturating_sub(10))),
-            w,
-        )?;
-
-        let mut row: usize = 1;
-
-        if let Some(check) = self.checks.get(self.selected) {
-            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
-                "✓"
-            } else {
-                "✗"
-            };
-            write_at(
-                stdout,
-                col,
-                row as u16,
-                &format!("│ {status_icon}  {}", check.id),
-                w,
-            )?;
-            row += 1;
-
-            if let Some(detail) = &check.detail {
-                write_at(stdout, col, row as u16, "│", w)?;
-                row += 1;
-                if row < content_rows.saturating_sub(1) {
-                    write_at(stdout, col, row as u16, "│ Detail:", w)?;
-                    row += 1;
-                }
-                for line in detail
-                    .chars()
-                    .collect::<Vec<_>>()
-                    .chunks(w.saturating_sub(4))
-                {
-                    if row >= content_rows.saturating_sub(1) {
-                        break;
-                    }
-                    let s: String = line.iter().collect();
-                    write_at(stdout, col, row as u16, &format!("│   {s}"), w)?;
-                    row += 1;
-                }
-            }
-
-            if let Some(remediation) = &check.remediation {
-                write_at(stdout, col, row as u16, "│", w)?;
-                row += 1;
-                if row < content_rows.saturating_sub(1) {
-                    write_at(stdout, col, row as u16, "│ Fix:", w)?;
-                    row += 1;
-                }
-                for line in remediation
-                    .chars()
-                    .collect::<Vec<_>>()
-                    .chunks(w.saturating_sub(4))
-                {
-                    if row >= content_rows.saturating_sub(1) {
-                        break;
-                    }
-                    let s: String = line.iter().collect();
-                    write_at(stdout, col, row as u16, &format!("│   {s}"), w)?;
-                    row += 1;
-                }
-            }
-
-            if let Some(output) = &self.fix_output
-                && row < content_rows.saturating_sub(2)
-            {
-                write_at(stdout, col, row as u16, "│", w)?;
-                row += 1;
-                write_at(stdout, col, row as u16, "│ Fix output:", w)?;
-                row += 1;
-                write_at(stdout, col, row as u16, &format!("│   {output}"), w)?;
-                row += 1;
-            }
-        }
-
-        // Fill empty rows
-        while row < content_rows.saturating_sub(1) {
-            write_at(stdout, col, row as u16, "│", w)?;
-            row += 1;
-        }
-
-        // Footer
-        if row < content_rows {
-            write_at(
-                stdout,
-                col,
-                row as u16,
-                &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
-                w,
-            )?;
-        }
-
-        Ok(())
-    }
-}
-
-fn render_keybinding_ribbon_doctor(
-    stdout: &mut impl Write,
-    layout: &PanedLayout,
-) -> io::Result<()> {
-    let ribbon = " [↑/↓] Select  [f] Apply fix  [r] Refresh  [q/Esc] Quit";
-    write_at(stdout, 0, layout.ribbon_row, ribbon, layout.cols as usize)
 }
 
 // ── Doctor TUI surface ────────────────────────────────────────────────────────
@@ -1498,9 +1381,203 @@ fn doctor_check_views_from_report(report: &crate::doctor::DoctorReport) -> Vec<D
         .collect()
 }
 
-/// Run the interactive doctor surface from the given working directory.
+// ── App shell (three-tab TUI) ─────────────────────────────────────────────────
+
+/// The three top-level screens reachable with Left/Right arrow keys.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AppTab {
+    Doctor,
+    StateMachine,
+    Agents,
+}
+
+impl AppTab {
+    const ALL: [AppTab; 3] = [AppTab::Doctor, AppTab::StateMachine, AppTab::Agents];
+
+    fn label(self) -> &'static str {
+        match self {
+            AppTab::Doctor => "Doctor",
+            AppTab::StateMachine => "State Machine",
+            AppTab::Agents => "Agents",
+        }
+    }
+
+    /// Context-sensitive keybinding hints shown in the ribbon for this tab.
+    fn screen_hints(self) -> &'static str {
+        match self {
+            AppTab::Doctor => "[↑/↓] Select  [f] Fix  [r] Refresh",
+            AppTab::StateMachine => "[↑/↓] Scroll",
+            AppTab::Agents => "[Tab] Chat  [Ctrl+C] Interrupt",
+        }
+    }
+
+    fn next(self) -> Self {
+        match self {
+            AppTab::Doctor => AppTab::StateMachine,
+            AppTab::StateMachine => AppTab::Agents,
+            AppTab::Agents => AppTab::Agents,
+        }
+    }
+
+    fn prev(self) -> Self {
+        match self {
+            AppTab::Doctor => AppTab::Doctor,
+            AppTab::StateMachine => AppTab::Doctor,
+            AppTab::Agents => AppTab::StateMachine,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AppEvent {
+    Continue,
+    Quit,
+}
+
+/// Top-level TUI shell with three navigable screens.
 ///
-/// This is the entry point for `calypso doctor --tui`.
+/// Left/Right arrows switch tabs. All other keys are forwarded to the active screen.
+pub struct AppShell {
+    pub tab: AppTab,
+    pub doctor: DoctorSurface,
+    /// Operator surface used for the Agents tab (absent when no feature is active).
+    pub operator: Option<OperatorSurface>,
+}
+
+impl AppShell {
+    pub fn new(doctor: DoctorSurface) -> Self {
+        Self {
+            tab: AppTab::Doctor,
+            doctor,
+            operator: None,
+        }
+    }
+
+    pub fn with_operator(mut self, surface: OperatorSurface) -> Self {
+        self.operator = Some(surface);
+        self
+    }
+
+    pub fn handle_key_event(
+        &mut self,
+        event: KeyEvent,
+        cwd: &std::path::Path,
+    ) -> AppEvent {
+        // Ctrl+C always exits at the app level.
+        if event.code == KeyCode::Char('c') && event.modifiers.contains(KeyModifiers::CONTROL) {
+            return AppEvent::Quit;
+        }
+        // Left/Right switch tabs without forwarding to the active screen.
+        match event.code {
+            KeyCode::Left => {
+                self.tab = self.tab.prev();
+                return AppEvent::Continue;
+            }
+            KeyCode::Right => {
+                self.tab = self.tab.next();
+                return AppEvent::Continue;
+            }
+            _ => {}
+        }
+        // Delegate remaining keys to the active screen.
+        match self.tab {
+            AppTab::Doctor => match self.doctor.handle_key_event(event, cwd) {
+                DoctorSurfaceEvent::Continue => AppEvent::Continue,
+                DoctorSurfaceEvent::Quit => AppEvent::Quit,
+            },
+            AppTab::StateMachine => placeholder_key_event(event),
+            AppTab::Agents => {
+                if let Some(op) = &mut self.operator {
+                    match op.handle_key_event(event) {
+                        SurfaceEvent::Quit => AppEvent::Quit,
+                        _ => AppEvent::Continue,
+                    }
+                } else {
+                    placeholder_key_event(event)
+                }
+            }
+        }
+    }
+
+    /// Render the active screen then overwrite the ribbon row with the app-level ribbon.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        match self.tab {
+            AppTab::Doctor => self.doctor.render_paned(stdout, layout)?,
+            AppTab::StateMachine => render_state_machine_scaffold(stdout, layout)?,
+            AppTab::Agents => {
+                if let Some(op) = &self.operator {
+                    op.render_paned(stdout, layout)?;
+                } else {
+                    render_agents_scaffold(stdout, layout)?;
+                }
+            }
+        }
+        // Always overwrite the ribbon row last so the app-level tab bar wins.
+        render_app_ribbon(stdout, layout, self.tab)?;
+        Ok(())
+    }
+}
+
+/// Bottom ribbon showing the three tabs (active tab highlighted) and context-sensitive hints.
+fn render_app_ribbon(
+    stdout: &mut impl Write,
+    layout: &PanedLayout,
+    active: AppTab,
+) -> io::Result<()> {
+    let mut tabs = String::new();
+    for (i, tab) in AppTab::ALL.iter().enumerate() {
+        if i > 0 {
+            tabs.push_str("  ");
+        }
+        tabs.push_str(if *tab == active { "◆" } else { "○" });
+        tabs.push(' ');
+        tabs.push_str(tab.label());
+    }
+    let ribbon = format!("  {tabs}    {}  [←/→] Switch  [Esc] Quit", active.screen_hints());
+    write_at(stdout, 0, layout.ribbon_row, &ribbon, layout.cols as usize)
+}
+
+/// Key handler for scaffold placeholder screens: only Esc/q quit, everything else is ignored.
+fn placeholder_key_event(event: KeyEvent) -> AppEvent {
+    match event.code {
+        KeyCode::Esc | KeyCode::Char('q') => AppEvent::Quit,
+        _ => AppEvent::Continue,
+    }
+}
+
+/// Render a scaffold placeholder screen: header box, one body line, cleared remaining rows.
+fn render_placeholder_screen(
+    stdout: &mut impl Write,
+    layout: &PanedLayout,
+    title: &str,
+    body: &str,
+) -> io::Result<()> {
+    let w = layout.cols as usize;
+    write_at(stdout, 0, 0, &format!("┌{}┐", "─".repeat(w.saturating_sub(2))), w)?;
+    write_at(stdout, 0, 1, &format!("│  {title}"), w)?;
+    write_at(stdout, 0, 2, &format!("└{}┘", "─".repeat(w.saturating_sub(2))), w)?;
+    write_at(stdout, 0, 3, "", w)?;
+    write_at(stdout, 0, 4, &format!("  {body}"), w)?;
+    for row in 5..layout.content_rows {
+        write_at(stdout, 0, row, "", w)?;
+    }
+    Ok(())
+}
+
+fn render_state_machine_scaffold(
+    stdout: &mut impl Write,
+    layout: &PanedLayout,
+) -> io::Result<()> {
+    render_placeholder_screen(stdout, layout, "State Machine", "Pipeline and gate view — coming soon.")
+}
+
+fn render_agents_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+    render_placeholder_screen(stdout, layout, "Active Agents", "No active feature — run calypso doctor to initialize.")
+}
+
+/// Run the interactive app shell (three-tab TUI) from the given working directory.
+///
+/// This is the entry point for the default `calypso` invocation when no state file is present.
 #[cfg(not(coverage))]
 pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     use crossterm::cursor::{Hide, Show};
@@ -1512,14 +1589,13 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
 
     let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
-    let mut surface =
-        DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
+    let doctor = DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
+    let mut shell = AppShell::new(doctor);
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     execute!(stdout, EnterAlternateScreen, Hide)?;
 
-    // Initialise paned layout from terminal size; fall back to flat render if unavailable.
     let mut layout: Option<PanedLayout> = crossterm::terminal::size()
         .ok()
         .map(|(cols, rows)| PanedLayout::from_size(TerminalSize { cols, rows }));
@@ -1527,10 +1603,10 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
 
     let loop_result = loop {
         match &layout {
-            Some(l) => surface.render_paned(&mut stdout, l)?,
+            Some(l) => shell.render_paned(&mut stdout, l)?,
             None => {
                 queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-                write!(stdout, "{}", surface.render())?;
+                write!(stdout, "{}", shell.doctor.render())?;
             }
         }
         stdout.flush()?;
@@ -1542,10 +1618,7 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
                     queue!(stdout, Clear(ClearType::All))?;
                 }
                 crossterm::event::Event::Key(key_event) => {
-                    if matches!(
-                        surface.handle_key_event(key_event, cwd),
-                        DoctorSurfaceEvent::Quit
-                    ) {
+                    if matches!(shell.handle_key_event(key_event, cwd), AppEvent::Quit) {
                         break Ok(());
                     }
                 }
@@ -1565,32 +1638,37 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
 
     let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
-    let mut surface =
-        DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
+    let doctor = DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
+    let mut shell = AppShell::new(doctor);
 
     let mut stdout = io::sink();
     let mut layout: Option<PanedLayout> = None;
 
-    // Exercise a set of events for coverage — resize first activates paned rendering.
+    // Exercise all three tabs and screen-specific keys. Resize first activates paned rendering.
     let events = vec![
         Some(crossterm::event::Event::Resize(80, 24)),
+        // Navigate to State Machine and render it.
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Right))),
+        // Navigate to Agents and render the scaffold placeholder.
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Right))),
+        // Navigate back to State Machine.
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Left))),
+        // Navigate back to Doctor.
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Left))),
+        // Exercise doctor-specific keys while on Doctor tab.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Down))),
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Up))),
-        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char(
-            'f',
-        )))),
-        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char(
-            'r',
-        )))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char('f')))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char('r')))),
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Esc))),
     ];
 
     for event in events {
         match &layout {
-            Some(l) => surface.render_paned(&mut stdout, l)?,
+            Some(l) => shell.render_paned(&mut stdout, l)?,
             None => {
                 queue!(stdout, Clear(ClearType::All), MoveTo(0, 0))?;
-                write!(stdout, "{}", surface.render())?;
+                write!(stdout, "{}", shell.doctor.render())?;
             }
         }
         stdout.flush()?;
@@ -1600,10 +1678,7 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
                 layout = Some(PanedLayout::from_size(TerminalSize { cols, rows }));
             }
             Some(crossterm::event::Event::Key(key_event)) => {
-                if matches!(
-                    surface.handle_key_event(key_event, cwd),
-                    DoctorSurfaceEvent::Quit
-                ) {
+                if matches!(shell.handle_key_event(key_event, cwd), AppEvent::Quit) {
                     break;
                 }
             }
@@ -1611,9 +1686,12 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
         }
     }
 
-    // Exercise Ctrl+C path
+    // Exercise doctor's own Ctrl+C handler (shell intercepts it before delegation normally).
     let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-    surface.handle_key_event(ctrl_c, cwd);
+    shell.doctor.handle_key_event(ctrl_c, cwd);
+    // Exercise shell-level Ctrl+C.
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    shell.handle_key_event(ctrl_c, cwd);
 
     Ok(())
 }
