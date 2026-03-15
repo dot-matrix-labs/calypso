@@ -451,15 +451,8 @@ impl Logger {
 
                 let comp_display = if component.is_empty() { "-" } else { component };
 
-                let line = format!(
-                    "{ts} {pre}{lvl}{suf} [{comp}] {msg}\n",
-                    ts = timestamp,
-                    pre = pre,
-                    lvl = level_upper,
-                    suf = suf,
-                    comp = comp_display,
-                    msg = message,
-                );
+                let line =
+                    format!("{timestamp} {pre}{level_upper}{suf} [{comp_display}] {message}\n",);
 
                 if let Ok(mut w) = self.writer.lock() {
                     let _ = w.write_all(line.as_bytes());

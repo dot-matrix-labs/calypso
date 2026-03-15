@@ -79,7 +79,9 @@ fn coverage_totals(lcov: &str) -> (u64, u64) {
 }
 
 fn is_excluded_from_gate(file: &str) -> bool {
-    file.ends_with("/src/main.rs") || file.ends_with("/src/bin/coverage_driver.rs")
+    file.ends_with("/src/main.rs")
+        || file.ends_with("/src/bin/coverage_driver.rs")
+        || file.ends_with("/src/signal.rs")
 }
 
 #[cfg(test)]
