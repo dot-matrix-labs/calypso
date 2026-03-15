@@ -265,7 +265,7 @@ impl OperatorSurface {
                     status_icon, session.role, session.session_id, session.status
                 ));
                 for output in &session.output {
-                    lines.push(format!("    {}", output));
+                    lines.push(format!("    {output}"));
                 }
             }
         }
@@ -999,7 +999,7 @@ impl OperatorSurface {
                     lines.push("    No output yet.".to_string());
                 } else {
                     for line in &session.output {
-                        lines.push(format!("    {}", line));
+                        lines.push(format!("    {line}"));
                     }
                 }
             }
@@ -1022,7 +1022,7 @@ impl OperatorSurface {
                             status_icon, session.role, session.session_id, session.status
                         ));
                         for output in &session.output {
-                            lines.push(format!("    {}", output));
+                            lines.push(format!("    {output}"));
                         }
                     }
                 }
@@ -1122,7 +1122,7 @@ impl OperatorSurface {
             if row >= content_rows.saturating_sub(1) {
                 break;
             }
-            let msg = format!("│ > {}", follow_up);
+            let msg = format!("│ > {follow_up}");
             write_at(stdout, col, row as u16, &msg, w)?;
             row += 1;
         }

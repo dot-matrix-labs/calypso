@@ -435,7 +435,7 @@ pub fn render_state_status(feature: &FeatureState) -> String {
             let blocking_count = rollup.blocking_gate_ids.len();
             let group_marker = if blocking_count == 0 { "✓" } else { "✗" };
             let blocking_str = if blocking_count > 0 {
-                format!("  {} blocking", blocking_count)
+                format!("  {blocking_count} blocking")
             } else {
                 String::new()
             };

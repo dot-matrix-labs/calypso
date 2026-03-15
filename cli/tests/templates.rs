@@ -261,12 +261,10 @@ tasks:
 #[test]
 fn template_validation_rejects_policy_gate_with_unknown_gate_reference() {
     let state_machine = format!(
-        "{}\npolicy_gates:\n  - gate_id: missing-gate\n    evaluator: builtin.policy.next_prompt_present\n    kind: hook\n    paths:\n      - docs/plans/next-prompt.md\n",
-        VALID_STATE_MACHINE
+        "{VALID_STATE_MACHINE}\npolicy_gates:\n  - gate_id: missing-gate\n    evaluator: builtin.policy.next_prompt_present\n    kind: hook\n    paths:\n      - docs/plans/next-prompt.md\n"
     );
     let agents = format!(
-        "{}  - name: next-prompt-present\n    kind: builtin\n    builtin: builtin.policy.next_prompt_present\n",
-        VALID_AGENTS
+        "{VALID_AGENTS}  - name: next-prompt-present\n    kind: builtin\n    builtin: builtin.policy.next_prompt_present\n"
     );
 
     let error = TemplateSet::from_yaml_strings(&state_machine, &agents, VALID_PROMPTS)

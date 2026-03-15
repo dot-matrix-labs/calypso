@@ -203,8 +203,7 @@ impl TemplateSet {
         for prompt_name in self.prompts.prompts.keys() {
             if !known_task_names.contains(prompt_name.as_str()) {
                 return Err(TemplateError::Validation(format!(
-                    "prompt '{}' does not match any known task",
-                    prompt_name
+                    "prompt '{prompt_name}' does not match any known task"
                 )));
             }
         }
