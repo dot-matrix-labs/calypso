@@ -15,18 +15,14 @@ const CALYPSO_DEFAULT_DEPLOYMENT_WORKFLOW: &str = include_str!(
 const CALYPSO_DEFAULT_FEATURE_WORKFLOW: &str = include_str!(
     "../../calypso-blueprint/examples/workflows/calypso-default-feature-workflow.yaml"
 );
-const CALYPSO_DEPLOYMENT_REQUEST: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-deployment-request.yaml"
-);
-const CALYPSO_FEATURE_REQUEST: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-feature-request.yaml"
-);
-const CALYPSO_IMPLEMENTATION_LOOP: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-implementation-loop.yaml"
-);
-const CALYPSO_ORCHESTRATOR_STARTUP: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-orchestrator-startup.yaml"
-);
+const CALYPSO_DEPLOYMENT_REQUEST: &str =
+    include_str!("../../calypso-blueprint/examples/workflows/calypso-deployment-request.yaml");
+const CALYPSO_FEATURE_REQUEST: &str =
+    include_str!("../../calypso-blueprint/examples/workflows/calypso-feature-request.yaml");
+const CALYPSO_IMPLEMENTATION_LOOP: &str =
+    include_str!("../../calypso-blueprint/examples/workflows/calypso-implementation-loop.yaml");
+const CALYPSO_ORCHESTRATOR_STARTUP: &str =
+    include_str!("../../calypso-blueprint/examples/workflows/calypso-orchestrator-startup.yaml");
 const CALYPSO_PLANNING: &str =
     include_str!("../../calypso-blueprint/examples/workflows/calypso-planning.yaml");
 const CALYPSO_PR_REVIEW_MERGE: &str =
@@ -466,7 +462,7 @@ mod tests {
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
         assert_eq!(
             wf.initial_state.as_deref(),
-            Some("worktree-check"),
+            Some("feature-definition"),
             "unexpected initial_state"
         );
     }
@@ -512,8 +508,8 @@ mod tests {
         let next = state.next.as_ref().unwrap();
         assert_eq!(
             next.target_for("implementation-complete"),
-            Some("github-ci"),
-            "expected implementation-complete → github-ci"
+            Some("deterministic-validation"),
+            "expected implementation-complete → deterministic-validation"
         );
     }
 }
