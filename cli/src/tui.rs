@@ -80,6 +80,8 @@ pub struct OperatorSurface {
     scroll_offset: usize,
     /// Whether keyboard focus is on the sidebar (paned rendering only).
     sidebar_focused: bool,
+    /// Index of the session currently focused in the sidebar sidebar (None = overview).
+    selected_session: Option<usize>,
 }
 
 impl OperatorSurface {
@@ -154,6 +156,7 @@ impl OperatorSurface {
             last_event: "idle".to_string(),
             scroll_offset: 0,
             sidebar_focused: false,
+            selected_session: None,
         }
     }
 
@@ -328,11 +331,23 @@ impl OperatorSurface {
                 SurfaceEvent::Continue
             }
             KeyCode::Up => {
-                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                if self.sidebar_focused && !self.sessions.is_empty() {
+                    if let Some(sel) = self.selected_session {
+                        self.selected_session = sel.checked_sub(1).or(Some(0));
+                    }
+                } else {
+                    self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                }
                 SurfaceEvent::Continue
             }
             KeyCode::Down => {
-                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                if self.sidebar_focused && !self.sessions.is_empty() {
+                    let max = self.sessions.len().saturating_sub(1);
+                    self.selected_session =
+                        Some(self.selected_session.map(|s| (s + 1).min(max)).unwrap_or(0));
+                } else {
+                    self.scroll_offset = self.scroll_offset.saturating_add(1);
+                }
                 SurfaceEvent::Continue
             }
             _ => SurfaceEvent::Continue,
@@ -342,6 +357,20 @@ impl OperatorSurface {
     /// Returns the number of pending clarifications visible in this surface snapshot.
     pub fn pending_clarification_count(&self) -> usize {
         self.pending_clarifications.len()
+    }
+
+    /// Focus a specific session by session_id. Sets `selected_session` to its index in the
+    /// sessions list, enabling the focused-output view in the main pane.
+    pub fn focus_session(&mut self, session_id: &str) {
+        self.selected_session = self
+            .sessions
+            .iter()
+            .position(|s| s.session_id == session_id);
+    }
+
+    /// Returns the index of the currently selected session, if any.
+    pub fn selected_session(&self) -> Option<usize> {
+        self.selected_session
     }
 }
 
@@ -425,7 +454,11 @@ pub fn run_terminal_surface(feature: &mut FeatureState) -> io::Result<()> {
     // Exercise interrupt path — should NOT quit (just aborts active sessions)
     run_terminal_iteration(&mut stdout, feature, &mut surface, interrupt, &mut layout)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, type_c, &mut layout)?;
-    // Exercise Tab (sidebar focus) and scroll
+    // Exercise Tab (sidebar focus) + session navigation (Down/Up selects sessions)
+    run_terminal_iteration(&mut stdout, feature, &mut surface, tab.clone(), &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_down.clone(), &mut layout)?;
+    run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_up.clone(), &mut layout)?;
+    // Tab back to main focus and exercise scroll
     run_terminal_iteration(&mut stdout, feature, &mut surface, tab, &mut layout)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_down, &mut layout)?;
     run_terminal_iteration(&mut stdout, feature, &mut surface, scroll_up, &mut layout)?;
@@ -934,14 +967,10 @@ impl OperatorSurface {
             }
         }
 
-        // Active sessions
+        // Sessions — focused view when a session is selected, overview otherwise
         lines.push(String::new());
-        lines.push("  Sessions".to_string());
-        lines.push(format!("  {}", "─".repeat(w.saturating_sub(4))));
-        if self.sessions.is_empty() {
-            lines.push("  No active sessions".to_string());
-        } else {
-            for session in &self.sessions {
+        match self.selected_session.and_then(|i| self.sessions.get(i)) {
+            Some(session) => {
                 let status_icon = match session.status.as_str() {
                     "running" => "▶",
                     "completed" => "✓",
@@ -950,11 +979,40 @@ impl OperatorSurface {
                     _ => "○",
                 };
                 lines.push(format!(
-                    "  {} {} ({}) [{}]",
+                    "  {} {}  ·  {}  ·  [{}]",
                     status_icon, session.role, session.session_id, session.status
                 ));
-                for output in &session.output {
-                    lines.push(format!("    {}", output));
+                lines.push(format!("  {}", "─".repeat(w.saturating_sub(4))));
+                if session.output.is_empty() {
+                    lines.push("    No output yet.".to_string());
+                } else {
+                    for line in &session.output {
+                        lines.push(format!("    {}", line));
+                    }
+                }
+            }
+            None => {
+                lines.push("  Sessions".to_string());
+                lines.push(format!("  {}", "─".repeat(w.saturating_sub(4))));
+                if self.sessions.is_empty() {
+                    lines.push("  No active sessions".to_string());
+                } else {
+                    for session in &self.sessions {
+                        let status_icon = match session.status.as_str() {
+                            "running" => "▶",
+                            "completed" => "✓",
+                            "failed" => "✗",
+                            "aborted" => "⊗",
+                            _ => "○",
+                        };
+                        lines.push(format!(
+                            "  {} {} ({}) [{}]",
+                            status_icon, session.role, session.session_id, session.status
+                        ));
+                        for output in &session.output {
+                            lines.push(format!("    {}", output));
+                        }
+                    }
                 }
             }
         }
@@ -987,47 +1045,70 @@ impl OperatorSurface {
 
         let focus_indicator = if self.sidebar_focused { "●" } else { " " };
         let header = format!(
-            "┌─{focus_indicator} Chat {}",
-            "─".repeat(w.saturating_sub(8))
+            "┌─{focus_indicator} Sessions {}",
+            "─".repeat(w.saturating_sub(12))
         );
         write_at(stdout, col, 0, &format!("{header}┐"), w)?;
 
         let mut row: usize = 1;
 
-        // Pending clarifications section
-        if !self.pending_clarifications.is_empty() {
+        // Session list
+        if self.sessions.is_empty() {
             if row < content_rows.saturating_sub(1) {
-                write_at(stdout, col, row as u16, "│ Clarifications:", w)?;
+                write_at(stdout, col, row as u16, "│  No active sessions", w)?;
                 row += 1;
             }
-            for clarification in &self.pending_clarifications {
+        } else {
+            for (i, session) in self.sessions.iter().enumerate() {
                 if row >= content_rows.saturating_sub(1) {
                     break;
                 }
-                let q = format!("│ ? {}", clarification.question);
-                write_at(stdout, col, row as u16, &q, w)?;
-                row += 1;
-            }
-            if row < content_rows.saturating_sub(1) {
-                write_at(stdout, col, row as u16, "│", w)?;
+                let cursor = if self.selected_session == Some(i) { "●" } else { " " };
+                let status_icon = match session.status.as_str() {
+                    "running" => "▶",
+                    "completed" => "✓",
+                    "failed" => "✗",
+                    "aborted" => "⊗",
+                    _ => "○",
+                };
+                let line = format!("│ {} {} {}", cursor, status_icon, session.role);
+                write_at(stdout, col, row as u16, &line, w)?;
                 row += 1;
             }
         }
 
-        // Queued follow-ups section
-        if !self.queued_follow_ups.is_empty() {
-            if row < content_rows.saturating_sub(1) {
-                write_at(stdout, col, row as u16, "│ Follow-ups:", w)?;
-                row += 1;
+        // Divider before clarifications / follow-ups
+        let has_extra =
+            !self.pending_clarifications.is_empty() || !self.queued_follow_ups.is_empty();
+        if has_extra && row < content_rows.saturating_sub(1) {
+            write_at(
+                stdout,
+                col,
+                row as u16,
+                &format!("│ {}", "─".repeat(w.saturating_sub(4))),
+                w,
+            )?;
+            row += 1;
+        }
+
+        // Pending clarifications
+        for clarification in &self.pending_clarifications {
+            if row >= content_rows.saturating_sub(1) {
+                break;
             }
-            for follow_up in &self.queued_follow_ups {
-                if row >= content_rows.saturating_sub(1) {
-                    break;
-                }
-                let msg = format!("│ > {}", follow_up);
-                write_at(stdout, col, row as u16, &msg, w)?;
-                row += 1;
+            let q = format!("│ ? {}", clarification.question);
+            write_at(stdout, col, row as u16, &q, w)?;
+            row += 1;
+        }
+
+        // Queued follow-ups
+        for follow_up in &self.queued_follow_ups {
+            if row >= content_rows.saturating_sub(1) {
+                break;
             }
+            let msg = format!("│ > {}", follow_up);
+            write_at(stdout, col, row as u16, &msg, w)?;
+            row += 1;
         }
 
         // Fill empty rows
@@ -1069,12 +1150,12 @@ fn render_keybinding_ribbon_operator(
     layout: &PanedLayout,
     sidebar_focused: bool,
 ) -> io::Result<()> {
-    let focus_hint = if sidebar_focused {
-        "[Tab] Main"
+    let (focus_hint, navigate_hint) = if sidebar_focused {
+        ("[Tab] Main", "[↑/↓] Select session")
     } else {
-        "[Tab] Chat"
+        ("[Tab] Sessions", "[↑/↓] Scroll")
     };
-    let ribbon = format!(" [Ctrl+C] Interrupt  [Esc] Quit  {focus_hint}  [↑/↓] Scroll");
+    let ribbon = format!(" [Ctrl+C] Interrupt  [Esc] Quit  {focus_hint}  {navigate_hint}");
     write_at(stdout, 0, layout.ribbon_row, &ribbon, layout.cols as usize)
 }
 
@@ -1981,7 +2062,7 @@ impl AppTab {
         match self {
             AppTab::Doctor => "[↑/↓] Select  [f] Fix  [r] Refresh",
             AppTab::StateMachine => "[↑/↓] Navigate  [Enter] Expand  [Esc] Collapse  [a] Agent",
-            AppTab::Agents => "[Tab] Chat  [Ctrl+C] Interrupt",
+            AppTab::Agents => "[Tab] Sessions  [↑/↓] Navigate  [Ctrl+C] Interrupt",
         }
     }
 
@@ -2006,6 +2087,12 @@ impl AppTab {
 pub enum AppEvent {
     Continue,
     Quit,
+    /// A follow-up message was submitted from the Agents tab.
+    FollowUpSubmitted(String),
+    /// A clarification question was answered from the Agents tab.
+    ClarificationAnswered { session_id: String, answer: String },
+    /// The operator requested interruption of all active sessions.
+    Interrupted,
 }
 
 /// Top-level TUI shell with three navigable screens.
@@ -2066,16 +2153,24 @@ impl AppShell {
             AppTab::StateMachine => match self.sm.handle_key_event(event) {
                 SmEvent::Continue => AppEvent::Continue,
                 SmEvent::Quit => AppEvent::Quit,
-                SmEvent::JumpToAgents(_session_id) => {
+                SmEvent::JumpToAgents(session_id) => {
                     self.tab = AppTab::Agents;
+                    if let (Some(id), Some(op)) = (session_id, &mut self.operator) {
+                        op.focus_session(&id);
+                    }
                     AppEvent::Continue
                 }
             },
             AppTab::Agents => {
                 if let Some(op) = &mut self.operator {
                     match op.handle_key_event(event) {
+                        SurfaceEvent::Continue => AppEvent::Continue,
                         SurfaceEvent::Quit => AppEvent::Quit,
-                        _ => AppEvent::Continue,
+                        SurfaceEvent::Submitted(text) => AppEvent::FollowUpSubmitted(text),
+                        SurfaceEvent::ClarificationAnswered { session_id, answer } => {
+                            AppEvent::ClarificationAnswered { session_id, answer }
+                        }
+                        SurfaceEvent::Interrupt => AppEvent::Interrupted,
                     }
                 } else {
                     placeholder_key_event(event)
