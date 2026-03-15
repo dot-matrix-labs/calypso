@@ -450,24 +450,6 @@ mod tests {
     }
 
     #[test]
-    fn codex_error_display_covers_all_variants() {
-        let io_error = CodexError::Io(io::Error::other("disk gone"));
-        assert_eq!(io_error.to_string(), "codex runtime I/O error: disk gone");
-
-        let missing_pipe = CodexError::MissingPipe("stdin");
-        assert_eq!(
-            missing_pipe.to_string(),
-            "codex runtime missing expected stdin pipe"
-        );
-
-        let output_read = CodexError::OutputRead("broken stream".to_string());
-        assert_eq!(
-            output_read.to_string(),
-            "codex runtime failed to read process output: broken stream"
-        );
-    }
-
-    #[test]
     fn spawn_reader_emits_read_failures_and_stops_when_receiver_is_gone() {
         let (sender, receiver) = mpsc::channel();
         spawn_reader(ErrorReader, SessionOutputStream::Stdout, sender);

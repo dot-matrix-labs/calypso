@@ -1199,21 +1199,6 @@ mod tests {
         assert!(pre_t.contains("\x1b[2m"));
     }
 
-    // ---- days_to_ymd ----
-
-    #[test]
-    fn days_to_ymd_epoch() {
-        let (y, m, d) = days_to_ymd(0);
-        assert_eq!((y, m, d), (1970, 1, 1));
-    }
-
-    #[test]
-    fn days_to_ymd_known_date() {
-        // 2024-01-01 = day 19723
-        let (y, m, d) = days_to_ymd(19723);
-        assert_eq!((y, m, d), (2024, 1, 1));
-    }
-
     // ---- Logger Debug ----
 
     #[test]

@@ -874,6 +874,24 @@ mod tests {
         assert_eq!(extract_repo_name(""), None);
     }
 
+    #[test]
+    fn extract_repo_name_subpath_after_repo_name() {
+        // A URL with extra path segments after the repo name should still
+        // extract the last segment (which is the subpath, not the repo name).
+        assert_eq!(
+            extract_repo_name("https://github.com/org/myrepo/tree/main"),
+            Some("main".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_repo_name_malformed_input() {
+        // Bare word with no slashes or colons
+        assert_eq!(extract_repo_name("just-a-word"), Some("just-a-word".to_string()));
+        // Only a scheme prefix
+        assert_eq!(extract_repo_name("https://"), None);
+    }
+
     // ── InitStep ─────────────────────────────────────────────────────────────
 
     #[test]
