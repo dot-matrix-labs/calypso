@@ -458,10 +458,7 @@ fn doctor_report_marks_missing_git_hooks_as_failing() {
     );
 
     let check = check_for(&report, DoctorCheckId::RequiredGitHooksInstalled);
-    assert_eq!(
-        check.detail.as_deref(),
-        Some("commit-msg, pre-commit")
-    );
+    assert_eq!(check.detail.as_deref(), Some("commit-msg, pre-commit"));
     assert!(check.remediation.is_some());
     assert!(
         check
@@ -476,8 +473,7 @@ fn doctor_report_marks_missing_git_hooks_as_failing() {
 fn doctor_report_marks_git_hooks_as_passing_when_none_missing() {
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(
-        &FakeEnvironment::default()
-            .with_git_hooks_path(Path::new("/tmp/calypso/.git/hooks")),
+        &FakeEnvironment::default().with_git_hooks_path(Path::new("/tmp/calypso/.git/hooks")),
         repo_root,
     );
     let statuses = status_map(&report);

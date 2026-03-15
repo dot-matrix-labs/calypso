@@ -211,7 +211,12 @@ impl DoctorEnvironment for HostDoctorEnvironment {
     fn missing_git_hooks(&self, repo_root: &Path) -> Vec<String> {
         let hooks_dir = match self.git_hooks_path(repo_root) {
             Some(p) => p,
-            None => return REQUIRED_GIT_HOOKS.iter().map(|h| (*h).to_string()).collect(),
+            None => {
+                return REQUIRED_GIT_HOOKS
+                    .iter()
+                    .map(|h| (*h).to_string())
+                    .collect();
+            }
         };
         let source_dir = repo_root.join("scripts").join("hooks");
 
@@ -768,8 +773,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("calypso-doctor-hooks-{label}-{nanos}"));
         std::fs::create_dir_all(path.join("scripts/hooks"))
             .expect("scripts/hooks dir should be created");
-        std::fs::create_dir_all(path.join(".git/hooks"))
-            .expect(".git/hooks dir should be created");
+        std::fs::create_dir_all(path.join(".git/hooks")).expect(".git/hooks dir should be created");
         // Write source hook files.
         for hook in REQUIRED_GIT_HOOKS {
             std::fs::write(
@@ -793,8 +797,7 @@ mod tests {
         let hooks_dir = repo_root.join(".git/hooks");
         let source = std::fs::read_to_string(repo_root.join("scripts/hooks/pre-commit"))
             .expect("source hook should be readable");
-        std::fs::write(hooks_dir.join("pre-commit"), &source)
-            .expect("hook should be written");
+        std::fs::write(hooks_dir.join("pre-commit"), &source).expect("hook should be written");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
