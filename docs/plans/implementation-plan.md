@@ -2,7 +2,7 @@
 
 ## PR: `feat: implement cli feature-start workflow`
 
-- [x] Read PR #27, the feature proposal in [docs/plans/cli-feature-start-workflow-feature.md](/tmp/calypso-worktrees/feat-cli-feature-start/docs/plans/cli-feature-start-workflow-feature.md), [cli/spec.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/spec.md), and [cli/calypso-cli-implementation-plan.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/calypso-cli-implementation-plan.md).
+- [x] Read PR #27, the feature proposal in [docs/plans/archive/cli-feature-start-workflow-feature.md](docs/plans/archive/cli-feature-start-workflow-feature.md), [cli/spec.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/spec.md), and [cli/calypso-cli-implementation-plan.md](/tmp/calypso-worktrees/feat-cli-feature-start/cli/calypso-cli-implementation-plan.md).
 - [x] Add a first-class `feature-start` command surface to `calypso-cli`.
 - [x] Implement deterministic semantic branch derivation from a user-provided feature identifier.
 - [x] Enforce clean-`main` base-state validation before mutating git state by default.
