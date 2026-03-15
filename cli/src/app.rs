@@ -14,8 +14,9 @@ use crate::report::{
     StateJsonGate, StateJsonGateGroup, StateStatusJsonReport,
 };
 use crate::state::{
-    AgentSession, AgentSessionStatus, BuiltinEvidence, EvidenceStatus, FeatureState, GateStatus,
-    GithubMergeability, GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
+    AgentSession, AgentSessionStatus, BuiltinEvidence, DevelopmentState, EvidenceStatus,
+    FeatureState, GateStatus, GithubMergeability, GithubReviewStatus, PullRequestChecklistItem,
+    PullRequestRef,
 };
 use crate::template::load_embedded_template_set;
 
@@ -265,10 +266,17 @@ pub fn render_feature_status(
     pull_request: Option<&PullRequestRef>,
     feature: &FeatureState,
 ) -> String {
+    // Include development phase if dev-state.json exists
+    let dev_state_path = repo_root.join(".calypso").join("dev-state.json");
+    let dev_phase = DevelopmentState::load_from_path(&dev_state_path)
+        .map(|ds| ds.phase.to_string())
+        .unwrap_or_else(|_| "unknown".to_string());
+
     let mut lines = vec![
         "Feature status".to_string(),
         format!("Repo: {}", repo_root.display()),
         format!("Branch: {branch}"),
+        format!("Development phase: {dev_phase}"),
         format!(
             "Pull request: {}",
             pull_request
@@ -757,6 +765,55 @@ pub fn run_workflows_validate(name: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Feature — development state (dev-status)
+// ---------------------------------------------------------------------------
+
+/// Render a human-readable summary of the development phase state machine.
+pub fn render_dev_status(dev_state: &DevelopmentState) -> String {
+    let mut lines = Vec::new();
+
+    lines.push(format!("Development phase: {}", dev_state.phase));
+
+    if let Some(init_step) = &dev_state.init_step {
+        lines.push(format!("Init sub-state:    {init_step}"));
+    }
+
+    if let Some(ts) = &dev_state.last_transition_at {
+        lines.push(format!("Last transition:   {ts}"));
+    }
+
+    if !dev_state.transition_log.is_empty() {
+        lines.push(String::new());
+        lines.push("Transition history".to_string());
+        lines.push(format!("  {}", "\u{2500}".repeat(40)));
+        for entry in &dev_state.transition_log {
+            lines.push(format!(
+                "  {} -> {} ({})",
+                entry.from, entry.to, entry.timestamp
+            ));
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Load development state from `.calypso/dev-state.json` and render a plain-text summary.
+pub fn run_dev_status(cwd: &Path) -> Result<String, String> {
+    let dev_state_path = cwd.join(".calypso").join("dev-state.json");
+    let dev_state =
+        DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
+    Ok(render_dev_status(&dev_state))
+}
+
+/// Load development state from `.calypso/dev-state.json` and return as JSON.
+pub fn run_dev_status_json(cwd: &Path) -> Result<String, String> {
+    let dev_state_path = cwd.join(".calypso").join("dev-state.json");
+    let dev_state =
+        DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
+    serde_json::to_string_pretty(&dev_state).map_err(|e| format!("serialization error: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -836,4 +893,5 @@ mod tests {
             "expected APPLIED tag: {output}"
         );
     }
+
 }

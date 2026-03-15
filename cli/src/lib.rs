@@ -82,6 +82,8 @@ Commands:
   init --refresh      Refresh/overwrite GitHub Actions workflow files
   init --org <org> --repo <name>
                       Create upstream GitHub remote during init
+  dev-status          Show the current development lifecycle phase
+  dev-status --json   Output development lifecycle phase as JSON
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
