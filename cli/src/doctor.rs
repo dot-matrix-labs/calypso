@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::claude::{ClaudeConfig, ClaudeSession};
+use crate::sm_audit;
 use crate::state::BuiltinEvidence;
 use crate::workflows;
 
@@ -23,6 +24,7 @@ pub enum DoctorCheckId {
     GhAuthenticated,
     GithubRemoteConfigured,
     RequiredWorkflowFilesPresent,
+    StateMachineIntegrity,
 }
 
 impl DoctorCheckId {
@@ -37,6 +39,7 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredWorkflowFilesPresent => {
                 "builtin.doctor.required_workflows_present"
             }
+            DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
         }
     }
 
@@ -49,6 +52,7 @@ impl DoctorCheckId {
             DoctorCheckId::GhAuthenticated => "gh-authenticated",
             DoctorCheckId::GithubRemoteConfigured => "github-remote-configured",
             DoctorCheckId::RequiredWorkflowFilesPresent => "required-workflows-present",
+            DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
         }
     }
 }
@@ -193,6 +197,7 @@ pub fn collect_doctor_report(
     let is_git = environment.is_git_repo(repo_root);
     let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
     missing_workflow_files.sort();
+    let sm_audit = sm_audit::run_audit(repo_root);
     // Only fetch the github user when it may be needed for fix construction.
     let github_user = if !environment.has_github_remote(repo_root) {
         environment.github_user()
@@ -260,6 +265,18 @@ pub fn collect_doctor_report(
                 DoctorCheckScope::LocalConfiguration,
                 missing_workflow_files.is_empty(),
                 (!missing_workflow_files.is_empty()).then_some(missing_workflow_files.join(", ")),
+                repo_root,
+                None,
+            ),
+            make_check(
+                DoctorCheckId::StateMachineIntegrity,
+                DoctorCheckScope::LocalConfiguration,
+                sm_audit.error_count() == 0,
+                if sm_audit.findings.is_empty() {
+                    None
+                } else {
+                    Some(sm_audit::render_audit(&sm_audit))
+                },
                 repo_root,
                 None,
             ),
@@ -532,6 +549,13 @@ fn failing_doctor_fix(
 
             Some(DoctorFix::Sequence(steps))
         }
+
+        // No automated fix for SM integrity — manual review required.
+        DoctorCheckId::StateMachineIntegrity => Some(DoctorFix::Manual {
+            instructions:
+                "Review the state machine audit output and correct workflow references in blueprint YAML files."
+                    .to_string(),
+        }),
     }
 }
 
@@ -568,6 +592,9 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
             "Missing workflow files will be written and pushed: {}",
             detail.unwrap_or("unknown")
         )),
+        DoctorCheckId::StateMachineIntegrity => {
+            Some("Review the state machine audit findings and fix workflow references.".to_string())
+        }
     }
 }
 
