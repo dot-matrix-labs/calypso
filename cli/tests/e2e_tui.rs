@@ -25,8 +25,7 @@ mod pty_tests {
     /// temporary working directory that has no `.calypso/state.json`, so the
     /// binary falls through to the Doctor TUI.
     fn spawn_doctor_session(extra_args: &[&str]) -> Session {
-        let work_dir =
-            std::env::temp_dir().join(format!("calypso-pty-{}", std::process::id()));
+        let work_dir = std::env::temp_dir().join(format!("calypso-pty-{}", std::process::id()));
         std::fs::create_dir_all(&work_dir).expect("temp dir should be created");
 
         let mut cmd = Command::new(BINARY);
@@ -87,9 +86,7 @@ mod pty_tests {
             .expect(Regex("passing"))
             .expect("should render doctor surface");
         // ESC is byte 0x1b
-        session
-            .send(&[0x1b_u8] as &[u8])
-            .expect("should send ESC");
+        session.send(&[0x1b_u8] as &[u8]).expect("should send ESC");
         session
             .expect(Eof)
             .expect("process should exit cleanly on ESC");
@@ -135,17 +132,13 @@ mod pty_tests {
             .expect("should render doctor surface");
 
         // Send Down arrow (ANSI escape: ESC [ B)
-        session
-            .send("\x1b[B")
-            .expect("should send Down arrow");
+        session.send("\x1b[B").expect("should send Down arrow");
         // Send another Down
         session
             .send("\x1b[B")
             .expect("should send Down arrow again");
         // Send Up arrow (ANSI escape: ESC [ A)
-        session
-            .send("\x1b[A")
-            .expect("should send Up arrow");
+        session.send("\x1b[A").expect("should send Up arrow");
 
         // Surface should still be alive and rendering after navigation.
         session
@@ -170,8 +163,7 @@ mod pty_tests {
     #[test]
     #[ignore]
     fn version_flag_renders_in_pty() {
-        let work_dir =
-            std::env::temp_dir().join(format!("calypso-pty-ver-{}", std::process::id()));
+        let work_dir = std::env::temp_dir().join(format!("calypso-pty-ver-{}", std::process::id()));
         std::fs::create_dir_all(&work_dir).expect("temp dir should be created");
 
         let mut cmd = Command::new(BINARY);
@@ -182,6 +174,8 @@ mod pty_tests {
         session
             .expect(Regex("0\\.1\\.0"))
             .expect("should print version");
-        session.expect(Eof).expect("should exit after printing version");
+        session
+            .expect(Eof)
+            .expect("should exit after printing version");
     }
 }
