@@ -1215,10 +1215,448 @@ impl DevelopmentPhase {
     pub fn is_init(&self) -> bool {
         matches!(self, Self::Init)
     }
+
+    /// Validates that transitioning to `target` is permitted.
+    /// Returns `Err` with a reason string when the transition is not allowed.
+    pub fn validate_transition(
+        &self,
+        target: &Self,
+    ) -> Result<(), DevelopmentTransitionError> {
+        if self.can_transition_to(target) {
+            return Ok(());
+        }
+        Err(DevelopmentTransitionError::Rejected {
+            from: self.clone(),
+            to: target.clone(),
+            reason: match (self, target) {
+                (Self::Init, Self::Testing) => {
+                    "init must complete before entering testing".to_string()
+                }
+                (Self::Testing, Self::Testing) | (Self::Development, Self::Development) => {
+                    "already in this phase".to_string()
+                }
+                _ => format!(
+                    "transition from '{}' to '{}' is not permitted",
+                    self.as_str(),
+                    target.as_str()
+                ),
+            },
+        })
+    }
 }
 
 impl fmt::Display for DevelopmentPhase {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
+    }
+}
+
+/// Error type for development phase transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DevelopmentTransitionError {
+    Rejected {
+        from: DevelopmentPhase,
+        to: DevelopmentPhase,
+        reason: String,
+    },
+}
+
+impl fmt::Display for DevelopmentTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Rejected { from, to, reason } => {
+                write!(
+                    f,
+                    "cannot transition development phase from '{from}' to '{to}': {reason}"
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for DevelopmentTransitionError {}
+
+/// Persisted state for the development lifecycle state machine.
+///
+/// Written to `.calypso/dev-state.json`. This is the outer state machine
+/// that wraps the init sub-state-machine (`InitStep`) and tracks which
+/// development phase the project is currently in.
+///
+/// When `phase` is `Init`, the `init_step` field tracks progress within
+/// the init sub-state-machine. When init reaches `Complete`, the phase
+/// automatically transitions to `Development`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevelopmentState {
+    /// Current outer phase.
+    pub phase: DevelopmentPhase,
+    /// When in `Init` phase, tracks the current step of the init sub-state-machine.
+    /// `None` when not in the init phase (or init has not yet started).
+    #[serde(default)]
+    pub init_step: Option<String>,
+    /// Timestamp of the last phase transition (ISO 8601).
+    #[serde(default)]
+    pub last_transition_at: Option<String>,
+    /// History of phase transitions, most recent last.
+    #[serde(default)]
+    pub transition_log: Vec<DevelopmentTransitionEntry>,
+}
+
+/// A single entry recording a phase transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DevelopmentTransitionEntry {
+    pub from: DevelopmentPhase,
+    pub to: DevelopmentPhase,
+    pub timestamp: String,
+}
+
+impl DevelopmentState {
+    /// Create a new `DevelopmentState` starting in the `Init` phase.
+    pub fn new() -> Self {
+        Self {
+            phase: DevelopmentPhase::Init,
+            init_step: None,
+            last_transition_at: None,
+            transition_log: Vec::new(),
+        }
+    }
+
+    /// Transition to a new phase, recording the transition in the log.
+    ///
+    /// Returns `Err` if the transition is not permitted by the state machine.
+    pub fn transition_to(
+        &mut self,
+        target: DevelopmentPhase,
+        timestamp: &str,
+    ) -> Result<(), DevelopmentTransitionError> {
+        self.phase.validate_transition(&target)?;
+        let entry = DevelopmentTransitionEntry {
+            from: self.phase.clone(),
+            to: target.clone(),
+            timestamp: timestamp.to_string(),
+        };
+        self.transition_log.push(entry);
+        self.last_transition_at = Some(timestamp.to_string());
+        // Clear init_step when leaving Init, set it when entering Init
+        if target == DevelopmentPhase::Init {
+            self.init_step = None; // will be populated by the init runner
+        } else {
+            self.init_step = None;
+        }
+        self.phase = target;
+        Ok(())
+    }
+
+    /// Called when the init sub-state-machine advances a step.
+    /// Updates the tracked `init_step`.
+    pub fn update_init_step(&mut self, step_name: &str) {
+        self.init_step = Some(step_name.to_string());
+    }
+
+    /// Check whether the init sub-state-machine has completed, and if so,
+    /// automatically transition to `Development`.
+    ///
+    /// Returns `true` if the auto-transition occurred.
+    pub fn auto_advance_from_init(&mut self, timestamp: &str) -> bool {
+        if self.phase == DevelopmentPhase::Init
+            && self.init_step.as_deref() == Some("complete")
+        {
+            // This transition is always valid (Init -> Development)
+            let _ = self.transition_to(DevelopmentPhase::Development, timestamp);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Atomically saves state by writing to a `.tmp` file then renaming into place.
+    pub fn save_to_path(&self, path: &Path) -> Result<(), StateError> {
+        let json =
+            serde_json::to_string_pretty(self).map_err(StateError::Json)?;
+        let tmp_path = path.with_extension("tmp");
+        fs::write(&tmp_path, &json).map_err(StateError::Io)?;
+        fs::rename(&tmp_path, path).map_err(StateError::Io)
+    }
+
+    /// Load state from a JSON file.
+    pub fn load_from_path(path: &Path) -> Result<Self, StateError> {
+        let json = fs::read_to_string(path).map_err(StateError::Io)?;
+        serde_json::from_str(&json).map_err(StateError::Json)
+    }
+}
+
+impl Default for DevelopmentState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── DevelopmentPhase ──────────────────────────────────────────────────
+
+    #[test]
+    fn development_phase_as_str_values() {
+        assert_eq!(DevelopmentPhase::Init.as_str(), "init");
+        assert_eq!(DevelopmentPhase::Development.as_str(), "development");
+        assert_eq!(DevelopmentPhase::Testing.as_str(), "testing");
+    }
+
+    #[test]
+    fn development_phase_default_is_init() {
+        assert_eq!(DevelopmentPhase::default(), DevelopmentPhase::Init);
+    }
+
+    #[test]
+    fn development_phase_display_matches_as_str() {
+        for phase in [
+            DevelopmentPhase::Init,
+            DevelopmentPhase::Development,
+            DevelopmentPhase::Testing,
+        ] {
+            assert_eq!(phase.to_string(), phase.as_str());
+        }
+    }
+
+    #[test]
+    fn development_phase_valid_transitions_from_init() {
+        let valid = DevelopmentPhase::Init.valid_next_phases();
+        assert_eq!(valid, vec![DevelopmentPhase::Development]);
+    }
+
+    #[test]
+    fn development_phase_valid_transitions_from_development() {
+        let valid = DevelopmentPhase::Development.valid_next_phases();
+        assert!(valid.contains(&DevelopmentPhase::Testing));
+        assert!(valid.contains(&DevelopmentPhase::Init));
+    }
+
+    #[test]
+    fn development_phase_valid_transitions_from_testing() {
+        let valid = DevelopmentPhase::Testing.valid_next_phases();
+        assert!(valid.contains(&DevelopmentPhase::Development));
+        assert!(valid.contains(&DevelopmentPhase::Init));
+    }
+
+    #[test]
+    fn development_phase_can_transition_to_checks() {
+        assert!(DevelopmentPhase::Init.can_transition_to(&DevelopmentPhase::Development));
+        assert!(!DevelopmentPhase::Init.can_transition_to(&DevelopmentPhase::Testing));
+        assert!(DevelopmentPhase::Development.can_transition_to(&DevelopmentPhase::Init));
+        assert!(DevelopmentPhase::Testing.can_transition_to(&DevelopmentPhase::Init));
+    }
+
+    #[test]
+    fn development_phase_is_init() {
+        assert!(DevelopmentPhase::Init.is_init());
+        assert!(!DevelopmentPhase::Development.is_init());
+        assert!(!DevelopmentPhase::Testing.is_init());
+    }
+
+    #[test]
+    fn development_phase_validate_transition_ok() {
+        let result =
+            DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Development);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn development_phase_validate_transition_rejected() {
+        let result =
+            DevelopmentPhase::Init.validate_transition(&DevelopmentPhase::Testing);
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("cannot transition"));
+    }
+
+    #[test]
+    fn development_phase_serializes_to_kebab_case() {
+        let json = serde_json::to_string(&DevelopmentPhase::Development).unwrap();
+        assert_eq!(json, "\"development\"");
+    }
+
+    #[test]
+    fn development_phase_deserializes_from_kebab_case() {
+        let phase: DevelopmentPhase = serde_json::from_str("\"testing\"").unwrap();
+        assert_eq!(phase, DevelopmentPhase::Testing);
+    }
+
+    #[test]
+    fn development_phase_round_trips_through_json() {
+        for phase in [
+            DevelopmentPhase::Init,
+            DevelopmentPhase::Development,
+            DevelopmentPhase::Testing,
+        ] {
+            let json = serde_json::to_string(&phase).unwrap();
+            let decoded: DevelopmentPhase = serde_json::from_str(&json).unwrap();
+            assert_eq!(decoded, phase);
+        }
+    }
+
+    // ── DevelopmentTransitionError ────────────────────────────────────────
+
+    #[test]
+    fn development_transition_error_display() {
+        let err = DevelopmentTransitionError::Rejected {
+            from: DevelopmentPhase::Init,
+            to: DevelopmentPhase::Testing,
+            reason: "not allowed".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("init"));
+        assert!(msg.contains("testing"));
+        assert!(msg.contains("not allowed"));
+    }
+
+    // ── DevelopmentState ─────────────────────────────────────────────────
+
+    #[test]
+    fn development_state_new_starts_at_init() {
+        let state = DevelopmentState::new();
+        assert_eq!(state.phase, DevelopmentPhase::Init);
+        assert!(state.init_step.is_none());
+        assert!(state.last_transition_at.is_none());
+        assert!(state.transition_log.is_empty());
+    }
+
+    #[test]
+    fn development_state_default_equals_new() {
+        assert_eq!(DevelopmentState::default(), DevelopmentState::new());
+    }
+
+    #[test]
+    fn development_state_transition_to_records_log() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(DevelopmentPhase::Development, "2026-03-15T00:00:00Z")
+            .unwrap();
+
+        assert_eq!(state.phase, DevelopmentPhase::Development);
+        assert_eq!(
+            state.last_transition_at.as_deref(),
+            Some("2026-03-15T00:00:00Z")
+        );
+        assert_eq!(state.transition_log.len(), 1);
+        assert_eq!(state.transition_log[0].from, DevelopmentPhase::Init);
+        assert_eq!(state.transition_log[0].to, DevelopmentPhase::Development);
+    }
+
+    #[test]
+    fn development_state_transition_to_rejects_invalid() {
+        let mut state = DevelopmentState::new();
+        let result = state.transition_to(DevelopmentPhase::Testing, "2026-03-15T00:00:00Z");
+        assert!(result.is_err());
+        assert_eq!(state.phase, DevelopmentPhase::Init); // unchanged
+    }
+
+    #[test]
+    fn development_state_update_init_step() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("create-git-repo");
+        assert_eq!(state.init_step.as_deref(), Some("create-git-repo"));
+    }
+
+    #[test]
+    fn development_state_auto_advance_from_init_when_complete() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("complete");
+        let advanced = state.auto_advance_from_init("2026-03-15T00:00:00Z");
+        assert!(advanced);
+        assert_eq!(state.phase, DevelopmentPhase::Development);
+    }
+
+    #[test]
+    fn development_state_auto_advance_from_init_not_complete() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("verify-setup");
+        let advanced = state.auto_advance_from_init("2026-03-15T00:00:00Z");
+        assert!(!advanced);
+        assert_eq!(state.phase, DevelopmentPhase::Init);
+    }
+
+    #[test]
+    fn development_state_auto_advance_from_non_init_phase() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(DevelopmentPhase::Development, "2026-03-15T00:00:00Z")
+            .unwrap();
+        state.update_init_step("complete");
+        let advanced = state.auto_advance_from_init("2026-03-15T01:00:00Z");
+        assert!(!advanced);
+        assert_eq!(state.phase, DevelopmentPhase::Development);
+    }
+
+    #[test]
+    fn development_state_re_entry_to_init_from_development() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(DevelopmentPhase::Development, "t1")
+            .unwrap();
+        state
+            .transition_to(DevelopmentPhase::Init, "t2")
+            .unwrap();
+        assert_eq!(state.phase, DevelopmentPhase::Init);
+        assert_eq!(state.transition_log.len(), 2);
+    }
+
+    #[test]
+    fn development_state_re_entry_to_init_from_testing() {
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(DevelopmentPhase::Development, "t1")
+            .unwrap();
+        state
+            .transition_to(DevelopmentPhase::Testing, "t2")
+            .unwrap();
+        state
+            .transition_to(DevelopmentPhase::Init, "t3")
+            .unwrap();
+        assert_eq!(state.phase, DevelopmentPhase::Init);
+        assert_eq!(state.transition_log.len(), 3);
+    }
+
+    #[test]
+    fn development_state_transition_clears_init_step() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("verify-setup");
+        state
+            .transition_to(DevelopmentPhase::Development, "t1")
+            .unwrap();
+        assert!(state.init_step.is_none());
+    }
+
+    #[test]
+    fn development_state_serializes_and_deserializes() {
+        let mut state = DevelopmentState::new();
+        state.update_init_step("complete");
+        state.auto_advance_from_init("2026-03-15T00:00:00Z");
+
+        let json = serde_json::to_string_pretty(&state).unwrap();
+        let decoded: DevelopmentState = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded, state);
+    }
+
+    #[test]
+    fn development_state_save_and_load_round_trip() {
+        let tmp = std::env::temp_dir().join("calypso-dev-state-test.json");
+        let mut state = DevelopmentState::new();
+        state
+            .transition_to(DevelopmentPhase::Development, "t1")
+            .unwrap();
+
+        state.save_to_path(&tmp).unwrap();
+        let loaded = DevelopmentState::load_from_path(&tmp).unwrap();
+        assert_eq!(loaded, state);
+
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn development_state_load_from_missing_file_returns_error() {
+        let result =
+            DevelopmentState::load_from_path(std::path::Path::new("/nonexistent/path.json"));
+        assert!(result.is_err());
     }
 }

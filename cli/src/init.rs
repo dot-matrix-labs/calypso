@@ -4,7 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::state::{RepositoryIdentity, RepositoryState};
+use crate::state::{DevelopmentState, RepositoryIdentity, RepositoryState};
 use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
 
 // ---------------------------------------------------------------------------
@@ -556,10 +556,18 @@ pub fn run_init_interactive(
 ) -> Result<InitProgress, InitError> {
     let mut progress = InitProgress::new(repo_path.to_path_buf());
 
+    // Load or create development state
+    let calypso_dir = repo_path.join(".calypso");
+    let dev_state_path = calypso_dir.join("dev-state.json");
+    let mut dev_state = DevelopmentState::load_from_path(&dev_state_path)
+        .unwrap_or_default();
+
     // Step: prompt-directory (non-interactive — cwd is the directory)
+    dev_state.update_init_step(progress.current_step.as_str());
     progress.advance(); // PromptDirectory -> CreateGitRepo
 
     // Step: create-git-repo
+    dev_state.update_init_step(progress.current_step.as_str());
     if !env.is_git_repo(repo_path)? {
         env.git_init(repo_path)?;
     }
@@ -568,13 +576,16 @@ pub fn run_init_interactive(
     // Step: create-upstream — attempt to get existing remote or skip
     // (When no upstream is configured yet, the caller should prompt the user
     // or pass github_org/repo. For now we record the step and move on.)
+    dev_state.update_init_step(progress.current_step.as_str());
     progress.advance(); // CreateUpstream -> ScaffoldGithubActions
 
     // Step: scaffold-github-actions
+    dev_state.update_init_step(progress.current_step.as_str());
     scaffold_github_actions(repo_path, env)?;
     progress.advance(); // ScaffoldGithubActions -> ConfigureLocal
 
     // Step: configure-local (.calypso/ setup) — only when a GitHub remote exists
+    dev_state.update_init_step(progress.current_step.as_str());
     let remote_url = env.remote_url(repo_path).unwrap_or_default();
     if is_github_url(&remote_url) {
         let request = InitRequest {
@@ -591,9 +602,30 @@ pub fn run_init_interactive(
 
     // Step: verify-setup — basic doctor-style checks
     // (Integration with doctor is intentional; we record completion here.)
+    dev_state.update_init_step(progress.current_step.as_str());
     progress.advance(); // VerifySetup -> Complete
 
+    // Mark init as complete and auto-advance to Development phase
+    dev_state.update_init_step(progress.current_step.as_str());
+    let now = current_timestamp();
+    dev_state.auto_advance_from_init(&now);
+
+    // Persist dev state (best-effort: don't fail init if the directory
+    // was just created and state serialization succeeds)
+    if calypso_dir.exists() || env.path_exists(&calypso_dir) {
+        let _ = dev_state.save_to_path(&dev_state_path);
+    }
+
     Ok(progress)
+}
+
+/// Returns a UTC timestamp in ISO 8601 format.
+fn current_timestamp() -> String {
+    // Use a simple approach that doesn't require chrono
+    let dur = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    format!("{}Z", dur.as_secs())
 }
 
 /// Scaffold GitHub Actions workflow files into the repository.
