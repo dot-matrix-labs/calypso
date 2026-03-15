@@ -9,7 +9,10 @@ The command-line interface for Calypso, built in Rust.
 
 ## Running
 
+`cargo run` works from both the repository root and the `cli/` directory — the workspace `Cargo.toml` at the repo root sets `default-members = ["cli"]` and the crate's `default-run = "calypso-cli"`, so no `--bin` flag is needed.
+
 ```sh
+# From the repository root or cli/ directory:
 cargo run                        # launch TUI from current directory
 cargo run -- ./my-project        # launch TUI for a specific project directory
 cargo run -- /abs/path/to/proj   # absolute path also works
@@ -18,9 +21,11 @@ cargo run -- ~/projects/calypso  # tilde paths also work
 cargo run -- doctor              # run prerequisite checks
 cargo run -- status              # print feature gate summary
 cargo run -- watch               # live-reload TUI from current directory
-```
 
-`cargo run` defaults to the `calypso-cli` binary (via `default-run` in `Cargo.toml`), so no `--bin` flag is needed.
+# Release builds work the same way:
+cargo run --release              # launch TUI (optimized build)
+cargo run --release -- doctor    # run doctor (optimized build)
+```
 
 ## Path argument
 
@@ -55,7 +60,7 @@ calypso /abs/path        # uses /abs/path/.calypso/state.json
 
 ```bash
 git clone https://github.com/dot-matrix-labs/calypso.git
-cd calypso/cli
+cd calypso
 cargo build --release
 ```
 
@@ -63,7 +68,7 @@ The binary will be at `target/release/calypso-cli`.
 
 To install globally:
 ```bash
-cargo install --path .
+cargo install --path cli
 ```
 
 ## Development

@@ -1,0 +1,4 @@
+[workspace]
+members = ["cli"]
+default-members = ["cli"]
+resolver = "3"
