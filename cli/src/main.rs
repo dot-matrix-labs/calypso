@@ -448,7 +448,9 @@ fn run_calypso_init(
     // For fully configured repos without --reinit, just validate.
     if status == RepoInitStatus::FullyConfigured && !allow_reinit {
         println!("Repository is already fully configured.");
-        println!("Use `calypso init --reinit` to re-initialise or `calypso init --refresh` to update workflows.");
+        println!(
+            "Use `calypso init --reinit` to re-initialise or `calypso init --refresh` to update workflows."
+        );
         return;
     }
 

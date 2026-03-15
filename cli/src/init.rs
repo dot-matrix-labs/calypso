@@ -881,10 +881,7 @@ pub fn refresh_workflows(
 
 /// Detect the repository's init status: returns a human-readable summary
 /// and a machine-readable `RepoInitStatus`.
-pub fn detect_repo_status(
-    repo_path: &Path,
-    env: &impl InitEnvironment,
-) -> RepoInitStatus {
+pub fn detect_repo_status(repo_path: &Path, env: &impl InitEnvironment) -> RepoInitStatus {
     let is_git = env.is_git_repo(repo_path).unwrap_or(false);
     if !is_git {
         return RepoInitStatus::NoGit;
@@ -923,7 +920,9 @@ impl fmt::Display for RepoInitStatus {
         match self {
             Self::NoGit => write!(f, "not a git repository"),
             Self::GitNoUpstream => write!(f, "git repository without upstream remote"),
-            Self::GitWithUpstream => write!(f, "git repository with upstream (not fully configured)"),
+            Self::GitWithUpstream => {
+                write!(f, "git repository with upstream (not fully configured)")
+            }
             Self::FullyConfigured => write!(f, "fully configured"),
         }
     }
@@ -1522,17 +1521,16 @@ mod tests {
 
     #[test]
     fn repo_init_status_display() {
-        assert_eq!(
-            RepoInitStatus::NoGit.to_string(),
-            "not a git repository"
-        );
+        assert_eq!(RepoInitStatus::NoGit.to_string(), "not a git repository");
         assert_eq!(
             RepoInitStatus::GitNoUpstream.to_string(),
             "git repository without upstream remote"
         );
-        assert!(RepoInitStatus::FullyConfigured
-            .to_string()
-            .contains("fully configured"));
+        assert!(
+            RepoInitStatus::FullyConfigured
+                .to_string()
+                .contains("fully configured")
+        );
     }
 
     #[test]
