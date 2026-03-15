@@ -98,6 +98,7 @@ fn driver_step_errors_when_state_file_missing() {
         state_path: std::path::PathBuf::from("/nonexistent/path/state.json"),
         template,
         config: ExecutionConfig::default(),
+        executor: None,
     };
 
     let result = driver.step();
@@ -115,6 +116,7 @@ fn run_auto_stops_on_first_error() {
         state_path: std::path::PathBuf::from("/nonexistent/path/state.json"),
         template,
         config: ExecutionConfig::default(),
+        executor: None,
     };
 
     let results = driver.run_auto();

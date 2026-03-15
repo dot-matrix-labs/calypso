@@ -8,10 +8,41 @@
 //! q to quit).
 
 use std::path::Path;
+use std::sync::Arc;
 
-use crate::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
+use crate::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome, run_supervised_session};
 use crate::state::{RepositoryState, WorkflowState};
 use crate::template::{StateDefinition, StepType, TemplateSet};
+
+// ── SessionExecutor trait ─────────────────────────────────────────────────────
+
+/// Abstraction over the supervised-session execution layer.
+///
+/// The real implementation calls Claude via `run_supervised_session`.
+/// Tests inject a `PhonyExecutor` that returns pre-canned outcomes without
+/// spawning any external process.
+pub trait SessionExecutor: Send + Sync {
+    fn run(
+        &self,
+        state_path: &Path,
+        role: &str,
+        config: &ExecutionConfig,
+    ) -> Result<ExecutionOutcome, ExecutionError>;
+}
+
+/// Production executor — delegates to `run_supervised_session`.
+pub struct RealExecutor;
+
+impl SessionExecutor for RealExecutor {
+    fn run(
+        &self,
+        state_path: &Path,
+        role: &str,
+        config: &ExecutionConfig,
+    ) -> Result<ExecutionOutcome, ExecutionError> {
+        run_supervised_session(state_path, role, config)
+    }
+}
 
 /// Whether the driver runs all steps automatically or waits for a keypress between steps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -43,6 +74,8 @@ pub struct StateMachineDriver {
     pub state_path: std::path::PathBuf,
     pub template: TemplateSet,
     pub config: ExecutionConfig,
+    /// Pluggable session executor. `None` uses `RealExecutor` (default).
+    pub executor: Option<Arc<dyn SessionExecutor>>,
 }
 
 impl StateMachineDriver {
@@ -90,7 +123,13 @@ impl StateMachineDriver {
             })
             .unwrap_or_else(|| state_name.to_string());
 
-        match run_supervised_session(&self.state_path, &role, &self.config) {
+        let result = if let Some(exec) = &self.executor {
+            exec.run(&self.state_path, &role, &self.config)
+        } else {
+            run_supervised_session(&self.state_path, &role, &self.config)
+        };
+
+        match result {
             Ok(outcome) => match outcome {
                 ExecutionOutcome::Ok { advanced_to, .. } => advanced_to
                     .map(DriverStepResult::Advanced)

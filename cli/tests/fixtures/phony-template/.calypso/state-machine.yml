@@ -1,0 +1,74 @@
+# Phony 3-step pipeline for testing
+# States: new -> prd-review -> architecture-plan (done/aborted as terminals)
+# Uses a subset of canonical WorkflowState slugs so the driver can parse them.
+initial_state: new
+
+states:
+  - new
+  - prd-review
+  - architecture-plan
+  - done
+  - blocked
+  - aborted
+
+transitions:
+  - from: new
+    to: prd-review
+  - from: prd-review
+    to: architecture-plan
+  - from: architecture-plan
+    to: done
+  - from: new
+    to: blocked
+  - from: prd-review
+    to: blocked
+  - from: architecture-plan
+    to: blocked
+  - from: blocked
+    to: new
+  - from: blocked
+    to: prd-review
+  - from: blocked
+    to: architecture-plan
+  - from: new
+    to: aborted
+  - from: prd-review
+    to: aborted
+  - from: architecture-plan
+    to: aborted
+  - from: blocked
+    to: aborted
+
+# Override policy_gates to empty so default bindings (which reference
+# default gate IDs) do not conflict with our phony gate_groups.
+policy_gates: []
+
+# Override artifact_policies to empty (no required artifacts in phony pipeline).
+artifact_policies:
+  required_per_state: {}
+
+gate_groups:
+  - id: phony-alpha
+    label: Alpha Gate Group
+    gates:
+      - id: phony-alpha-gate
+        label: Alpha task complete
+        task: phony-alpha-task
+        applies_to:
+          - new
+  - id: phony-beta
+    label: Beta Gate Group
+    gates:
+      - id: phony-beta-gate
+        label: Beta task complete
+        task: phony-beta-task
+        applies_to:
+          - prd-review
+  - id: phony-gamma
+    label: Gamma Gate Group
+    gates:
+      - id: phony-gamma-gate
+        label: Gamma task complete
+        task: phony-gamma-task
+        applies_to:
+          - architecture-plan

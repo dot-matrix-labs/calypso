@@ -1,0 +1,13 @@
+# Phony agent task catalog for testing
+tasks:
+  - name: phony-alpha-task
+    kind: agent
+    role: phony-alpha-agent
+
+  - name: phony-beta-task
+    kind: agent
+    role: phony-beta-agent
+
+  - name: phony-gamma-task
+    kind: agent
+    role: phony-gamma-agent

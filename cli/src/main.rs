@@ -352,6 +352,7 @@ fn run_state_machine_auto(state_path: &std::path::Path) {
         state_path: state_path.to_path_buf(),
         template,
         config: ExecutionConfig::default(),
+        executor: None,
     };
 
     let results = driver.run_auto();
@@ -395,6 +396,7 @@ fn run_state_machine_step(state_path: &std::path::Path) {
         state_path: state_path.to_path_buf(),
         template,
         config: ExecutionConfig::default(),
+        executor: None,
     };
 
     loop {
