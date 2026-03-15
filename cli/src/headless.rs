@@ -508,7 +508,10 @@ mod tests {
 
         // No output expected for empty report
         let output = writer.contents();
-        assert!(output.is_empty(), "expected no output for empty report: {output}");
+        assert!(
+            output.is_empty(),
+            "expected no output for empty report: {output}"
+        );
     }
 
     /// Build a phony TemplateSet from the test fixture YAML files.
