@@ -10,27 +10,27 @@ use serde::{Deserialize, Serialize};
 // ── Embedded YAML content ────────────────────────────────────────────────────
 
 const CALYPSO_DEFAULT_DEPLOYMENT_WORKFLOW: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-default-deployment-workflow.yaml"
+    "../../../calypso-blueprint/examples/workflows/calypso-default-deployment-workflow.yaml"
 );
 const CALYPSO_DEFAULT_FEATURE_WORKFLOW: &str = include_str!(
-    "../../calypso-blueprint/examples/workflows/calypso-default-feature-workflow.yaml"
+    "../../../calypso-blueprint/examples/workflows/calypso-default-feature-workflow.yaml"
 );
 const CALYPSO_DEPLOYMENT_REQUEST: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-deployment-request.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-deployment-request.yaml");
 const CALYPSO_FEATURE_REQUEST: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-feature-request.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-feature-request.yaml");
 const CALYPSO_IMPLEMENTATION_LOOP: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-implementation-loop.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-implementation-loop.yaml");
 const CALYPSO_ORCHESTRATOR_STARTUP: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-orchestrator-startup.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-orchestrator-startup.yaml");
 const CALYPSO_PLANNING: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-planning.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-planning.yaml");
 const CALYPSO_PR_REVIEW_MERGE: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-pr-review-merge.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-pr-review-merge.yaml");
 const CALYPSO_RELEASE_REQUEST: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-release-request.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-release-request.yaml");
 const CALYPSO_SAVE_STATE: &str =
-    include_str!("../../calypso-blueprint/examples/workflows/calypso-save-state.yaml");
+    include_str!("../../../calypso-blueprint/examples/workflows/calypso-save-state.yaml");
 
 // ── Library ──────────────────────────────────────────────────────────────────
 

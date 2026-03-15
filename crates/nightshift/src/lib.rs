@@ -1,9 +1,27 @@
-//! Thin re-export layer — all library code lives in the `nightshift` crate.
-//!
-//! This module re-exports everything from `nightshift` so that existing
-//! `use calypso_cli::*` paths continue to work unchanged.
-
-pub use nightshift::*;
+pub mod app;
+pub mod blueprint_workflows;
+pub mod claude;
+// FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
+// pub mod codex;
+pub mod doctor;
+pub mod driver;
+pub mod error;
+pub mod execution;
+pub mod feature_start;
+pub mod github;
+pub mod headless;
+pub mod init;
+pub mod policy;
+pub mod pr_checklist;
+pub mod report;
+pub mod runtime;
+pub mod signal;
+pub mod sm_audit;
+pub mod state;
+pub mod telemetry;
+pub mod template;
+pub mod tui;
+pub mod workflows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {
@@ -43,10 +61,8 @@ Commands:
   (none)              Drive the state machine for the project directory
   --step              Drive the state machine one step at a time
   doctor              Check local prerequisites and environment
-  doctor --verbose    Show detailed remediation steps for failing checks
   doctor --json       Output doctor results as JSON (exit 1 if any failing)
-  doctor --fix        Apply auto-fixes for all failing checks
-  doctor --fix <id>   Apply an available fix for a specific doctor check
+  doctor --fix <id>   Apply an available fix for a doctor check
   status              Render the feature status for the project directory
   state               Alias for `state status`
   state --json        Alias for `state status --json`
@@ -64,8 +80,6 @@ Commands:
   init --refresh      Refresh/overwrite GitHub Actions workflow files
   init --org <org> --repo <name>
                       Create upstream GitHub remote during init
-  dev-status          Show the current development lifecycle phase
-  dev-status --json   Output development lifecycle phase as JSON
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
