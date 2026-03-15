@@ -27,6 +27,7 @@ pub struct DoctorJsonCheck {
 pub struct DoctorJsonSummary {
     pub total: usize,
     pub passing: usize,
+    pub warnings: usize,
     pub failing: usize,
 }
 
