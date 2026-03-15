@@ -108,18 +108,10 @@ Once you go post-human, the stack goes lower. The constraints that TypeScript an
 
 ## Installation
 
-### Precompiled Binaries
+### One-liner Install
 
-Calypso CLI is available as precompiled binaries for:
+The installer auto-detects your OS and architecture, downloads the correct binary, verifies the SHA-256 checksum, and places it in `/usr/local/bin`:
 
-- **macOS** — arm64 (M1/M2/M3) and x86_64
-- **Linux** — x86_64 and aarch64
-
-All binaries are available on [GitHub Releases](https://github.com/dot-matrix-labs/calypso/releases).
-
-### Installation Methods
-
-**Latest production release:**
 ```bash
 curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash
 ```
@@ -134,7 +126,23 @@ curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/i
 curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash -s -- canary
 ```
 
-### Manual Download
+**Custom install directory** (no sudo required):
+```bash
+INSTALL_DIR=~/.local/bin curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/install.sh | bash
+```
+
+### Supported Platforms
+
+| OS | Architecture | Target |
+|---|---|---|
+| macOS | Apple Silicon (M1/M2/M3/M4) | `macos-aarch64` |
+| macOS | Intel | `macos-x86_64` |
+| Linux | x86_64 | `linux-x86_64` |
+| Linux | ARM64 | `linux-aarch64` |
+
+All binaries and checksums are published to [GitHub Releases](https://github.com/dot-matrix-labs/calypso/releases).
+
+### Manual Download and Verification
 
 1. Visit [GitHub Releases](https://github.com/dot-matrix-labs/calypso/releases)
 2. Download the binary for your platform: `calypso-cli-<platform>-<version>.tar.gz`
@@ -143,7 +151,7 @@ curl -fsSL https://github.com/dot-matrix-labs/calypso/releases/latest/download/i
    tar -xzf calypso-cli-*.tar.gz
    sha256sum -c calypso-cli-*.tar.gz.sha256
    ```
-4. Move to `/usr/local/bin`:
+4. Move to your PATH:
    ```bash
    sudo mv calypso-cli /usr/local/bin/
    sudo chmod +x /usr/local/bin/calypso-cli
