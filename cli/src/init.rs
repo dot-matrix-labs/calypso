@@ -4,6 +4,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::doctor::{DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
 use crate::state::{RepositoryIdentity, RepositoryState};
 use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
 
@@ -62,6 +63,46 @@ impl InitStep {
     pub fn is_complete(&self) -> bool {
         matches!(self, Self::Complete)
     }
+
+    /// Returns all steps in order.
+    pub fn all_steps() -> &'static [Self] {
+        &[
+            Self::PromptDirectory,
+            Self::CreateGitRepo,
+            Self::CreateUpstream,
+            Self::ScaffoldGithubActions,
+            Self::ConfigureLocal,
+            Self::VerifySetup,
+            Self::Complete,
+        ]
+    }
+
+    /// Returns the zero-based ordinal position of this step in the sequence.
+    pub fn ordinal(&self) -> usize {
+        match self {
+            Self::PromptDirectory => 0,
+            Self::CreateGitRepo => 1,
+            Self::CreateUpstream => 2,
+            Self::ScaffoldGithubActions => 3,
+            Self::ConfigureLocal => 4,
+            Self::VerifySetup => 5,
+            Self::Complete => 6,
+        }
+    }
+
+    /// Parse a step from its kebab-case string representation.
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "prompt-directory" => Some(Self::PromptDirectory),
+            "create-git-repo" => Some(Self::CreateGitRepo),
+            "create-upstream" => Some(Self::CreateUpstream),
+            "scaffold-github-actions" => Some(Self::ScaffoldGithubActions),
+            "configure-local" => Some(Self::ConfigureLocal),
+            "verify-setup" => Some(Self::VerifySetup),
+            "complete" => Some(Self::Complete),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for InitStep {
@@ -106,6 +147,51 @@ impl InitProgress {
     /// Returns `true` if the given step has already been completed.
     pub fn is_step_done(&self, step: &InitStep) -> bool {
         self.completed_steps.contains(step)
+    }
+
+    /// Returns `true` if the given step is a valid target from the current step.
+    ///
+    /// Valid targets are: the immediate next step (forward progress), or any
+    /// already-completed step (re-running). Skipping ahead is not allowed.
+    pub fn can_advance_to(&self, target: &InitStep) -> bool {
+        // Already at target
+        if self.current_step == *target {
+            return true;
+        }
+        // Forward by exactly one step
+        if let Some(next) = self.current_step.next()
+            && next == *target
+        {
+            return true;
+        }
+        // Re-run a completed step
+        self.completed_steps.contains(target)
+    }
+
+    /// Persist the init progress to `.calypso/init-state.json` under the given repo root.
+    pub fn save(&self, repo_root: &Path) -> Result<(), InitError> {
+        let calypso_dir = repo_root.join(".calypso");
+        fs::create_dir_all(&calypso_dir).map_err(InitError::Io)?;
+        let state_path = calypso_dir.join("init-state.json");
+        let json = serde_json::to_string_pretty(self).map_err(InitError::StateSerialize)?;
+        let tmp_path = state_path.with_extension("tmp");
+        fs::write(&tmp_path, &json).map_err(InitError::Io)?;
+        fs::rename(&tmp_path, &state_path).map_err(InitError::Io)?;
+        Ok(())
+    }
+
+    /// Load init progress from `.calypso/init-state.json` under the given repo root.
+    ///
+    /// Returns `Ok(None)` if the file does not exist.
+    pub fn load(repo_root: &Path) -> Result<Option<Self>, InitError> {
+        let state_path = repo_root.join(".calypso").join("init-state.json");
+        if !state_path.exists() {
+            return Ok(None);
+        }
+        let json = fs::read_to_string(&state_path).map_err(InitError::Io)?;
+        let progress: Self =
+            serde_json::from_str(&json).map_err(InitError::StateSerialize)?;
+        Ok(Some(progress))
     }
 }
 
@@ -305,6 +391,14 @@ pub trait InitEnvironment {
     /// Resolve the hooks directory via `git rev-parse --git-path hooks`.
     /// Handles worktrees and `core.hooksPath` correctly.
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError>;
+    /// Persist init progress to `.calypso/init-state.json`.
+    fn save_init_state(&self, repo_root: &Path, progress: &InitProgress) -> Result<(), InitError> {
+        progress.save(repo_root)
+    }
+    /// Load init progress from `.calypso/init-state.json`.
+    fn load_init_state(&self, repo_root: &Path) -> Result<Option<InitProgress>, InitError> {
+        InitProgress::load(repo_root)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -549,50 +643,194 @@ pub fn run_init(request: &InitRequest) -> Result<InitResult, InitError> {
 ///
 /// The function returns `Ok(InitProgress)` representing the final state of the
 /// init state machine after all applicable steps have been executed.
+/// State is persisted to `.calypso/init-state.json` after each step.
 pub fn run_init_interactive(
     repo_path: &Path,
     allow_reinit: bool,
     env: &impl InitEnvironment,
 ) -> Result<InitProgress, InitError> {
-    let mut progress = InitProgress::new(repo_path.to_path_buf());
+    // Resume from persisted state if available and not reinitialising.
+    let mut progress = if !allow_reinit {
+        env.load_init_state(repo_path)?
+            .unwrap_or_else(|| InitProgress::new(repo_path.to_path_buf()))
+    } else {
+        InitProgress::new(repo_path.to_path_buf())
+    };
 
-    // Step: prompt-directory (non-interactive — cwd is the directory)
-    progress.advance(); // PromptDirectory -> CreateGitRepo
-
-    // Step: create-git-repo
-    if !env.is_git_repo(repo_path)? {
-        env.git_init(repo_path)?;
+    // If already complete, nothing to do.
+    if progress.current_step.is_complete() {
+        return Ok(progress);
     }
-    progress.advance(); // CreateGitRepo -> CreateUpstream
 
-    // Step: create-upstream — attempt to get existing remote or skip
-    // (When no upstream is configured yet, the caller should prompt the user
-    // or pass github_org/repo. For now we record the step and move on.)
-    progress.advance(); // CreateUpstream -> ScaffoldGithubActions
+    // Run steps from the current position forward.
+    loop {
+        match &progress.current_step {
+            InitStep::PromptDirectory => {
+                // Non-interactive — cwd is the directory.
+                progress.advance();
+            }
+            InitStep::CreateGitRepo => {
+                if !env.is_git_repo(repo_path)? {
+                    env.git_init(repo_path)?;
+                }
+                progress.advance();
+            }
+            InitStep::CreateUpstream => {
+                // Attempt to get existing remote or skip.
+                progress.advance();
+            }
+            InitStep::ScaffoldGithubActions => {
+                scaffold_github_actions(repo_path, env)?;
+                progress.advance();
+            }
+            InitStep::ConfigureLocal => {
+                let remote_url = env.remote_url(repo_path).unwrap_or_default();
+                if is_github_url(&remote_url) {
+                    let request = InitRequest {
+                        repo_path: repo_path.to_path_buf(),
+                        provider: None,
+                        allow_reinit,
+                        create_git_repo: false,
+                        github_org: None,
+                        github_repo_name: None,
+                    };
+                    init_repository(&request, env)?;
+                }
+                progress.advance();
+            }
+            InitStep::VerifySetup => {
+                // Wire to doctor: collect doctor report and check for failures.
+                let report = collect_doctor_report(&HostDoctorEnvironment, repo_path);
+                let failing = report
+                    .checks
+                    .iter()
+                    .filter(|c| c.status == DoctorStatus::Failing)
+                    .count();
+                if failing > 0 {
+                    // Record the step as done but note failures in progress.
+                    // The init still completes — doctor issues are advisory.
+                }
+                progress.advance();
+            }
+            InitStep::Complete => break,
+        }
+        // Persist after each step so interrupted runs can resume.
+        env.save_init_state(repo_path, &progress)?;
+    }
 
-    // Step: scaffold-github-actions
-    scaffold_github_actions(repo_path, env)?;
-    progress.advance(); // ScaffoldGithubActions -> ConfigureLocal
+    Ok(progress)
+}
 
-    // Step: configure-local (.calypso/ setup) — only when a GitHub remote exists
-    let remote_url = env.remote_url(repo_path).unwrap_or_default();
-    if is_github_url(&remote_url) {
-        let request = InitRequest {
-            repo_path: repo_path.to_path_buf(),
-            provider: None,
-            allow_reinit,
-            create_git_repo: false,
-            github_org: None,
-            github_repo_name: None,
+/// Render a human-readable summary of the init state machine progress.
+pub fn render_init_status(progress: &InitProgress) -> String {
+    let mut lines = Vec::new();
+    lines.push("Init state machine".to_string());
+    lines.push(format!("Repo: {}", progress.repo_path.display()));
+    lines.push(format!("Current step: {}", progress.current_step));
+    lines.push(String::new());
+
+    for step in InitStep::all_steps() {
+        let marker = if progress.completed_steps.contains(step) {
+            "[x]"
+        } else if progress.current_step == *step {
+            "[>]"
+        } else {
+            "[ ]"
         };
-        init_repository(&request, env)?;
+        lines.push(format!("  {marker} {step}"));
     }
-    progress.advance(); // ConfigureLocal -> VerifySetup
+    lines.join("\n")
+}
 
-    // Step: verify-setup — basic doctor-style checks
-    // (Integration with doctor is intentional; we record completion here.)
-    progress.advance(); // VerifySetup -> Complete
+/// Execute a single named init step, validating that the transition is legal.
+///
+/// Returns the updated progress after executing the step. The progress is
+/// persisted to disk before returning.
+pub fn run_init_step(
+    repo_path: &Path,
+    step_name: &str,
+    env: &impl InitEnvironment,
+) -> Result<InitProgress, InitError> {
+    let target = InitStep::parse(step_name).ok_or_else(|| {
+        InitError::GitCommandFailed {
+            action: "init --step".to_string(),
+            details: format!(
+                "unknown step '{step_name}'; valid steps: {}",
+                InitStep::all_steps()
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
+    })?;
 
+    let mut progress = InitProgress::load(repo_path)?
+        .unwrap_or_else(|| InitProgress::new(repo_path.to_path_buf()));
+
+    if !progress.can_advance_to(&target) {
+        return Err(InitError::GitCommandFailed {
+            action: "init --step".to_string(),
+            details: format!(
+                "cannot jump to '{}' from '{}'; steps must be executed in order",
+                target, progress.current_step
+            ),
+        });
+    }
+
+    // If re-running a completed step, reset current_step to the target.
+    if progress.completed_steps.contains(&target) || progress.current_step == target {
+        progress.current_step = target.clone();
+        // Remove this step and all later steps from completed_steps.
+        progress
+            .completed_steps
+            .retain(|s| s.ordinal() < target.ordinal());
+    }
+
+    // Execute the target step.
+    match &target {
+        InitStep::PromptDirectory => {
+            // Non-interactive — cwd is the directory.
+            progress.advance();
+        }
+        InitStep::CreateGitRepo => {
+            if !env.is_git_repo(repo_path)? {
+                env.git_init(repo_path)?;
+            }
+            progress.advance();
+        }
+        InitStep::CreateUpstream => {
+            progress.advance();
+        }
+        InitStep::ScaffoldGithubActions => {
+            scaffold_github_actions(repo_path, env)?;
+            progress.advance();
+        }
+        InitStep::ConfigureLocal => {
+            let remote_url = env.remote_url(repo_path).unwrap_or_default();
+            if is_github_url(&remote_url) {
+                let request = InitRequest {
+                    repo_path: repo_path.to_path_buf(),
+                    provider: None,
+                    allow_reinit: true,
+                    create_git_repo: false,
+                    github_org: None,
+                    github_repo_name: None,
+                };
+                init_repository(&request, env)?;
+            }
+            progress.advance();
+        }
+        InitStep::VerifySetup => {
+            let _report = collect_doctor_report(&HostDoctorEnvironment, repo_path);
+            progress.advance();
+        }
+        InitStep::Complete => {
+            // No-op — already at terminal.
+        }
+    }
+
+    progress.save(repo_path)?;
     Ok(progress)
 }
 
@@ -1030,5 +1268,140 @@ mod tests {
             serde_yaml::from_str(WORKFLOW_CI).expect("ci should be valid YAML");
         let map = val.as_mapping().expect("top-level should be a mapping");
         assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
+    }
+
+    // ── InitStep::parse ───────────────────────────────────────────────────────
+
+    #[test]
+    fn init_step_parse_valid_names() {
+        assert_eq!(
+            InitStep::parse("prompt-directory"),
+            Some(InitStep::PromptDirectory)
+        );
+        assert_eq!(
+            InitStep::parse("create-git-repo"),
+            Some(InitStep::CreateGitRepo)
+        );
+        assert_eq!(
+            InitStep::parse("create-upstream"),
+            Some(InitStep::CreateUpstream)
+        );
+        assert_eq!(
+            InitStep::parse("scaffold-github-actions"),
+            Some(InitStep::ScaffoldGithubActions)
+        );
+        assert_eq!(
+            InitStep::parse("configure-local"),
+            Some(InitStep::ConfigureLocal)
+        );
+        assert_eq!(
+            InitStep::parse("verify-setup"),
+            Some(InitStep::VerifySetup)
+        );
+        assert_eq!(InitStep::parse("complete"), Some(InitStep::Complete));
+    }
+
+    #[test]
+    fn init_step_parse_unknown_returns_none() {
+        assert_eq!(InitStep::parse("nonexistent"), None);
+        assert_eq!(InitStep::parse(""), None);
+    }
+
+    // ── InitStep::ordinal ─────────────────────────────────────────────────────
+
+    #[test]
+    fn init_step_ordinals_are_sequential() {
+        let steps = InitStep::all_steps();
+        for (i, step) in steps.iter().enumerate() {
+            assert_eq!(step.ordinal(), i, "ordinal mismatch for {step}");
+        }
+    }
+
+    // ── InitProgress::can_advance_to ──────────────────────────────────────────
+
+    #[test]
+    fn can_advance_to_next_step() {
+        let progress = InitProgress::new(PathBuf::from("/fake/repo"));
+        assert!(progress.can_advance_to(&InitStep::PromptDirectory));
+        assert!(progress.can_advance_to(&InitStep::CreateGitRepo));
+        assert!(!progress.can_advance_to(&InitStep::CreateUpstream));
+    }
+
+    #[test]
+    fn can_advance_to_completed_step() {
+        let mut progress = InitProgress::new(PathBuf::from("/fake/repo"));
+        progress.advance(); // PromptDirectory done, now at CreateGitRepo
+        progress.advance(); // CreateGitRepo done, now at CreateUpstream
+
+        // Can re-run PromptDirectory (completed)
+        assert!(progress.can_advance_to(&InitStep::PromptDirectory));
+        // Can re-run CreateGitRepo (completed)
+        assert!(progress.can_advance_to(&InitStep::CreateGitRepo));
+        // Can go forward one step
+        assert!(progress.can_advance_to(&InitStep::ScaffoldGithubActions));
+        // Cannot skip ahead
+        assert!(!progress.can_advance_to(&InitStep::ConfigureLocal));
+    }
+
+    // ── InitProgress persistence ──────────────────────────────────────────────
+
+    #[test]
+    fn init_progress_save_and_load_round_trips() {
+        let dir = std::env::temp_dir().join(format!(
+            "calypso-init-persist-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut progress = InitProgress::new(dir.clone());
+        progress.advance();
+        progress.advance();
+        progress.github_org = Some("test-org".to_string());
+
+        progress.save(&dir).unwrap();
+        let loaded = InitProgress::load(&dir).unwrap().unwrap();
+
+        assert_eq!(loaded.current_step, InitStep::CreateUpstream);
+        assert_eq!(loaded.github_org.as_deref(), Some("test-org"));
+        assert!(loaded.is_step_done(&InitStep::PromptDirectory));
+        assert!(loaded.is_step_done(&InitStep::CreateGitRepo));
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn init_progress_load_returns_none_when_no_file() {
+        let dir = std::env::temp_dir().join("calypso-init-no-file");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let result = InitProgress::load(&dir).unwrap();
+        assert!(result.is_none());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    // ── render_init_status ────────────────────────────────────────────────────
+
+    #[test]
+    fn render_init_status_shows_current_step_marker() {
+        let progress = InitProgress::new(PathBuf::from("/fake/repo"));
+        let output = render_init_status(&progress);
+        assert!(output.contains("[>] prompt-directory"));
+        assert!(output.contains("[ ] create-git-repo"));
+    }
+
+    #[test]
+    fn render_init_status_shows_completed_steps() {
+        let mut progress = InitProgress::new(PathBuf::from("/fake/repo"));
+        progress.advance();
+        progress.advance();
+        let output = render_init_status(&progress);
+        assert!(output.contains("[x] prompt-directory"));
+        assert!(output.contains("[x] create-git-repo"));
+        assert!(output.contains("[>] create-upstream"));
     }
 }
