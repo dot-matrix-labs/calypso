@@ -11,6 +11,7 @@ pub mod github;
 pub mod init;
 pub mod policy;
 pub mod pr_checklist;
+pub mod report;
 pub mod runtime;
 pub mod state;
 pub mod telemetry;
@@ -50,12 +51,17 @@ Commands:
   (none)              Drive the state machine for the project directory
   --step              Drive the state machine one step at a time
   doctor              Check local prerequisites and environment
+  doctor --json       Output doctor results as JSON (exit 1 if any failing)
   doctor --fix <id>   Apply an available fix for a doctor check
   status              Render the feature status for the project directory
+  state status        Show a human-readable summary of .calypso/state.json
+  state status --json Output state status as JSON
+  state show          Print the current state file as raw JSON
+  agents              Show active agent sessions
+  agents --json       Output agent sessions as JSON
   watch               Open the interactive operator surface (live TUI)
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
-  state show          Print the current state file as JSON
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template

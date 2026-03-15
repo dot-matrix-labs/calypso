@@ -3,12 +3,18 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::doctor::{HostDoctorEnvironment, collect_doctor_report, render_doctor_report};
+use crate::doctor::{
+    DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report, render_doctor_report,
+};
 use crate::github::{HostGithubEnvironment, collect_github_report};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
+use crate::report::{
+    AgentJsonSession, AgentsJsonReport, DoctorJsonCheck, DoctorJsonReport, DoctorJsonSummary,
+    StateJsonGate, StateJsonGateGroup, StateStatusJsonReport,
+};
 use crate::state::{
-    BuiltinEvidence, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
-    GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
+    AgentSession, AgentSessionStatus, BuiltinEvidence, EvidenceStatus, FeatureState, GateStatus,
+    GithubMergeability, GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
 };
 use crate::template::load_embedded_template_set;
 
@@ -284,4 +290,264 @@ fn evidence_status_label(status: &EvidenceStatus) -> &'static str {
         EvidenceStatus::Pending => "pending",
         EvidenceStatus::Manual => "manual",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Feature 1 — doctor --json
+// ---------------------------------------------------------------------------
+
+/// Build a `DoctorJsonReport` from a `DoctorReport`.
+pub fn doctor_json_report(report: &DoctorReport) -> DoctorJsonReport {
+    let checks: Vec<DoctorJsonCheck> = report
+        .checks
+        .iter()
+        .map(|check| DoctorJsonCheck {
+            id: check.id.label().to_string(),
+            status: if check.status == DoctorStatus::Passing {
+                "passing"
+            } else {
+                "failing"
+            },
+            detail: check.detail.clone(),
+            remediation: check.remediation.clone(),
+            has_auto_fix: check.fix.as_ref().is_some_and(|f| f.is_automatic()),
+        })
+        .collect();
+
+    let total = checks.len();
+    let passing = checks.iter().filter(|c| c.status == "passing").count();
+    let failing = total - passing;
+
+    DoctorJsonReport {
+        checks,
+        summary: DoctorJsonSummary {
+            total,
+            passing,
+            failing,
+        },
+    }
+}
+
+/// Run the doctor check and return the JSON report as a pretty-printed string.
+/// Returns `Ok(json)` when all checks pass, `Err(json)` when any fail.
+pub fn run_doctor_json(cwd: &Path) -> Result<String, String> {
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
+    let json_report = doctor_json_report(&report);
+    let json = serde_json::to_string_pretty(&json_report).expect("DoctorJsonReport must serialize");
+    if json_report.summary.failing == 0 {
+        Ok(json)
+    } else {
+        Err(json)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Feature 2 — state status (plain text and --json)
+// ---------------------------------------------------------------------------
+
+fn gate_status_str(status: &GateStatus) -> &'static str {
+    match status {
+        GateStatus::Passing => "passing",
+        GateStatus::Failing => "failing",
+        GateStatus::Pending => "pending",
+        GateStatus::Manual => "manual",
+    }
+}
+
+/// Build a `StateStatusJsonReport` from a loaded `FeatureState`.
+pub fn state_status_json_report(feature: &FeatureState) -> StateStatusJsonReport {
+    let gate_groups = feature
+        .gate_groups
+        .iter()
+        .map(|group| {
+            let rollup = group.rollup();
+            let group_status = match rollup.status {
+                crate::state::GateGroupStatus::Passing => "passing",
+                crate::state::GateGroupStatus::Pending => "pending",
+                crate::state::GateGroupStatus::Manual => "manual",
+                crate::state::GateGroupStatus::Blocked => "failing",
+            };
+            StateJsonGateGroup {
+                id: group.id.clone(),
+                label: group.label.clone(),
+                status: group_status,
+                gates: group
+                    .gates
+                    .iter()
+                    .map(|gate| StateJsonGate {
+                        id: gate.id.clone(),
+                        label: gate.label.clone(),
+                        status: gate_status_str(&gate.status),
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    let pr_number = if feature.pull_request.number == 0 {
+        None
+    } else {
+        Some(feature.pull_request.number)
+    };
+
+    StateStatusJsonReport {
+        feature_id: feature.feature_id.clone(),
+        branch: feature.branch.clone(),
+        pr_number,
+        workflow_state: feature.workflow_state.as_str().to_string(),
+        gate_groups,
+        blocking_gate_ids: feature.blocking_gate_ids(),
+        active_session_count: feature.active_sessions.len(),
+    }
+}
+
+/// Load state from `.calypso/state.json` and return the JSON report.
+/// Returns `Ok(json)` on success, `Err(message)` when the file cannot be loaded.
+pub fn run_state_status_json(cwd: &Path) -> Result<String, String> {
+    let state_path = cwd.join(".calypso").join("state.json");
+    let state =
+        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let json_report = state_status_json_report(&state.current_feature);
+    serde_json::to_string_pretty(&json_report).map_err(|e| format!("serialization error: {e}"))
+}
+
+/// Render a human-readable summary of the feature state.
+pub fn render_state_status(feature: &FeatureState) -> String {
+    let mut lines = Vec::new();
+
+    lines.push(format!("feature: {}", feature.feature_id));
+
+    let pr_part = if feature.pull_request.number != 0 {
+        format!("  PR: #{}", feature.pull_request.number)
+    } else {
+        String::new()
+    };
+    lines.push(format!("branch:  {}{}", feature.branch, pr_part));
+    lines.push(format!("state:   {}", feature.workflow_state.as_str()));
+
+    if !feature.gate_groups.is_empty() {
+        lines.push(String::new());
+        lines.push("  Gates".to_string());
+        lines.push(format!("  {}", "─".repeat(33)));
+        for group in &feature.gate_groups {
+            let rollup = group.rollup();
+            let blocking_count = rollup.blocking_gate_ids.len();
+            let group_marker = if blocking_count == 0 { "✓" } else { "✗" };
+            let blocking_str = if blocking_count > 0 {
+                format!("  {} blocking", blocking_count)
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "  {} {}{}",
+                group_marker, group.label, blocking_str
+            ));
+            for gate in &group.gates {
+                let gate_marker = if gate.status == GateStatus::Passing {
+                    "✓"
+                } else {
+                    "✗"
+                };
+                lines.push(format!("    {} {}", gate_marker, gate.label));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Load state from `.calypso/state.json` and return a plain-text summary.
+pub fn run_state_status_plain(cwd: &Path) -> Result<String, String> {
+    let state_path = cwd.join(".calypso").join("state.json");
+    let state =
+        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    Ok(render_state_status(&state.current_feature))
+}
+
+// ---------------------------------------------------------------------------
+// Feature 3 — agents (plain text and --json)
+// ---------------------------------------------------------------------------
+
+fn agent_status_str(status: &AgentSessionStatus) -> &'static str {
+    match status {
+        AgentSessionStatus::Running => "running",
+        AgentSessionStatus::WaitingForHuman => "waiting-for-human",
+        AgentSessionStatus::Completed => "completed",
+        AgentSessionStatus::Failed => "failed",
+        AgentSessionStatus::Aborted => "aborted",
+    }
+}
+
+/// Build an `AgentsJsonReport` from a `FeatureState`.
+pub fn agents_json_report(feature: &FeatureState) -> AgentsJsonReport {
+    let sessions = feature
+        .active_sessions
+        .iter()
+        .map(|session| AgentJsonSession {
+            session_id: session.session_id.clone(),
+            role: session.role.clone(),
+            status: agent_status_str(&session.status).to_string(),
+            output: session.output.iter().map(|o| o.text.clone()).collect(),
+            pending_follow_ups: session.pending_follow_ups.clone(),
+        })
+        .collect();
+
+    AgentsJsonReport {
+        feature_id: feature.feature_id.clone(),
+        sessions,
+    }
+}
+
+/// Load state from `.calypso/state.json` and return the agents JSON report.
+pub fn run_agents_json(cwd: &Path) -> Result<String, String> {
+    let state_path = cwd.join(".calypso").join("state.json");
+    let state =
+        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let json_report = agents_json_report(&state.current_feature);
+    serde_json::to_string_pretty(&json_report).map_err(|e| format!("serialization error: {e}"))
+}
+
+/// Render a human-readable agents status from a session list.
+pub fn render_agents(feature: &FeatureState) -> String {
+    let mut lines = Vec::new();
+    lines.push(format!("Active sessions for {}", feature.feature_id));
+    lines.push("─".repeat(42));
+
+    if feature.active_sessions.is_empty() {
+        lines.push("  (no active sessions)".to_string());
+    } else {
+        for session in &feature.active_sessions {
+            let (marker, status_str) = session_display_parts(session);
+            lines.push(format!(
+                "{} {}  [{}]  {}",
+                marker, session.role, session.session_id, status_str
+            ));
+            for line in &session.output {
+                for text_line in line.text.lines() {
+                    lines.push(format!("  {text_line}"));
+                }
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+fn session_display_parts(session: &AgentSession) -> (&'static str, &'static str) {
+    match session.status {
+        AgentSessionStatus::Running => ("▶", "running"),
+        AgentSessionStatus::WaitingForHuman => ("⏸", "waiting-for-human"),
+        AgentSessionStatus::Completed => ("✓", "completed"),
+        AgentSessionStatus::Failed => ("✗", "failed"),
+        AgentSessionStatus::Aborted => ("✗", "aborted"),
+    }
+}
+
+/// Load state from `.calypso/state.json` and return a plain-text agents summary.
+pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
+    let state_path = cwd.join(".calypso").join("state.json");
+    let state =
+        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    Ok(render_agents(&state.current_feature))
 }

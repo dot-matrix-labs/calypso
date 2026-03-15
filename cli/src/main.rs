@@ -1,4 +1,7 @@
-use calypso_cli::app::{run_doctor, run_status};
+use calypso_cli::app::{
+    run_agents_json, run_agents_plain, run_doctor, run_doctor_json, run_state_status_json,
+    run_state_status_plain, run_status,
+};
 use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
@@ -39,6 +42,13 @@ fn main() {
         [command] if command == "doctor" => {
             println!("{}", run_doctor(&cwd));
         }
+        [command, flag] if command == "doctor" && flag == "--json" => match run_doctor_json(&cwd) {
+            Ok(json) => println!("{json}"),
+            Err(json) => {
+                println!("{json}");
+                std::process::exit(1);
+            }
+        },
         [command, flag, check_id] if command == "doctor" && flag == "--fix" => {
             run_doctor_fix(check_id, &cwd);
         }
@@ -77,6 +87,42 @@ fn main() {
                 }
             }
         }
+        // calypso state status [--json]
+        [command, subcommand] if command == "state" && subcommand == "status" => {
+            match run_state_status_plain(&cwd) {
+                Ok(output) => println!("{output}"),
+                Err(error) => {
+                    eprintln!("state status error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        [command, subcommand, flag]
+            if command == "state" && subcommand == "status" && flag == "--json" =>
+        {
+            match run_state_status_json(&cwd) {
+                Ok(json) => println!("{json}"),
+                Err(error) => {
+                    eprintln!("state status error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // calypso agents [--json]
+        [command] if command == "agents" => match run_agents_plain(&cwd) {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("agents error: {error}");
+                std::process::exit(1);
+            }
+        },
+        [command, flag] if command == "agents" && flag == "--json" => match run_agents_json(&cwd) {
+            Ok(json) => println!("{json}"),
+            Err(error) => {
+                eprintln!("agents error: {error}");
+                std::process::exit(1);
+            }
+        },
         [command, feature_id, flag, worktree_base]
             if command == "feature-start" && flag == "--worktree-base" =>
         {
