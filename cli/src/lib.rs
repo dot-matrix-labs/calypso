@@ -66,6 +66,11 @@ Commands:
   watch               Open the interactive operator surface (live TUI)
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
+  init --json         Initialise and output results as JSON
+  init --status       Show detected repository init status
+  init --refresh      Refresh/overwrite GitHub Actions workflow files
+  init --org <org> --repo <name>
+                      Create upstream GitHub remote during init
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
