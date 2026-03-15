@@ -9,6 +9,7 @@ pub mod error;
 pub mod execution;
 pub mod feature_start;
 pub mod github;
+pub mod headless;
 pub mod init;
 pub mod policy;
 pub mod pr_checklist;

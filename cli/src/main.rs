@@ -6,24 +6,13 @@ use calypso_cli::app::{
 use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
+use calypso_cli::headless::{HeadlessConfig, run_headless};
 use calypso_cli::init::{HostInitEnvironment, run_init_interactive};
 use calypso_cli::state::RepositoryState;
 use calypso_cli::telemetry::{LogFormat, LogLevel};
 use calypso_cli::template::TemplateSet;
 use calypso_cli::tui::{OperatorSurface, run_doctor_surface, run_terminal_surface, run_watch};
 use calypso_cli::{BuildInfo, render_help, render_version};
-
-/// Configuration resolved from CLI flags when `--headless` is active.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeadlessConfig {
-    /// Resolved verbosity: Warn (default), Info (`-v`), or Debug (`-vv`).
-    pub verbosity: LogLevel,
-    /// Output format for log lines.
-    pub log_format: LogFormat,
-    /// If both `-v`/`-vv` and `CALYPSO_LOG` are set, captures the env value
-    /// so the caller can emit a notice.
-    pub env_log_override: Option<String>,
-}
 
 fn build_info() -> BuildInfo<'static> {
     const VERSION: &str = concat!(
@@ -56,9 +45,8 @@ fn main() {
     // If --headless was supplied, build HeadlessConfig and branch early.
     if headless_flags.enabled {
         let config = build_headless_config(&headless_flags);
-        println!("headless mode not yet implemented");
-        let _ = config; // will be used by the orchestrator loop
-        std::process::exit(0);
+        let exit_code = run_headless(&cwd, &config);
+        std::process::exit(exit_code);
     }
 
     match args.as_slice() {
