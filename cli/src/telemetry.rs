@@ -305,9 +305,9 @@ fn ansi_level_prefix(level: LogLevel, use_color: bool) -> (&'static str, &'stati
     match level {
         LogLevel::Error => ("\x1b[31m", "\x1b[0m"), // red
         LogLevel::Warn => ("\x1b[33m", "\x1b[0m"),  // yellow
-        LogLevel::Info => ("\x1b[32m", "\x1b[0m"),   // green
-        LogLevel::Debug => ("\x1b[2m", "\x1b[0m"),   // dim/gray
-        LogLevel::Trace => ("\x1b[2m", "\x1b[0m"),   // dim
+        LogLevel::Info => ("\x1b[32m", "\x1b[0m"),  // green
+        LogLevel::Debug => ("\x1b[2m", "\x1b[0m"),  // dim/gray
+        LogLevel::Trace => ("\x1b[2m", "\x1b[0m"),  // dim
     }
 }
 
@@ -398,7 +398,13 @@ impl Logger {
         message: &str,
         fields: BTreeMap<String, serde_json::Value>,
     ) {
-        self.log_full(level, component.as_str(), Some(event.as_str()), message, fields);
+        self.log_full(
+            level,
+            component.as_str(),
+            Some(event.as_str()),
+            message,
+            fields,
+        );
     }
 
     /// Internal: emit a log entry with all fields.
@@ -489,9 +495,7 @@ impl Logger {
     /// Emit an info-level notice when the `CALYPSO_LOG` env var was set but
     /// a CLI verbosity flag takes precedence.
     pub fn log_level_override_notice(&self, env_value: &str, resolved: LogLevel) {
-        let msg = format!(
-            "verbosity flag overrides CALYPSO_LOG={env_value}; using {resolved}"
-        );
+        let msg = format!("verbosity flag overrides CALYPSO_LOG={env_value}; using {resolved}");
         self.log_event(
             LogLevel::Info,
             Component::Cli,
@@ -584,7 +588,8 @@ impl<'a> LogEntryBuilder<'a> {
     pub fn emit(self) {
         let comp = self.component.map(|c| c.as_str()).unwrap_or("");
         let evt = self.event.map(|e| e.as_str());
-        self.logger.log_full(self.level, comp, evt, &self.message, self.fields);
+        self.logger
+            .log_full(self.level, comp, evt, &self.message, self.fields);
     }
 }
 
