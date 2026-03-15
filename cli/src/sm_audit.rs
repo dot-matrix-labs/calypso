@@ -110,13 +110,7 @@ pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
             }
         };
 
-        audit_blueprint_workflow(
-            stem,
-            &wf,
-            repo_root,
-            &available_gha_files,
-            &mut findings,
-        );
+        audit_blueprint_workflow(stem, &wf, repo_root, &available_gha_files, &mut findings);
     }
 
     // 2) Audit policy gate paths from the default state machine template
@@ -161,9 +155,7 @@ fn suggest_filename(target: &str, available: &BTreeMap<String, GhaWorkflow>) -> 
     let mut best: Option<(&str, usize)> = None;
 
     for filename in available.keys() {
-        let candidate = filename
-            .trim_end_matches(".yml")
-            .trim_end_matches(".yaml");
+        let candidate = filename.trim_end_matches(".yml").trim_end_matches(".yaml");
 
         // Check for substring overlap in either direction
         if candidate.contains(target_base) || target_base.contains(candidate) {
@@ -416,11 +408,7 @@ fn validate_job_keys(
 }
 
 /// Audit orphan and dangling check references within a blueprint workflow.
-fn audit_check_references(
-    stem: &str,
-    wf: &BlueprintWorkflow,
-    findings: &mut Vec<AuditFinding>,
-) {
+fn audit_check_references(stem: &str, wf: &BlueprintWorkflow, findings: &mut Vec<AuditFinding>) {
     let defined_checks: BTreeSet<&str> = wf.checks.keys().map(|k| k.as_str()).collect();
 
     // Collect all check names referenced by states
@@ -466,9 +454,7 @@ fn audit_check_references(
             findings.push(AuditFinding {
                 severity: AuditSeverity::Warning,
                 source: stem.to_string(),
-                message: format!(
-                    "check '{defined}' is defined but not referenced by any state"
-                ),
+                message: format!("check '{defined}' is defined but not referenced by any state"),
                 suggestion: None,
             });
         }
@@ -556,14 +542,13 @@ mod tests {
     fn write_gha_file(repo_root: &Path, filename: &str, name: &str, jobs: &[&str]) {
         let jobs_yaml: String = jobs
             .iter()
-            .map(|j| format!("  {j}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n"))
+            .map(|j| {
+                format!("  {j}:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo ok\n")
+            })
             .collect();
         let content = format!("name: {name}\non: push\njobs:\n{jobs_yaml}");
-        std::fs::write(
-            repo_root.join(".github/workflows").join(filename),
-            content,
-        )
-        .expect("gha file should be written");
+        std::fs::write(repo_root.join(".github/workflows").join(filename), content)
+            .expect("gha file should be written");
     }
 
     #[test]
@@ -593,7 +578,12 @@ mod tests {
         // Write required workflow files that the template policy gates expect
         write_gha_file(&repo_root, "rust-quality.yml", "Rust Quality", &["check"]);
         write_gha_file(&repo_root, "rust-unit.yml", "Rust Unit", &["test"]);
-        write_gha_file(&repo_root, "rust-integration.yml", "Rust Integration", &["test"]);
+        write_gha_file(
+            &repo_root,
+            "rust-integration.yml",
+            "Rust Integration",
+            &["test"],
+        );
         write_gha_file(&repo_root, "rust-e2e.yml", "Rust E2E", &["test"]);
         write_gha_file(&repo_root, "rust-coverage.yml", "Rust Coverage", &["test"]);
         write_gha_file(&repo_root, "release-cli.yml", "Release CLI", &["release"]);
@@ -608,8 +598,7 @@ mod tests {
             .findings
             .iter()
             .filter(|f| {
-                f.severity == AuditSeverity::Error
-                    && f.source.starts_with("template policy_gate")
+                f.severity == AuditSeverity::Error && f.source.starts_with("template policy_gate")
             })
             .collect();
         assert!(
@@ -683,11 +672,13 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].severity, AuditSeverity::Warning);
         assert!(findings[0].message.contains("mismatch"));
-        assert!(findings[0]
-            .suggestion
-            .as_ref()
-            .unwrap()
-            .contains("Quality gate"));
+        assert!(
+            findings[0]
+                .suggestion
+                .as_ref()
+                .unwrap()
+                .contains("Quality gate")
+        );
 
         std::fs::remove_dir_all(repo_root).ok();
     }
@@ -817,9 +808,7 @@ checks:
 
     #[test]
     fn render_audit_clean() {
-        let audit = StateMachineAudit {
-            findings: vec![],
-        };
+        let audit = StateMachineAudit { findings: vec![] };
         let output = render_audit(&audit);
         assert_eq!(output, "State machine audit: all references valid");
     }
