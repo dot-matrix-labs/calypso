@@ -190,6 +190,22 @@ impl InitEnvironment for FakeEnv {
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
         Ok(path.join(".git").join("hooks"))
     }
+
+    fn save_init_state(
+        &self,
+        _repo_root: &Path,
+        _progress: &InitProgress,
+    ) -> Result<(), InitError> {
+        // No-op for fake environment — avoid writing to fake paths.
+        Ok(())
+    }
+
+    fn load_init_state(
+        &self,
+        _repo_root: &Path,
+    ) -> Result<Option<InitProgress>, InitError> {
+        Ok(None)
+    }
 }
 
 // ── tests ─────────────────────────────────────────────────────────────────────
