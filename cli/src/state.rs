@@ -55,6 +55,8 @@ pub struct RepositoryState {
     #[serde(default)]
     pub identity: RepositoryIdentity,
     /// Names of configured providers (no secrets).
+    // FUTURE: #42/#48 — parsed and persisted but not yet enforced; provider registry
+    // integration is pending multi-vendor support.
     #[serde(default)]
     pub providers: Vec<String>,
     // FUTURE: #42 — token name or keychain reference for GitHub auth; never the raw token
