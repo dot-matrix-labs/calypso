@@ -1423,6 +1423,538 @@ fn doctor_check_views_from_report(report: &crate::doctor::DoctorReport) -> Vec<D
         .collect()
 }
 
+// ── State Machine TUI surface ─────────────────────────────────────────────────
+
+/// The ordered feature lifecycle pipeline steps (excludes side states Blocked/Aborted).
+fn sm_pipeline() -> [WorkflowState; 9] {
+    [
+        WorkflowState::New,
+        WorkflowState::PrdReview,
+        WorkflowState::ArchitecturePlan,
+        WorkflowState::ScaffoldTdd,
+        WorkflowState::ArchitectureReview,
+        WorkflowState::Implementation,
+        WorkflowState::QaValidation,
+        WorkflowState::ReleaseReady,
+        WorkflowState::Done,
+    ]
+}
+
+fn sm_step_label(state: &WorkflowState) -> &'static str {
+    match state {
+        WorkflowState::New => "New",
+        WorkflowState::PrdReview => "PRD Review",
+        WorkflowState::ArchitecturePlan => "Architecture Plan",
+        WorkflowState::ScaffoldTdd => "Scaffold TDD",
+        WorkflowState::ArchitectureReview => "Architecture Review",
+        WorkflowState::Implementation => "Implementation",
+        WorkflowState::QaValidation => "QA Validation",
+        WorkflowState::ReleaseReady => "Release Ready",
+        WorkflowState::Done => "Done",
+        WorkflowState::Blocked => "Blocked",
+        WorkflowState::Aborted => "Aborted",
+        WorkflowState::WaitingForHuman => "Implementation",
+        WorkflowState::ReadyForReview => "Release Ready",
+    }
+}
+
+/// Status of a node in the state machine tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SmStatus {
+    Pending,
+    Active,
+    Done,
+    Failed,
+    Manual,
+    Blocked,
+}
+
+impl SmStatus {
+    fn icon(self) -> &'static str {
+        match self {
+            Self::Pending => "○",
+            Self::Active => "●",
+            Self::Done => "✓",
+            Self::Failed => "✗",
+            Self::Manual => "◆",
+            Self::Blocked => "⚠",
+        }
+    }
+}
+
+/// Identity of a node in the tree, used for expand/collapse operations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum SmNodeId {
+    PipelineStep(usize),
+    GateGroup(usize),
+    Gate { group: usize, gate: usize },
+}
+
+/// A flat visible row in the rendered state machine tree.
+#[derive(Debug, Clone)]
+struct SmRow {
+    node_id: SmNodeId,
+    depth: usize,
+    label: String,
+    status: SmStatus,
+    is_expandable: bool,
+    is_expanded: bool,
+    /// Number of concurrent activities (> 1 shows "N -").
+    activity_count: usize,
+    /// Running agent session ID, if any (triggers "*" indicator).
+    agent_session_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct SmGateGroup {
+    label: String,
+    status: SmStatus,
+    gates: Vec<SmGate>,
+    /// Number of pending gates (= concurrent CI-style activities in progress).
+    pending_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct SmGate {
+    label: String,
+    status: SmStatus,
+}
+
+#[derive(Debug, Clone)]
+struct SmSessionSnap {
+    session_id: String,
+    is_running: bool,
+}
+
+/// Events emitted by the state machine surface.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SmEvent {
+    Continue,
+    Quit,
+    /// Switch to the Agents tab, optionally pre-selecting a session.
+    JumpToAgents(Option<String>),
+}
+
+/// Interactive state machine tree view with collapsible sub-state-machines.
+///
+/// The top-level rows are the feature lifecycle pipeline steps. Each active step can
+/// be expanded (Enter) to reveal its gate groups (sub-state-machines). Gate groups
+/// can in turn be expanded to show individual gates. Only one sub-state-machine may
+/// be open at a time at each nesting level; Esc collapses from the inside out.
+pub struct StateMachineSurface {
+    workflow_state: WorkflowState,
+    gate_groups: Vec<SmGateGroup>,
+    sessions: Vec<SmSessionSnap>,
+    /// Which pipeline step index is currently expanded (one at a time).
+    expanded_step: Option<usize>,
+    /// Which gate group index is expanded within the expanded step (one at a time).
+    expanded_gate_group: Option<usize>,
+    /// Cursor position (index into the visible row list).
+    selected: usize,
+    /// Scroll offset: index of the first visible row.
+    scroll: usize,
+}
+
+impl Default for StateMachineSurface {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl StateMachineSurface {
+    /// Create an empty surface (no feature loaded).
+    pub fn new() -> Self {
+        Self {
+            workflow_state: WorkflowState::New,
+            gate_groups: Vec::new(),
+            sessions: Vec::new(),
+            expanded_step: None,
+            expanded_gate_group: None,
+            selected: 0,
+            scroll: 0,
+        }
+    }
+
+    /// Build the surface from a loaded feature state.
+    pub fn from_feature_state(feature: &FeatureState) -> Self {
+        let gate_groups = feature
+            .gate_groups
+            .iter()
+            .map(|group| {
+                let pending_count = group
+                    .gates
+                    .iter()
+                    .filter(|g| g.status == GateStatus::Pending)
+                    .count();
+                SmGateGroup {
+                    label: group.label.clone(),
+                    status: sm_gate_group_status(group.rollup_status()),
+                    gates: group
+                        .gates
+                        .iter()
+                        .map(|gate| SmGate {
+                            label: gate.label.clone(),
+                            status: sm_gate_status(gate.status.clone()),
+                        })
+                        .collect(),
+                    pending_count,
+                }
+            })
+            .collect();
+
+        let sessions = feature
+            .active_sessions
+            .iter()
+            .map(|s| SmSessionSnap {
+                session_id: s.session_id.clone(),
+                is_running: matches!(
+                    s.status,
+                    AgentSessionStatus::Running | AgentSessionStatus::WaitingForHuman
+                ),
+            })
+            .collect();
+
+        // Normalise deprecated variant aliases for pipeline position lookup.
+        let canonical = match &feature.workflow_state {
+            WorkflowState::WaitingForHuman => WorkflowState::Implementation,
+            WorkflowState::ReadyForReview => WorkflowState::ReleaseReady,
+            other => other.clone(),
+        };
+        let pipeline = sm_pipeline();
+        let current_step_idx = pipeline.iter().position(|s| *s == canonical);
+
+        // Auto-expand the active step when gate groups are present.
+        let expanded_step = if feature.gate_groups.is_empty() {
+            None
+        } else {
+            current_step_idx
+        };
+
+        let mut surface = Self {
+            workflow_state: feature.workflow_state.clone(),
+            gate_groups,
+            sessions,
+            expanded_step,
+            expanded_gate_group: None,
+            selected: 0,
+            scroll: 0,
+        };
+
+        // Place cursor on the active pipeline step.
+        if let Some(idx) = current_step_idx {
+            let rows = surface.visible_rows();
+            surface.selected = rows
+                .iter()
+                .position(|r| r.node_id == SmNodeId::PipelineStep(idx))
+                .unwrap_or(0);
+        }
+
+        surface
+    }
+
+    /// Build the flat visible row list, reflecting the current expand/collapse state.
+    fn visible_rows(&self) -> Vec<SmRow> {
+        let pipeline = sm_pipeline();
+        let canonical = match &self.workflow_state {
+            WorkflowState::WaitingForHuman => WorkflowState::Implementation,
+            WorkflowState::ReadyForReview => WorkflowState::ReleaseReady,
+            other => other.clone(),
+        };
+        let is_side_state = matches!(
+            self.workflow_state,
+            WorkflowState::Blocked | WorkflowState::Aborted
+        );
+        let current_idx = if is_side_state {
+            None
+        } else {
+            pipeline.iter().position(|s| *s == canonical)
+        };
+
+        let mut rows: Vec<SmRow> = Vec::new();
+
+        for (i, step) in pipeline.iter().enumerate() {
+            let is_current = current_idx == Some(i);
+            let is_before = current_idx.is_some_and(|pos| i < pos);
+
+            let status = if is_before {
+                SmStatus::Done
+            } else if is_current {
+                SmStatus::Active
+            } else {
+                SmStatus::Pending
+            };
+
+            let has_children = is_current && !self.gate_groups.is_empty();
+            let is_expanded = self.expanded_step == Some(i);
+
+            let running: Vec<&SmSessionSnap> = if is_current {
+                self.sessions.iter().filter(|s| s.is_running).collect()
+            } else {
+                Vec::new()
+            };
+
+            rows.push(SmRow {
+                node_id: SmNodeId::PipelineStep(i),
+                depth: 0,
+                label: sm_step_label(step).to_string(),
+                status,
+                is_expandable: has_children,
+                is_expanded,
+                activity_count: running.len(),
+                agent_session_id: running.first().map(|s| s.session_id.clone()),
+            });
+
+            if is_expanded {
+                for (gi, group) in self.gate_groups.iter().enumerate() {
+                    let group_expanded = self.expanded_gate_group == Some(gi);
+                    rows.push(SmRow {
+                        node_id: SmNodeId::GateGroup(gi),
+                        depth: 1,
+                        label: group.label.clone(),
+                        status: group.status,
+                        is_expandable: !group.gates.is_empty(),
+                        is_expanded: group_expanded,
+                        activity_count: group.pending_count,
+                        agent_session_id: None,
+                    });
+
+                    if group_expanded {
+                        for (ki, gate) in group.gates.iter().enumerate() {
+                            rows.push(SmRow {
+                                node_id: SmNodeId::Gate {
+                                    group: gi,
+                                    gate: ki,
+                                },
+                                depth: 2,
+                                label: gate.label.clone(),
+                                status: gate.status,
+                                is_expandable: false,
+                                is_expanded: false,
+                                activity_count: 0,
+                                agent_session_id: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Append side-state rows when the feature is blocked or aborted.
+        if matches!(self.workflow_state, WorkflowState::Blocked) {
+            rows.push(SmRow {
+                node_id: SmNodeId::PipelineStep(pipeline.len()),
+                depth: 0,
+                label: "Blocked".to_string(),
+                status: SmStatus::Blocked,
+                is_expandable: false,
+                is_expanded: false,
+                activity_count: 0,
+                agent_session_id: None,
+            });
+        }
+        if matches!(self.workflow_state, WorkflowState::Aborted) {
+            rows.push(SmRow {
+                node_id: SmNodeId::PipelineStep(pipeline.len() + 1),
+                depth: 0,
+                label: "Aborted".to_string(),
+                status: SmStatus::Failed,
+                is_expandable: false,
+                is_expanded: false,
+                activity_count: 0,
+                agent_session_id: None,
+            });
+        }
+
+        rows
+    }
+
+    /// Render the surface into the full terminal width of the paned layout.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        const HEADER_ROWS: u16 = 4;
+        let w = layout.cols as usize;
+        let content_rows = layout.content_rows;
+        let viewport_height = content_rows.saturating_sub(HEADER_ROWS) as usize;
+
+        write_at(
+            stdout,
+            0,
+            0,
+            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 1, "│  State Machine", w)?;
+        write_at(
+            stdout,
+            0,
+            2,
+            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 3, "", w)?;
+
+        let rows = self.visible_rows();
+        let visible_start = self.scroll.min(rows.len().saturating_sub(1));
+
+        let mut render_row: u16 = HEADER_ROWS;
+        for (list_idx, sm_row) in rows.iter().enumerate() {
+            if render_row >= content_rows {
+                break;
+            }
+            if list_idx < visible_start {
+                continue;
+            }
+            if list_idx >= visible_start + viewport_height {
+                break;
+            }
+
+            let cursor = if list_idx == self.selected {
+                "▶"
+            } else {
+                " "
+            };
+            let expand_icon = if sm_row.is_expandable {
+                if sm_row.is_expanded { "▾" } else { "▸" }
+            } else {
+                " "
+            };
+            let indent: String = "  ".repeat(sm_row.depth);
+
+            // Activity indicator: `N *` for agentic (with count), `*` for single agent,
+            // `N -` for N concurrent non-agentic activities.
+            let activity = if sm_row.agent_session_id.is_some() {
+                if sm_row.activity_count > 1 {
+                    format!("  {} *", sm_row.activity_count)
+                } else {
+                    "  *".to_string()
+                }
+            } else if sm_row.activity_count > 1 {
+                format!("  {} -", sm_row.activity_count)
+            } else {
+                String::new()
+            };
+
+            let line = format!(
+                "  {} {} {} {}{}{}",
+                cursor,
+                expand_icon,
+                sm_row.status.icon(),
+                indent,
+                sm_row.label,
+                activity,
+            );
+            write_at(stdout, 0, render_row, &line, w)?;
+            render_row += 1;
+        }
+
+        while render_row < content_rows {
+            write_at(stdout, 0, render_row, "", w)?;
+            render_row += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Handle a key event, returning an `SmEvent`.
+    pub fn handle_key_event(&mut self, event: KeyEvent) -> SmEvent {
+        let rows = self.visible_rows();
+        let row_count = rows.len();
+
+        match event.code {
+            KeyCode::Up => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Down => {
+                if self.selected + 1 < row_count {
+                    self.selected += 1;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Enter => {
+                // Expand the selected row if it has children and is not yet open.
+                if let Some(row) = rows.get(self.selected).cloned()
+                    && row.is_expandable
+                    && !row.is_expanded
+                {
+                    self.expand_node(row.node_id);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Esc => {
+                // Collapse from innermost outward; quit when nothing remains open.
+                if self.expanded_gate_group.is_some() {
+                    self.expanded_gate_group = None;
+                    SmEvent::Continue
+                } else if self.expanded_step.is_some() {
+                    self.expanded_step = None;
+                    SmEvent::Continue
+                } else {
+                    SmEvent::Quit
+                }
+            }
+            KeyCode::Char('a') => {
+                // Jump to the Agents tab, carrying the session ID if one is active here.
+                let session_id = rows
+                    .get(self.selected)
+                    .and_then(|r| r.agent_session_id.clone());
+                SmEvent::JumpToAgents(session_id)
+            }
+            KeyCode::Char('q') => SmEvent::Quit,
+            _ => SmEvent::Continue,
+        }
+    }
+
+    fn expand_node(&mut self, node_id: SmNodeId) {
+        match node_id {
+            SmNodeId::PipelineStep(i) => {
+                // Opening a different step closes any previously open gate group.
+                self.expanded_step = Some(i);
+                self.expanded_gate_group = None;
+            }
+            SmNodeId::GateGroup(gi) => {
+                self.expanded_gate_group = Some(gi);
+            }
+            SmNodeId::Gate { .. } => {}
+        }
+    }
+
+    /// Adjust the scroll offset to keep the cursor within the visible viewport.
+    fn adjust_scroll(&mut self, total_rows: usize) {
+        // Use a conservative viewport estimate; real size comes from the layout at render time.
+        const VIEWPORT: usize = 15;
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + VIEWPORT {
+            self.scroll = self.selected + 1 - VIEWPORT;
+        }
+        if total_rows > VIEWPORT && self.scroll + VIEWPORT > total_rows {
+            self.scroll = total_rows - VIEWPORT;
+        }
+    }
+}
+
+fn sm_gate_status(status: GateStatus) -> SmStatus {
+    match status {
+        GateStatus::Pending => SmStatus::Pending,
+        GateStatus::Passing => SmStatus::Done,
+        GateStatus::Failing => SmStatus::Failed,
+        GateStatus::Manual => SmStatus::Manual,
+    }
+}
+
+fn sm_gate_group_status(status: GateGroupStatus) -> SmStatus {
+    match status {
+        GateGroupStatus::Passing => SmStatus::Done,
+        GateGroupStatus::Pending => SmStatus::Pending,
+        GateGroupStatus::Manual => SmStatus::Manual,
+        GateGroupStatus::Blocked => SmStatus::Failed,
+    }
+}
+
 // ── App shell (three-tab TUI) ─────────────────────────────────────────────────
 
 /// The three top-level screens reachable with Left/Right arrow keys.
@@ -1448,7 +1980,7 @@ impl AppTab {
     fn screen_hints(self) -> &'static str {
         match self {
             AppTab::Doctor => "[↑/↓] Select  [f] Fix  [r] Refresh",
-            AppTab::StateMachine => "[↑/↓] Scroll",
+            AppTab::StateMachine => "[↑/↓] Navigate  [Enter] Expand  [Esc] Collapse  [a] Agent",
             AppTab::Agents => "[Tab] Chat  [Ctrl+C] Interrupt",
         }
     }
@@ -1482,6 +2014,8 @@ pub enum AppEvent {
 pub struct AppShell {
     pub tab: AppTab,
     pub doctor: DoctorSurface,
+    /// State machine surface (always present; populated from feature state when available).
+    pub sm: StateMachineSurface,
     /// Operator surface used for the Agents tab (absent when no feature is active).
     pub operator: Option<OperatorSurface>,
 }
@@ -1491,8 +2025,14 @@ impl AppShell {
         Self {
             tab: AppTab::Doctor,
             doctor,
+            sm: StateMachineSurface::new(),
             operator: None,
         }
+    }
+
+    pub fn with_sm(mut self, sm: StateMachineSurface) -> Self {
+        self.sm = sm;
+        self
     }
 
     pub fn with_operator(mut self, surface: OperatorSurface) -> Self {
@@ -1523,7 +2063,14 @@ impl AppShell {
                 DoctorSurfaceEvent::Continue => AppEvent::Continue,
                 DoctorSurfaceEvent::Quit => AppEvent::Quit,
             },
-            AppTab::StateMachine => placeholder_key_event(event),
+            AppTab::StateMachine => match self.sm.handle_key_event(event) {
+                SmEvent::Continue => AppEvent::Continue,
+                SmEvent::Quit => AppEvent::Quit,
+                SmEvent::JumpToAgents(_session_id) => {
+                    self.tab = AppTab::Agents;
+                    AppEvent::Continue
+                }
+            },
             AppTab::Agents => {
                 if let Some(op) = &mut self.operator {
                     match op.handle_key_event(event) {
@@ -1541,7 +2088,7 @@ impl AppShell {
     pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
         match self.tab {
             AppTab::Doctor => self.doctor.render_paned(stdout, layout)?,
-            AppTab::StateMachine => render_state_machine_scaffold(stdout, layout)?,
+            AppTab::StateMachine => self.sm.render_paned(stdout, layout)?,
             AppTab::Agents => {
                 if let Some(op) = &self.operator {
                     op.render_paned(stdout, layout)?;
@@ -1615,15 +2162,6 @@ fn render_placeholder_screen(
         write_at(stdout, 0, row, "", w)?;
     }
     Ok(())
-}
-
-fn render_state_machine_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
-    render_placeholder_screen(
-        stdout,
-        layout,
-        "State Machine",
-        "Pipeline and gate view — coming soon.",
-    )
 }
 
 fn render_agents_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
@@ -1707,13 +2245,17 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     // Exercise all three tabs and screen-specific keys. Resize first activates paned rendering.
     let events = vec![
         Some(crossterm::event::Event::Resize(80, 24)),
-        // Navigate to State Machine and render it.
+        // Navigate to State Machine and render the new SM surface.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Right))),
-        // Navigate to Agents and render the scaffold placeholder.
-        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Right))),
-        // Navigate back to State Machine.
+        // Exercise SM navigation: Down / Up / Enter (no-op on leaf) / 'a' (jump to Agents).
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Down))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Up))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Enter))),
+        Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Char(
+            'a',
+        )))),
+        // 'a' switched to Agents tab; navigate back to SM then back to Doctor.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Left))),
-        // Navigate back to Doctor.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Left))),
         // Exercise doctor-specific keys while on Doctor tab.
         Some(crossterm::event::Event::Key(KeyEvent::from(KeyCode::Down))),
