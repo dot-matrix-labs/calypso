@@ -800,3 +800,603 @@ impl EventStream {
             .unwrap_or_default()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: create a logger that writes JSON to an in-memory buffer.
+    fn json_logger(level: LogLevel) -> (Logger, Arc<Mutex<Vec<u8>>>) {
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Box<dyn Write + Send> = Box::new(BufWriter(Arc::clone(&buf)));
+        let logger = Logger {
+            min_level: level,
+            format: LogFormat::Json,
+            context: CorrelationContext::default(),
+            writer: Arc::new(Mutex::new(writer)),
+        };
+        (logger, buf)
+    }
+
+    /// Helper: create a logger that writes Text to an in-memory buffer.
+    fn text_logger(level: LogLevel) -> (Logger, Arc<Mutex<Vec<u8>>>) {
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Box<dyn Write + Send> = Box::new(BufWriter(Arc::clone(&buf)));
+        let logger = Logger {
+            min_level: level,
+            format: LogFormat::Text,
+            context: CorrelationContext::default(),
+            writer: Arc::new(Mutex::new(writer)),
+        };
+        (logger, buf)
+    }
+
+    /// A simple writer that delegates to a shared `Vec<u8>`.
+    struct BufWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for BufWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn buf_to_string(buf: &Arc<Mutex<Vec<u8>>>) -> String {
+        String::from_utf8(buf.lock().unwrap().clone()).unwrap()
+    }
+
+    // -- Component --
+
+    #[test]
+    fn component_as_str_all_variants() {
+        assert_eq!(Component::Doctor.as_str(), "doctor");
+        assert_eq!(Component::StateMachine.as_str(), "statemachine");
+        assert_eq!(Component::Gate.as_str(), "gate");
+        assert_eq!(Component::Agent.as_str(), "agent");
+        assert_eq!(Component::Github.as_str(), "github");
+        assert_eq!(Component::Git.as_str(), "git");
+        assert_eq!(Component::Init.as_str(), "init");
+        assert_eq!(Component::Cli.as_str(), "cli");
+    }
+
+    #[test]
+    fn component_display() {
+        assert_eq!(format!("{}", Component::Doctor), "doctor");
+        assert_eq!(format!("{}", Component::Agent), "agent");
+    }
+
+    #[test]
+    fn component_serialize_json() {
+        let json = serde_json::to_string(&Component::Git).unwrap();
+        assert_eq!(json, "\"git\"");
+    }
+
+    // -- LogEvent --
+
+    #[test]
+    fn log_event_as_str_all_variants() {
+        assert_eq!(LogEvent::StateTransition.as_str(), "state_transition");
+        assert_eq!(LogEvent::GateEvaluated.as_str(), "gate_evaluated");
+        assert_eq!(LogEvent::AgentStarted.as_str(), "agent_started");
+        assert_eq!(LogEvent::AgentCompleted.as_str(), "agent_completed");
+        assert_eq!(LogEvent::DoctorCheck.as_str(), "doctor_check");
+        assert_eq!(LogEvent::DoctorFailed.as_str(), "doctor_failed");
+        assert_eq!(LogEvent::Startup.as_str(), "startup");
+        assert_eq!(LogEvent::Shutdown.as_str(), "shutdown");
+    }
+
+    #[test]
+    fn log_event_display() {
+        assert_eq!(format!("{}", LogEvent::Startup), "startup");
+        assert_eq!(format!("{}", LogEvent::Shutdown), "shutdown");
+    }
+
+    #[test]
+    fn log_event_serialize_json() {
+        let json = serde_json::to_string(&LogEvent::GateEvaluated).unwrap();
+        assert_eq!(json, "\"gate_evaluated\"");
+    }
+
+    // -- LogFormat --
+
+    #[test]
+    fn log_format_equality() {
+        assert_eq!(LogFormat::Json, LogFormat::Json);
+        assert_eq!(LogFormat::Text, LogFormat::Text);
+        assert_ne!(LogFormat::Json, LogFormat::Text);
+    }
+
+    // -- LogLevel --
+
+    #[test]
+    fn log_level_trace_from_str_and_as_str() {
+        assert_eq!(LogLevel::from_str("trace"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::from_str("TRACE"), Some(LogLevel::Trace));
+        assert_eq!(LogLevel::Trace.as_str(), "trace");
+    }
+
+    #[test]
+    fn log_level_display() {
+        assert_eq!(format!("{}", LogLevel::Trace), "trace");
+        assert_eq!(format!("{}", LogLevel::Error), "error");
+    }
+
+    #[test]
+    fn log_level_from_str_invalid_returns_none() {
+        assert_eq!(LogLevel::from_str("bogus"), None);
+    }
+
+    // -- Text format --
+
+    #[test]
+    fn text_format_output_contains_level_and_message() {
+        let (logger, buf) = text_logger(LogLevel::Info);
+        logger.info("hello world");
+        let output = buf_to_string(&buf);
+        assert!(output.contains("INFO"), "expected INFO in: {output}");
+        assert!(output.contains("hello world"), "expected message in: {output}");
+        // Component should be "-" when not set
+        assert!(output.contains("[-]"), "expected [-] for no component in: {output}");
+    }
+
+    #[test]
+    fn text_format_with_component() {
+        let (logger, buf) = text_logger(LogLevel::Debug);
+        logger.log_event(
+            LogLevel::Info,
+            Component::Doctor,
+            LogEvent::DoctorCheck,
+            "checking",
+            BTreeMap::new(),
+        );
+        let output = buf_to_string(&buf);
+        assert!(output.contains("[doctor]"), "expected [doctor] in: {output}");
+        assert!(output.contains("checking"), "expected message in: {output}");
+    }
+
+    // -- ANSI colour helpers --
+
+    #[test]
+    fn ansi_level_prefix_no_color() {
+        let (pre, suf) = ansi_level_prefix(LogLevel::Error, false);
+        assert!(pre.is_empty());
+        assert!(suf.is_empty());
+    }
+
+    #[test]
+    fn ansi_level_prefix_with_color() {
+        let (pre, suf) = ansi_level_prefix(LogLevel::Error, true);
+        assert_eq!(pre, "\x1b[31m"); // red
+        assert_eq!(suf, "\x1b[0m");
+
+        let (pre, _) = ansi_level_prefix(LogLevel::Warn, true);
+        assert_eq!(pre, "\x1b[33m"); // yellow
+
+        let (pre, _) = ansi_level_prefix(LogLevel::Info, true);
+        assert_eq!(pre, "\x1b[32m"); // green
+
+        let (pre, _) = ansi_level_prefix(LogLevel::Debug, true);
+        assert_eq!(pre, "\x1b[2m"); // dim
+
+        let (pre, _) = ansi_level_prefix(LogLevel::Trace, true);
+        assert_eq!(pre, "\x1b[2m"); // dim
+    }
+
+    // -- is_tty --
+
+    #[test]
+    fn is_tty_returns_false_in_tests() {
+        // In CI and test environments, stderr is not a TTY.
+        assert!(!is_tty());
+    }
+
+    // -- log_event() --
+
+    #[test]
+    fn log_event_includes_component_and_event_in_json() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger.log_event(
+            LogLevel::Info,
+            Component::Gate,
+            LogEvent::GateEvaluated,
+            "gate passed",
+            BTreeMap::new(),
+        );
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["component"], "gate");
+        assert_eq!(parsed["event"], "gate_evaluated");
+        assert_eq!(parsed["message"], "gate passed");
+        assert_eq!(parsed["level"], "info");
+    }
+
+    // -- log_level_override_notice --
+
+    #[test]
+    fn log_level_override_notice_emits_expected_message() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger.log_level_override_notice("debug", LogLevel::Warn);
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["component"], "cli");
+        assert_eq!(parsed["event"], "startup");
+        let msg = parsed["message"].as_str().unwrap();
+        assert!(msg.contains("CALYPSO_LOG=debug"), "expected env ref in: {msg}");
+        assert!(msg.contains("warn"), "expected resolved level in: {msg}");
+    }
+
+    // -- LogEntryBuilder with component and event --
+
+    #[test]
+    fn entry_builder_with_component_and_event() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger
+            .entry(LogLevel::Info, "builder test")
+            .component(Component::Agent)
+            .event(LogEvent::AgentStarted)
+            .field("key", "value")
+            .emit();
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["component"], "agent");
+        assert_eq!(parsed["event"], "agent_started");
+        assert_eq!(parsed["message"], "builder test");
+        assert_eq!(parsed["fields"]["key"], "value");
+    }
+
+    #[test]
+    fn entry_builder_without_component_omits_field() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger
+            .entry(LogLevel::Info, "no comp")
+            .emit();
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert!(parsed.get("component").is_none(), "component should be omitted");
+        assert!(parsed.get("event").is_none(), "event should be omitted");
+    }
+
+    // -- Redaction --
+
+    #[test]
+    fn redaction_of_secret_keys() {
+        assert_eq!(redact_if_secret("api_token", "abc123"), "[REDACTED]");
+        assert_eq!(redact_if_secret("secret_key", "xyz"), "[REDACTED]");
+        assert_eq!(redact_if_secret("password", "pass"), "[REDACTED]");
+        assert_eq!(redact_if_secret("credential_file", "f"), "[REDACTED]");
+        assert_eq!(redact_if_secret("api_key", "k"), "[REDACTED]");
+        assert_eq!(redact_if_secret("auth_header", "h"), "[REDACTED]");
+        assert_eq!(redact_if_secret("host", "example.com"), "example.com");
+    }
+
+    #[test]
+    fn entry_builder_redacts_secret_fields() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger
+            .entry(LogLevel::Info, "redact test")
+            .field("auth_token", "super-secret")
+            .field("hostname", "example.com")
+            .emit();
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["fields"]["auth_token"], "[REDACTED]");
+        assert_eq!(parsed["fields"]["hostname"], "example.com");
+    }
+
+    // -- Filtering by level --
+
+    #[test]
+    fn log_below_min_level_is_suppressed() {
+        let (logger, buf) = json_logger(LogLevel::Warn);
+        logger.info("should be suppressed");
+        logger.debug("also suppressed");
+        logger.warn("should appear");
+        let output = buf_to_string(&buf);
+        assert!(!output.contains("suppressed"));
+        assert!(output.contains("should appear"));
+    }
+
+    // -- CorrelationContext --
+
+    #[test]
+    fn correlation_context_appears_in_json() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        let logger = logger.with_context(
+            CorrelationContext::new()
+                .with_feature_id("feat-1")
+                .with_session_id("sess-1")
+                .with_thread_id("thread-1"),
+        );
+        logger.info("ctx test");
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["feature_id"], "feat-1");
+        assert_eq!(parsed["session_id"], "sess-1");
+        assert_eq!(parsed["thread_id"], "thread-1");
+    }
+
+    // -- with_format / with_min_level builders --
+
+    #[test]
+    fn with_format_switches_to_text() {
+        let buf = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let writer: Box<dyn Write + Send> = Box::new(BufWriter(Arc::clone(&buf)));
+        let logger = Logger {
+            min_level: LogLevel::Info,
+            format: LogFormat::Json,
+            context: CorrelationContext::default(),
+            writer: Arc::new(Mutex::new(writer)),
+        };
+        let logger = logger.with_format(LogFormat::Text);
+        logger.info("format test");
+        let output = buf_to_string(&buf);
+        // Text format uses uppercase level and brackets
+        assert!(output.contains("INFO"), "expected text format");
+        assert!(!output.starts_with('{'), "should not be JSON");
+    }
+
+    #[test]
+    fn with_min_level_changes_threshold() {
+        let (logger, buf) = json_logger(LogLevel::Info);
+        let logger = logger.with_min_level(LogLevel::Error);
+        logger.warn("nope");
+        logger.error("yes");
+        let output = buf_to_string(&buf);
+        assert!(!output.contains("nope"));
+        assert!(output.contains("yes"));
+    }
+
+    // -- min_level accessor --
+
+    #[test]
+    fn min_level_returns_configured_level() {
+        let (logger, _) = json_logger(LogLevel::Warn);
+        assert_eq!(logger.min_level(), LogLevel::Warn);
+    }
+
+    // -- Logger Debug impl --
+
+    #[test]
+    fn logger_debug_impl() {
+        let (logger, _) = json_logger(LogLevel::Info);
+        let debug = format!("{:?}", logger);
+        assert!(debug.contains("Logger"));
+        assert!(debug.contains("min_level"));
+    }
+
+    // -- field_json on builder --
+
+    #[test]
+    fn entry_builder_field_json() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        logger
+            .entry(LogLevel::Info, "json field")
+            .field_json("count", serde_json::json!(42))
+            .emit();
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["fields"]["count"], 42);
+    }
+
+    // -- days_to_ymd --
+
+    #[test]
+    fn days_to_ymd_epoch() {
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn days_to_ymd_known_date() {
+        // 2024-01-01 is day 19723
+        assert_eq!(days_to_ymd(19723), (2024, 1, 1));
+    }
+
+    // -- EventKind Display --
+
+    #[test]
+    fn event_kind_display() {
+        assert_eq!(format!("{}", EventKind::StateTransition), "state_transition");
+        assert_eq!(format!("{}", EventKind::GateChanged), "gate_changed");
+        assert_eq!(format!("{}", EventKind::SessionStarted), "session_started");
+        assert_eq!(format!("{}", EventKind::SessionEnded), "session_ended");
+        assert_eq!(format!("{}", EventKind::GitOp), "git_op");
+        assert_eq!(format!("{}", EventKind::GithubApiCall), "github_api_call");
+    }
+
+    // -- Event constructors --
+
+    #[test]
+    fn event_state_transition() {
+        let e = Event::state_transition("idle", "running", Some("f1"));
+        assert_eq!(e.kind, EventKind::StateTransition);
+        assert_eq!(e.payload["from"], "idle");
+        assert_eq!(e.payload["to"], "running");
+        assert_eq!(e.payload["feature_id"], "f1");
+    }
+
+    #[test]
+    fn event_state_transition_no_feature() {
+        let e = Event::state_transition("idle", "running", None);
+        assert!(!e.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_gate_changed() {
+        let e = Event::gate_changed("g1", "pass", Some("f2"));
+        assert_eq!(e.kind, EventKind::GateChanged);
+        assert_eq!(e.payload["gate_id"], "g1");
+        assert_eq!(e.payload["status"], "pass");
+    }
+
+    #[test]
+    fn event_gate_changed_no_feature() {
+        let e = Event::gate_changed("g1", "pass", None);
+        assert!(!e.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_session_started() {
+        let e = Event::session_started("s1", Some("f3"));
+        assert_eq!(e.kind, EventKind::SessionStarted);
+        assert_eq!(e.payload["session_id"], "s1");
+    }
+
+    #[test]
+    fn event_session_started_no_feature() {
+        let e = Event::session_started("s1", None);
+        assert!(!e.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_session_ended() {
+        let e = Event::session_ended("s1", "success", Some("f4"));
+        assert_eq!(e.kind, EventKind::SessionEnded);
+        assert_eq!(e.payload["outcome"], "success");
+    }
+
+    #[test]
+    fn event_session_ended_no_feature() {
+        let e = Event::session_ended("s1", "fail", None);
+        assert!(!e.payload.contains_key("feature_id"));
+    }
+
+    #[test]
+    fn event_git_op() {
+        let e = Event::git_op("clone", Some("https://example.com"));
+        assert_eq!(e.kind, EventKind::GitOp);
+        assert_eq!(e.payload["operation"], "clone");
+        assert_eq!(e.payload["detail"], "https://example.com");
+    }
+
+    #[test]
+    fn event_git_op_no_detail() {
+        let e = Event::git_op("fetch", None);
+        assert!(!e.payload.contains_key("detail"));
+    }
+
+    #[test]
+    fn event_github_api_call() {
+        let e = Event::github_api_call("/repos", Some(200));
+        assert_eq!(e.kind, EventKind::GithubApiCall);
+        assert_eq!(e.payload["endpoint"], "/repos");
+        assert_eq!(e.payload["status_code"], 200);
+    }
+
+    #[test]
+    fn event_github_api_call_no_status() {
+        let e = Event::github_api_call("/repos", None);
+        assert!(!e.payload.contains_key("status_code"));
+    }
+
+    // -- EventStream --
+
+    #[test]
+    fn event_stream_push_snapshot_drain() {
+        let stream = EventStream::new();
+        assert!(stream.snapshot().is_empty());
+
+        stream.push(Event::git_op("push", None));
+        stream.push(Event::git_op("fetch", None));
+        assert_eq!(stream.snapshot().len(), 2);
+
+        let drained = stream.drain();
+        assert_eq!(drained.len(), 2);
+        assert!(stream.snapshot().is_empty());
+    }
+
+    // -- log_event! macro --
+
+    #[test]
+    fn log_event_macro_emits_fields() {
+        let (logger, buf) = json_logger(LogLevel::Debug);
+        log_event!(logger, LogLevel::Info, "macro test", "k1" => "v1", "k2" => "v2");
+        let output = buf_to_string(&buf);
+        let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
+        assert_eq!(parsed["message"], "macro test");
+        assert_eq!(parsed["fields"]["k1"], "v1");
+        assert_eq!(parsed["fields"]["k2"], "v2");
+    }
+
+    // -- _with_level_and_writer --
+
+    #[test]
+    fn with_level_and_writer_sets_level() {
+        let buf: Vec<u8> = Vec::new();
+        let logger = Logger::_with_level_and_writer(LogLevel::Error, Box::new(buf));
+        assert_eq!(logger.min_level(), LogLevel::Error);
+        assert_eq!(logger.format, LogFormat::Json);
+    }
+
+    // -- str_is_empty --
+
+    #[test]
+    fn str_is_empty_function() {
+        assert!(str_is_empty(&""));
+        assert!(!str_is_empty(&"hello"));
+    }
+
+    // -- is_secret_key --
+
+    #[test]
+    fn is_secret_key_detects_secrets() {
+        assert!(is_secret_key("api_token"));
+        assert!(is_secret_key("MY_SECRET"));
+        assert!(is_secret_key("password"));
+        assert!(is_secret_key("CREDENTIAL_FILE"));
+        assert!(is_secret_key("api_key"));
+        assert!(is_secret_key("auth_header"));
+        assert!(!is_secret_key("hostname"));
+        assert!(!is_secret_key("port"));
+    }
+
+    // -- rfc3339_now --
+
+    #[test]
+    fn rfc3339_now_format() {
+        let ts = rfc3339_now();
+        // Should match YYYY-MM-DDTHH:MM:SSZ
+        assert!(ts.ends_with('Z'));
+        assert_eq!(ts.len(), 20);
+        assert_eq!(&ts[4..5], "-");
+        assert_eq!(&ts[7..8], "-");
+        assert_eq!(&ts[10..11], "T");
+    }
+
+    // -- Logger convenience methods --
+
+    #[test]
+    fn trace_debug_error_convenience_methods() {
+        let (logger, buf) = json_logger(LogLevel::Trace);
+        logger.trace("t");
+        logger.debug("d");
+        logger.error("e");
+        let output = buf_to_string(&buf);
+        assert!(output.contains("\"level\":\"trace\""));
+        assert!(output.contains("\"level\":\"debug\""));
+        assert!(output.contains("\"level\":\"error\""));
+    }
+
+    // -- CorrelationContext builders --
+
+    #[test]
+    fn correlation_context_builders() {
+        let ctx = CorrelationContext::new()
+            .with_feature_id("f")
+            .with_session_id("s")
+            .with_thread_id("t");
+        assert_eq!(ctx.feature_id.as_deref(), Some("f"));
+        assert_eq!(ctx.session_id.as_deref(), Some("s"));
+        assert_eq!(ctx.thread_id.as_deref(), Some("t"));
+    }
+
+    #[test]
+    fn correlation_context_default_is_empty() {
+        let ctx = CorrelationContext::default();
+        assert!(ctx.feature_id.is_none());
+        assert!(ctx.session_id.is_none());
+        assert!(ctx.thread_id.is_none());
+    }
+}
