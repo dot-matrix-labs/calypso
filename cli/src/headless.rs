@@ -242,7 +242,17 @@ fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &Repository
         .merge(&github_evidence)
         .merge(&policy_evidence);
 
-    if let Err(e) = feature.evaluate_gates(&template, &evidence) {
+    evaluate_and_log_gates(logger, &mut feature, &template, &evidence)
+}
+
+/// Core gate evaluation and logging, separated from evidence collection for testability.
+fn evaluate_and_log_gates(
+    logger: &Logger,
+    feature: &mut crate::state::FeatureState,
+    template: &crate::template::TemplateSet,
+    evidence: &crate::state::BuiltinEvidence,
+) -> i32 {
+    if let Err(e) = feature.evaluate_gates(template, evidence) {
         logger
             .entry(LogLevel::Error, "gate evaluation failed")
             .component(Component::Gate)
@@ -484,5 +494,228 @@ mod tests {
             output.contains("CALYPSO_LOG=debug"),
             "expected override notice in output: {output}"
         );
+    }
+
+    #[test]
+    fn log_doctor_results_empty_report_returns_0() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let report = DoctorReport { checks: vec![] };
+
+        let exit = log_doctor_results(&logger, &report);
+        assert_eq!(exit, 0);
+
+        // No output expected for empty report
+        let output = writer.contents();
+        assert!(output.is_empty(), "expected no output for empty report: {output}");
+    }
+
+    /// Build a phony TemplateSet from the test fixture YAML files.
+    fn phony_template() -> crate::template::TemplateSet {
+        let sm = include_str!("../tests/fixtures/phony-template/.calypso/state-machine.yml");
+        let agents = include_str!("../tests/fixtures/phony-template/.calypso/agents.yml");
+        let prompts = include_str!("../tests/fixtures/phony-template/.calypso/prompts.yml");
+        crate::template::TemplateSet::from_yaml_strings(sm, agents, prompts)
+            .expect("phony template should parse")
+    }
+
+    /// Build a minimal FeatureState from the phony template for gate evaluation tests.
+    fn phony_feature() -> crate::state::FeatureState {
+        let template = phony_template();
+        crate::state::FeatureState::from_template(
+            "test-feature",
+            "feat/test",
+            "/tmp/worktree",
+            crate::state::PullRequestRef {
+                number: 0,
+                url: String::new(),
+            },
+            &template,
+        )
+        .expect("phony template should create feature state")
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_all_pending_reports_blocking() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+        let mut feature = phony_feature();
+        let evidence = crate::state::BuiltinEvidence::new();
+
+        let exit = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
+        assert_eq!(exit, 0);
+
+        let output = writer.contents();
+        // Should report blocking gates since all agent gates stay pending
+        assert!(
+            output.contains("gate(s) blocking"),
+            "expected blocking summary in output: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"gate_evaluated\""),
+            "expected gate_evaluated event in output: {output}"
+        );
+        // Should log individual gate results at debug level
+        assert!(
+            output.contains("phony-alpha-gate"),
+            "expected gate id in output: {output}"
+        );
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_all_passing() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+        let mut feature = phony_feature();
+
+        // Manually set all gates to Passing before calling evaluate
+        for group in &mut feature.gate_groups {
+            for gate in &mut group.gates {
+                gate.status = crate::state::GateStatus::Passing;
+            }
+        }
+
+        // Use empty evidence — since gates are agent-kind they'll be reset to Pending.
+        // Instead, to get all-passing, we need to NOT call evaluate_gates and just test
+        // the logging portion.  Let's test the all-passing branch directly by skipping
+        // evaluate_gates and going straight to the logging code.
+        // Actually, evaluate_and_log_gates calls evaluate_gates which resets statuses.
+        // So we need to test that the "all gates passing" branch works.
+        // Agent-kind gates default to Pending, so let's use a feature with no gates.
+        let mut empty_feature = phony_feature();
+        empty_feature.gate_groups.clear();
+
+        let evidence = crate::state::BuiltinEvidence::new();
+        let exit = evaluate_and_log_gates(&logger, &mut empty_feature, &template, &evidence);
+        assert_eq!(exit, 0);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("all gates passing"),
+            "expected all-passing summary in output: {output}"
+        );
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_logs_state_name() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+        let mut feature = phony_feature();
+        let evidence = crate::state::BuiltinEvidence::new();
+
+        let _ = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("evaluating gates for state new"),
+            "expected state name in output: {output}"
+        );
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_unknown_task_returns_1() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+
+        // Create a feature with a gate referencing a non-existent task
+        let mut feature = phony_feature();
+        feature.gate_groups = vec![crate::state::GateGroup {
+            id: "bad-group".to_string(),
+            label: "Bad Group".to_string(),
+            gates: vec![crate::state::Gate {
+                id: "bad-gate".to_string(),
+                label: "Bad Gate".to_string(),
+                task: "nonexistent-task".to_string(),
+                status: crate::state::GateStatus::Pending,
+            }],
+        }];
+
+        let evidence = crate::state::BuiltinEvidence::new();
+        let exit = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
+        assert_eq!(exit, 1);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("gate evaluation failed"),
+            "expected error message in output: {output}"
+        );
+        assert!(
+            output.contains("nonexistent-task"),
+            "expected task name in error output: {output}"
+        );
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_with_mixed_statuses() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+        let mut feature = phony_feature();
+
+        // Set first gate to Passing, leave others as Pending
+        if let Some(group) = feature.gate_groups.first_mut()
+            && let Some(gate) = group.gates.first_mut()
+        {
+            gate.status = crate::state::GateStatus::Passing;
+        }
+
+        let evidence = crate::state::BuiltinEvidence::new();
+        let exit = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
+        assert_eq!(exit, 0);
+
+        let output = writer.contents();
+        // Should report blocking gates (the non-passing ones)
+        assert!(
+            output.contains("gate(s) blocking"),
+            "expected blocking summary in output: {output}"
+        );
+        assert!(
+            output.contains("\"count\""),
+            "expected count field in output: {output}"
+        );
+    }
+
+    #[test]
+    fn evaluate_and_log_gates_blocking_summary_includes_gate_ids() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let template = phony_template();
+        let mut feature = phony_feature();
+        let evidence = crate::state::BuiltinEvidence::new();
+
+        let _ = evaluate_and_log_gates(&logger, &mut feature, &template, &evidence);
+
+        let output = writer.contents();
+        // The blocking_gates field should contain our gate ids
+        assert!(
+            output.contains("blocking_gates"),
+            "expected blocking_gates field in output: {output}"
+        );
+    }
+
+    #[test]
+    fn headless_outcome_debug_and_equality() {
+        let a = HeadlessOutcome { exit_code: 0 };
+        let b = a.clone();
+        assert_eq!(a, b);
+        assert_eq!(format!("{a:?}"), "HeadlessOutcome { exit_code: 0 }");
+    }
+
+    #[test]
+    fn headless_config_debug_and_equality() {
+        let a = HeadlessConfig {
+            verbosity: LogLevel::Warn,
+            log_format: LogFormat::Json,
+            env_log_override: None,
+        };
+        let b = a.clone();
+        assert_eq!(a, b);
+        let debug = format!("{a:?}");
+        assert!(debug.contains("HeadlessConfig"));
     }
 }
