@@ -198,6 +198,36 @@ fn doctor_json_passing_check_has_null_detail_and_remediation() {
     assert_eq!(check.status, "passing");
 }
 
+#[test]
+fn doctor_json_warning_check_counted_separately_from_failures() {
+    let report = DoctorReport {
+        checks: vec![
+            passing_check(DoctorCheckId::GitInitialized),
+            failing_check(
+                DoctorCheckId::GhInstalled,
+                Some("gh not found".to_string()),
+                Some("Install gh CLI".to_string()),
+            ),
+            DoctorCheck {
+                id: DoctorCheckId::CodexInstalled,
+                scope: DoctorCheckScope::LocalConfiguration,
+                status: DoctorStatus::Warning,
+                detail: None,
+                remediation: Some("Install codex CLI".to_string()),
+                fix: None,
+            },
+        ],
+    };
+
+    let json_report = doctor_json_report(&report);
+
+    assert_eq!(json_report.summary.total, 3);
+    assert_eq!(json_report.summary.passing, 1);
+    assert_eq!(json_report.summary.warnings, 1);
+    assert_eq!(json_report.summary.failing, 1);
+    assert_eq!(json_report.checks[2].status, "warning");
+}
+
 // ---------------------------------------------------------------------------
 // Feature 2 — state status --json
 // ---------------------------------------------------------------------------

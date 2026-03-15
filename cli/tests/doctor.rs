@@ -179,7 +179,7 @@ fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
     assert_eq!(statuses[&DoctorCheckId::GhInstalled], DoctorStatus::Failing);
     assert_eq!(
         statuses[&DoctorCheckId::CodexInstalled],
-        DoctorStatus::Failing
+        DoctorStatus::Warning
     );
     assert_eq!(
         statuses[&DoctorCheckId::GhAuthenticated],
@@ -297,21 +297,23 @@ fn doctor_fix_is_populated_for_failing_checks() {
     let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
 
     for check in &report.checks {
-        if check.status == calypso_cli::doctor::DoctorStatus::Failing {
-            // RequiredGitHooksInstalled without a hooks path won't have a fix.
+        if check.status == calypso_cli::doctor::DoctorStatus::Passing {
+            assert!(
+                check.fix.is_none(),
+                "passing check {:?} should not have a fix",
+                check.id
+            );
+        } else {
+            // Failing and Warning checks should have a fix (except
+            // RequiredGitHooksInstalled without a hooks path).
             if check.id == DoctorCheckId::RequiredGitHooksInstalled {
                 continue;
             }
             assert!(
                 check.fix.is_some(),
-                "failing check {:?} should have a fix",
-                check.id
-            );
-        } else {
-            assert!(
-                check.fix.is_none(),
-                "passing check {:?} should not have a fix",
-                check.id
+                "non-passing check {:?} ({:?}) should have a fix",
+                check.id,
+                check.status
             );
         }
     }
@@ -481,5 +483,61 @@ fn doctor_report_marks_git_hooks_as_passing_when_none_missing() {
     assert_eq!(
         statuses[&DoctorCheckId::RequiredGitHooksInstalled],
         DoctorStatus::Passing
+    );
+}
+
+#[test]
+fn codex_installed_uses_warning_severity_when_missing() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git()
+            .with_command("gh")
+            .with_gh_authenticated(true)
+            .with_github_remote_root(repo_root),
+        repo_root,
+    );
+
+    let codex = check_for(&report, DoctorCheckId::CodexInstalled);
+    assert_eq!(codex.status, DoctorStatus::Warning);
+    assert!(
+        codex.remediation.is_some(),
+        "warning check should still have remediation"
+    );
+}
+
+#[test]
+fn doctor_report_has_failures_excludes_warnings() {
+    let repo_root = Path::new("/tmp/calypso");
+    // Build a report where all required checks pass but codex (advisory) is missing.
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git()
+            .with_command("gh")
+            .with_gh_authenticated(true)
+            .with_github_remote_root(repo_root)
+            .with_git_hooks_path(Path::new("/tmp/calypso/.git/hooks")),
+        repo_root,
+    );
+
+    // CodexInstalled and ClaudeInstalled are the only non-passing.
+    // CodexInstalled is advisory (Warning), ClaudeInstalled is required (Failing).
+    assert!(report.has_failures(), "claude-installed should be failing");
+    assert!(report.has_warnings(), "codex-installed should be warning");
+}
+
+#[test]
+fn doctor_report_render_shows_warn_for_advisory_checks() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
+    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+
+    assert!(
+        rendered.contains("[WARN] codex-installed"),
+        "advisory check should render as WARN"
+    );
+    assert!(
+        rendered.contains("[FAIL] gh-installed"),
+        "required check should render as FAIL"
     );
 }

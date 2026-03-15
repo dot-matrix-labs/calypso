@@ -303,10 +303,10 @@ pub fn doctor_json_report(report: &DoctorReport) -> DoctorJsonReport {
         .iter()
         .map(|check| DoctorJsonCheck {
             id: check.id.label().to_string(),
-            status: if check.status == DoctorStatus::Passing {
-                "passing"
-            } else {
-                "failing"
+            status: match check.status {
+                DoctorStatus::Passing => "passing",
+                DoctorStatus::Warning => "warning",
+                DoctorStatus::Failing => "failing",
             },
             detail: check.detail.clone(),
             remediation: check.remediation.clone(),
@@ -316,13 +316,15 @@ pub fn doctor_json_report(report: &DoctorReport) -> DoctorJsonReport {
 
     let total = checks.len();
     let passing = checks.iter().filter(|c| c.status == "passing").count();
-    let failing = total - passing;
+    let warnings = checks.iter().filter(|c| c.status == "warning").count();
+    let failing = total - passing - warnings;
 
     DoctorJsonReport {
         checks,
         summary: DoctorJsonSummary {
             total,
             passing,
+            warnings,
             failing,
         },
     }

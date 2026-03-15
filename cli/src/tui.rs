@@ -1191,9 +1191,20 @@ impl DoctorSurface {
             .iter()
             .filter(|c| matches!(c.status, DoctorStatus::Passing))
             .count();
+        let warnings = self
+            .checks
+            .iter()
+            .filter(|c| matches!(c.status, DoctorStatus::Warning))
+            .count();
         let total = self.checks.len();
 
-        // Header
+        // Header — include warning count when non-zero.
+        let summary = if warnings > 0 {
+            format!("{passing}/{total} passing, {warnings} warning(s)")
+        } else {
+            format!("{passing}/{total} passing")
+        };
+
         write_at(
             stdout,
             0,
@@ -1205,7 +1216,7 @@ impl DoctorSurface {
             stdout,
             0,
             1,
-            &format!("│  Calypso Doctor  {passing}/{total} passing"),
+            &format!("│  Calypso Doctor  {summary}"),
             w,
         )?;
         write_at(
@@ -1224,11 +1235,7 @@ impl DoctorSurface {
                 break;
             }
             let pointer = if index == self.selected { "▶" } else { " " };
-            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
-                "✓"
-            } else {
-                "✗"
-            };
+            let status_icon = doctor_status_icon(check.status);
             let fix_tag = if check.has_auto_fix() {
                 "  [auto-fix]"
             } else {
@@ -1261,11 +1268,7 @@ impl DoctorSurface {
                 row += 1;
             }
             if row < content_rows {
-                let status_icon = if matches!(check.status, DoctorStatus::Passing) {
-                    "✓"
-                } else {
-                    "✗"
-                };
+                let status_icon = doctor_status_icon(check.status);
                 write_at(stdout, 0, row, &format!("  {status_icon}  {}", check.id), w)?;
                 row += 1;
             }
@@ -1304,6 +1307,15 @@ impl DoctorSurface {
 use crate::app::resolve_repo_root;
 use crate::doctor::HostDoctorEnvironment;
 use crate::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
+
+/// Return a single-character icon for a `DoctorStatus`.
+fn doctor_status_icon(status: DoctorStatus) -> &'static str {
+    match status {
+        DoctorStatus::Passing => "✓",
+        DoctorStatus::Warning => "⚠",
+        DoctorStatus::Failing => "✗",
+    }
+}
 
 /// A view-model for a single doctor check rendered in the doctor TUI surface.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1363,15 +1375,23 @@ impl DoctorSurface {
             .iter()
             .filter(|c| matches!(c.status, DoctorStatus::Passing))
             .count();
+        let warnings = self
+            .checks
+            .iter()
+            .filter(|c| matches!(c.status, DoctorStatus::Warning))
+            .count();
         let total = self.checks.len();
+
+        let summary = if warnings > 0 {
+            format!("{passing}/{total} passing, {warnings} warning(s)")
+        } else {
+            format!("{passing}/{total} passing")
+        };
 
         let mut lines = vec![
             "┌─ Calypso Doctor ───────────────────────────────────────────────────────────┐"
                 .to_string(),
-            format!(
-                "│ Environment diagnostics  {passing}/{total} passing{:<48} │",
-                ""
-            ),
+            format!("│ Environment diagnostics  {summary}{:<48} │", ""),
             "└────────────────────────────────────────────────────────────────────────────┘"
                 .to_string(),
             String::new(),
@@ -1379,11 +1399,7 @@ impl DoctorSurface {
 
         for (index, check) in self.checks.iter().enumerate() {
             let pointer = if index == self.selected { "▶" } else { " " };
-            let status_icon = if matches!(check.status, DoctorStatus::Passing) {
-                "✓"
-            } else {
-                "✗"
-            };
+            let status_icon = doctor_status_icon(check.status);
             let fix_tag = if check.has_auto_fix() {
                 "  [auto-fix]"
             } else {
@@ -1398,11 +1414,7 @@ impl DoctorSurface {
                 "  ─────────────────────────────────────────────────────────────────────────"
                     .to_string(),
             );
-            let status_icon = if matches!(selected_check.status, DoctorStatus::Passing) {
-                "✓"
-            } else {
-                "✗"
-            };
+            let status_icon = doctor_status_icon(selected_check.status);
             lines.push(format!("  Selected: {} {status_icon}", selected_check.id));
             if let Some(detail) = &selected_check.detail {
                 lines.push(format!("     Detail: {detail}"));
