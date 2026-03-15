@@ -660,7 +660,10 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{build_headless_config, extract_headless_flags, extract_path_flag, looks_like_path, LogFormat};
+    use super::{
+        LogFormat, build_headless_config, extract_headless_flags, extract_path_flag,
+        looks_like_path,
+    };
     use calypso_cli::telemetry::LogLevel;
 
     // -- headless flag extraction tests --
