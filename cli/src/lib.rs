@@ -61,6 +61,8 @@ Commands:
   doctor --json       Output doctor results as JSON (exit 1 if any failing)
   doctor --fix <id>   Apply an available fix for a doctor check
   status              Render the feature status for the project directory
+  state               Alias for `state status`
+  state --json        Alias for `state status --json`
   state status        Show a human-readable summary of .calypso/state.json
   state status --json Output state status as JSON
   state show          Print the current state file as raw JSON

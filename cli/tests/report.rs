@@ -324,6 +324,74 @@ fn state_status_json_missing_state_file_returns_error() {
 }
 
 // ---------------------------------------------------------------------------
+// Feature 2b — state status integration tests against a fixture state file
+// ---------------------------------------------------------------------------
+
+fn fixture_repository_state() -> calypso_cli::state::RepositoryState {
+    calypso_cli::state::RepositoryState {
+        version: 1,
+        repo_id: "test-repo".to_string(),
+        current_feature: minimal_feature_state(),
+        schema_version: 2,
+        identity: calypso_cli::state::RepositoryIdentity::default(),
+        providers: vec![],
+        releases: vec![],
+        deployments: vec![],
+    }
+}
+
+#[test]
+fn state_status_json_fixture_file_round_trip() {
+    let tmp = std::env::temp_dir().join("calypso-state-status-fixture-json");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join(".calypso")).expect("create fixture dir");
+
+    let state = fixture_repository_state();
+    state
+        .save_to_path(&tmp.join(".calypso/state.json"))
+        .expect("save fixture");
+
+    let result = calypso_cli::app::run_state_status_json(&tmp);
+    assert!(result.is_ok(), "should load fixture state file");
+
+    let json = result.unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).expect("must be valid JSON");
+
+    assert_eq!(value["feature_id"], "feat-login-oauth");
+    assert_eq!(value["branch"], "feat/login-oauth");
+    assert_eq!(value["pr_number"], 42);
+    assert_eq!(value["workflow_state"], "implementation");
+    assert!(!value["gate_groups"].as_array().unwrap().is_empty());
+    assert!(value["blocking_gate_ids"].as_array().is_some());
+    assert_eq!(value["active_session_count"], 1);
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+#[test]
+fn state_status_plain_fixture_file_contains_expected_lines() {
+    let tmp = std::env::temp_dir().join("calypso-state-status-fixture-plain");
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(tmp.join(".calypso")).expect("create fixture dir");
+
+    let state = fixture_repository_state();
+    state
+        .save_to_path(&tmp.join(".calypso/state.json"))
+        .expect("save fixture");
+
+    let result = calypso_cli::app::run_state_status_plain(&tmp);
+    assert!(result.is_ok(), "should load fixture state file");
+
+    let output = result.unwrap();
+    assert!(output.contains("feature: feat-login-oauth"));
+    assert!(output.contains("branch:"));
+    assert!(output.contains("state:"));
+    assert!(output.contains("Gates"));
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+// ---------------------------------------------------------------------------
 // Feature 3 — agents --json
 // ---------------------------------------------------------------------------
 

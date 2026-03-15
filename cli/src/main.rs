@@ -95,6 +95,23 @@ fn main() {
         [command, flag] if command == "init" && flag == "--state" => {
             run_init_state_show(&cwd);
         }
+        // calypso state (no subcommand) — alias for `calypso state status`
+        [command] if command == "state" => match run_state_status_plain(&cwd) {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("state status error: {error}");
+                std::process::exit(1);
+            }
+        },
+        [command, flag] if command == "state" && flag == "--json" => {
+            match run_state_status_json(&cwd) {
+                Ok(json) => println!("{json}"),
+                Err(error) => {
+                    eprintln!("state status error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
         [command, subcommand] if command == "state" && subcommand == "show" => {
             let state_path = cwd.join(".calypso").join("state.json");
             match RepositoryState::load_from_path(&state_path) {
