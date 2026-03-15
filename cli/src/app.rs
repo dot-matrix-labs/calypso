@@ -891,5 +891,4 @@ mod tests {
             "expected APPLIED tag: {output}"
         );
     }
-
 }

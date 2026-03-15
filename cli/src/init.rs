@@ -760,7 +760,6 @@ pub fn run_init_interactive(
         let _ = dev_state.save_to_path(&dev_state_path);
     }
 
-
     Ok(progress)
 }
 
