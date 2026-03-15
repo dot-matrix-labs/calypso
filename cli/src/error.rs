@@ -19,10 +19,10 @@ pub fn register_secret(value: impl Into<String>) {
     if value.is_empty() {
         return;
     }
-    if let Ok(mut registry) = REDACTION_REGISTRY.write()
-        && !registry.contains(&value)
-    {
-        registry.push(value);
+    if let Ok(mut registry) = REDACTION_REGISTRY.write() {
+        if !registry.contains(&value) {
+            registry.push(value);
+        }
     }
 }
 

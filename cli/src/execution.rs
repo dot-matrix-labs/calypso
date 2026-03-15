@@ -582,7 +582,7 @@ fn epoch_to_parts(secs: u64) -> (u64, u64, u64, u64, u64, u64) {
 }
 
 fn is_leap(year: u64) -> bool {
-    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
