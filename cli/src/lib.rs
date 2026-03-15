@@ -1,4 +1,5 @@
 pub mod app;
+pub mod blueprint_workflows;
 pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
@@ -65,6 +66,11 @@ Commands:
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
+  workflows list      List all embedded blueprint workflow names
+  workflows show <name>
+                      Print the raw YAML for the named blueprint workflow
+  workflows validate <name>
+                      Parse the named workflow and report OK or the parse error
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

@@ -1,6 +1,7 @@
 use calypso_cli::app::{
     run_agents_json, run_agents_plain, run_doctor, run_doctor_json, run_state_status_json,
-    run_state_status_plain, run_status,
+    run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
+    run_workflows_validate,
 };
 use calypso_cli::doctor::{DoctorFix, DoctorStatus, apply_fix, collect_doctor_report};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
@@ -168,6 +169,30 @@ fn main() {
         }
         [command, subcommand] if command == "template" && subcommand == "validate" => {
             run_template_validate(&cwd);
+        }
+        // calypso workflows list
+        [command, subcommand] if command == "workflows" && subcommand == "list" => {
+            println!("{}", run_workflows_list());
+        }
+        // calypso workflows show <name>
+        [command, subcommand, name] if command == "workflows" && subcommand == "show" => {
+            match run_workflows_show(name) {
+                Ok(yaml) => print!("{yaml}"),
+                Err(error) => {
+                    eprintln!("workflows show error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // calypso workflows validate <name>
+        [command, subcommand, name] if command == "workflows" && subcommand == "validate" => {
+            match run_workflows_validate(name) {
+                Ok(message) => println!("{message}"),
+                Err(error) => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
         }
         // calypso <path> — positional project directory (kept for backward compatibility)
         [path] if looks_like_path(path) => {
