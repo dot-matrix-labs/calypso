@@ -31,6 +31,10 @@ tasks:
     kind: builtin
     builtin: builtin.doctor.github_remote_configured
 
+  - name: required-git-hooks-installed
+    kind: builtin
+    builtin: builtin.doctor.required_git_hooks_installed
+
   # ── GitHub / PR checks ─────────────────────────────────────────────────────
   - name: feature-pr-exists
     kind: builtin

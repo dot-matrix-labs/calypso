@@ -15,6 +15,15 @@ const REQUIRED_WORKFLOW_FILES: [&str; 6] = [
     "release-cli.yml",
 ];
 
+const REQUIRED_GIT_HOOKS: [&str; 6] = [
+    "commit-msg",
+    "post-checkout",
+    "post-commit",
+    "pre-commit",
+    "pre-push",
+    "prepare-commit-msg",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DoctorCheckId {
     GitInitialized,
@@ -24,6 +33,7 @@ pub enum DoctorCheckId {
     GhAuthenticated,
     GithubRemoteConfigured,
     RequiredWorkflowFilesPresent,
+    RequiredGitHooksInstalled,
     StateMachineIntegrity,
 }
 
@@ -39,6 +49,9 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredWorkflowFilesPresent => {
                 "builtin.doctor.required_workflows_present"
             }
+            DoctorCheckId::RequiredGitHooksInstalled => {
+                "builtin.doctor.required_git_hooks_installed"
+            }
             DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
         }
     }
@@ -52,6 +65,7 @@ impl DoctorCheckId {
             DoctorCheckId::GhAuthenticated => "gh-authenticated",
             DoctorCheckId::GithubRemoteConfigured => "github-remote-configured",
             DoctorCheckId::RequiredWorkflowFilesPresent => "required-workflows-present",
+            DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
             DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
         }
     }
@@ -126,6 +140,11 @@ pub trait DoctorEnvironment {
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String>;
     /// Returns the GitHub username of the currently authenticated user, if available.
     fn github_user(&self) -> Option<String>;
+    /// Returns the names of git hooks from `REQUIRED_GIT_HOOKS` that are missing,
+    /// not executable, or have content that differs from `scripts/hooks/<name>`.
+    fn missing_git_hooks(&self, repo_root: &Path) -> Vec<String>;
+    /// Resolves the git hooks directory for the given repo root.
+    fn git_hooks_path(&self, repo_root: &Path) -> Option<PathBuf>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -188,6 +207,73 @@ impl DoctorEnvironment for HostDoctorEnvironment {
             None
         }
     }
+
+    fn missing_git_hooks(&self, repo_root: &Path) -> Vec<String> {
+        let hooks_dir = match self.git_hooks_path(repo_root) {
+            Some(p) => p,
+            None => return REQUIRED_GIT_HOOKS.iter().map(|h| (*h).to_string()).collect(),
+        };
+        let source_dir = repo_root.join("scripts").join("hooks");
+
+        let mut missing: Vec<String> = REQUIRED_GIT_HOOKS
+            .iter()
+            .filter(|hook| {
+                let installed = hooks_dir.join(hook);
+                let source = source_dir.join(hook);
+
+                // Source must exist to compare against.
+                let source_content = match std::fs::read(&source) {
+                    Ok(c) => c,
+                    Err(_) => return false, // no source → skip this hook
+                };
+
+                // Installed must exist.
+                let installed_content = match std::fs::read(&installed) {
+                    Ok(c) => c,
+                    Err(_) => return true, // missing → report
+                };
+
+                // Must be executable (Unix).
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    if let Ok(meta) = std::fs::metadata(&installed)
+                        && meta.permissions().mode() & 0o111 == 0
+                    {
+                        return true; // not executable → report
+                    }
+                }
+
+                // Content must match.
+                installed_content != source_content
+            })
+            .map(|h| (*h).to_string())
+            .collect();
+        missing.sort();
+        missing
+    }
+
+    fn git_hooks_path(&self, repo_root: &Path) -> Option<PathBuf> {
+        let output = Command::new("git")
+            .args([
+                "-C",
+                &repo_root.to_string_lossy(),
+                "rev-parse",
+                "--git-path",
+                "hooks",
+            ])
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            return None;
+        }
+        let raw = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+        if raw.is_absolute() {
+            Some(raw)
+        } else {
+            Some(repo_root.join(raw))
+        }
+    }
 }
 
 pub fn collect_doctor_report(
@@ -197,6 +283,11 @@ pub fn collect_doctor_report(
     let is_git = environment.is_git_repo(repo_root);
     let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
     missing_workflow_files.sort();
+    let mut missing_git_hooks = environment.missing_git_hooks(repo_root);
+    missing_git_hooks.sort();
+    let hooks_path = environment
+        .git_hooks_path(repo_root)
+        .map(|p| p.to_string_lossy().into_owned());
     let sm_audit = sm_audit::run_audit(repo_root);
     // Only fetch the github user when it may be needed for fix construction.
     let github_user = if !environment.has_github_remote(repo_root) {
@@ -269,6 +360,14 @@ pub fn collect_doctor_report(
                 None,
             ),
             make_check(
+                DoctorCheckId::RequiredGitHooksInstalled,
+                DoctorCheckScope::LocalConfiguration,
+                missing_git_hooks.is_empty(),
+                (!missing_git_hooks.is_empty()).then_some(missing_git_hooks.join(", ")),
+                repo_root,
+                hooks_path,
+            ),
+            make_check(
                 DoctorCheckId::StateMachineIntegrity,
                 DoctorCheckScope::LocalConfiguration,
                 sm_audit.error_count() == 0,
@@ -295,6 +394,7 @@ fn status_from_bool(passing: bool) -> DoctorStatus {
 /// `extra` carries fix-construction context that varies per check:
 /// - For `GithubRemoteConfigured`: `Some("<user>/<repo>")` when a gh user is known.
 /// - For `RequiredWorkflowFilesPresent`: the `detail` field carries the missing file list.
+/// - For `RequiredGitHooksInstalled`: `Some("<hooks_dir>")` — the resolved git hooks path.
 /// - For all others: `None`.
 fn make_check(
     id: DoctorCheckId,
@@ -505,6 +605,48 @@ fn failing_doctor_fix(
             }
         }
 
+        // Copy missing/outdated hooks from scripts/hooks/ into the git hooks dir.
+        // `extra` carries the resolved hooks directory path.
+        DoctorCheckId::RequiredGitHooksInstalled => {
+            let hooks_dir = extra.map(PathBuf::from)?;
+            let missing: Vec<&str> = detail
+                .unwrap_or("")
+                .split(", ")
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .collect();
+
+            if missing.is_empty() {
+                return None;
+            }
+
+            let steps: Vec<DoctorFix> = missing
+                .iter()
+                .flat_map(|hook| {
+                    let source = repo_root.join("scripts").join("hooks").join(hook);
+                    let content = std::fs::read_to_string(&source).ok()?;
+                    let dest = hooks_dir.join(hook);
+                    Some(vec![
+                        DoctorFix::WriteFile {
+                            path: dest.clone(),
+                            content,
+                        },
+                        DoctorFix::RunCommand {
+                            command: "chmod".to_string(),
+                            args: vec!["+x".to_string(), dest.to_string_lossy().into_owned()],
+                        },
+                    ])
+                })
+                .flatten()
+                .collect();
+
+            if steps.is_empty() {
+                None
+            } else {
+                Some(DoctorFix::Sequence(steps))
+            }
+        }
+
         // Write every missing workflow file then commit and push.
         DoctorCheckId::RequiredWorkflowFilesPresent => {
             let workflows_dir = repo_root.join(".github").join("workflows");
@@ -588,6 +730,10 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
                 )
             }
         }
+        DoctorCheckId::RequiredGitHooksInstalled => Some(format!(
+            "Missing or outdated git hooks will be installed from scripts/hooks/: {}",
+            detail.unwrap_or("unknown")
+        )),
         DoctorCheckId::RequiredWorkflowFilesPresent => Some(format!(
             "Missing workflow files will be written and pushed: {}",
             detail.unwrap_or("unknown")
@@ -612,6 +758,128 @@ mod tests {
         std::fs::create_dir_all(path.join(".github/workflows"))
             .expect("workflow dir should be created");
         path
+    }
+
+    fn unique_hooks_temp_dir(label: &str) -> std::path::PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("calypso-doctor-hooks-{label}-{nanos}"));
+        std::fs::create_dir_all(path.join("scripts/hooks"))
+            .expect("scripts/hooks dir should be created");
+        std::fs::create_dir_all(path.join(".git/hooks"))
+            .expect(".git/hooks dir should be created");
+        // Write source hook files.
+        for hook in REQUIRED_GIT_HOOKS {
+            std::fs::write(
+                path.join("scripts/hooks").join(hook),
+                format!("#!/usr/bin/env bash\n# {hook}\n"),
+            )
+            .expect("source hook should be written");
+        }
+        // Initialize a git repo so git rev-parse works.
+        Command::new("git")
+            .args(["-C", &path.to_string_lossy(), "init"])
+            .output()
+            .expect("git init should succeed");
+        path
+    }
+
+    #[test]
+    fn host_environment_reports_missing_git_hooks() {
+        let repo_root = unique_hooks_temp_dir("missing");
+        // Install only one hook correctly.
+        let hooks_dir = repo_root.join(".git/hooks");
+        let source = std::fs::read_to_string(repo_root.join("scripts/hooks/pre-commit"))
+            .expect("source hook should be readable");
+        std::fs::write(hooks_dir.join("pre-commit"), &source)
+            .expect("hook should be written");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(
+                hooks_dir.join("pre-commit"),
+                std::fs::Permissions::from_mode(0o755),
+            )
+            .expect("permissions should be set");
+        }
+
+        let missing = HostDoctorEnvironment.missing_git_hooks(&repo_root);
+
+        assert_eq!(
+            missing,
+            vec![
+                "commit-msg",
+                "post-checkout",
+                "post-commit",
+                "pre-push",
+                "prepare-commit-msg",
+            ]
+        );
+
+        std::fs::remove_dir_all(repo_root).ok();
+    }
+
+    #[test]
+    fn host_environment_reports_outdated_git_hooks() {
+        let repo_root = unique_hooks_temp_dir("outdated");
+        let hooks_dir = repo_root.join(".git/hooks");
+        // Install all hooks, but with wrong content for commit-msg.
+        for hook in REQUIRED_GIT_HOOKS {
+            let content = if hook == "commit-msg" {
+                "#!/usr/bin/env bash\n# OUTDATED\n".to_string()
+            } else {
+                std::fs::read_to_string(repo_root.join("scripts/hooks").join(hook))
+                    .expect("source hook should be readable")
+            };
+            std::fs::write(hooks_dir.join(hook), &content).expect("hook should be written");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    hooks_dir.join(hook),
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .expect("permissions should be set");
+            }
+        }
+
+        let missing = HostDoctorEnvironment.missing_git_hooks(&repo_root);
+
+        assert_eq!(missing, vec!["commit-msg"]);
+
+        std::fs::remove_dir_all(repo_root).ok();
+    }
+
+    #[test]
+    fn host_environment_reports_all_hooks_present_when_content_matches() {
+        let repo_root = unique_hooks_temp_dir("all-present");
+        let hooks_dir = repo_root.join(".git/hooks");
+        // Install all hooks with matching content.
+        for hook in REQUIRED_GIT_HOOKS {
+            let content = std::fs::read_to_string(repo_root.join("scripts/hooks").join(hook))
+                .expect("source hook should be readable");
+            std::fs::write(hooks_dir.join(hook), &content).expect("hook should be written");
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(
+                    hooks_dir.join(hook),
+                    std::fs::Permissions::from_mode(0o755),
+                )
+                .expect("permissions should be set");
+            }
+        }
+
+        let missing = HostDoctorEnvironment.missing_git_hooks(&repo_root);
+
+        assert!(
+            missing.is_empty(),
+            "expected no missing hooks but got: {missing:?}"
+        );
+
+        std::fs::remove_dir_all(repo_root).ok();
     }
 
     #[test]

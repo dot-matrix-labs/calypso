@@ -13,6 +13,8 @@ struct FakeEnvironment {
     gh_authenticated: bool,
     github_remote_roots: BTreeSet<PathBuf>,
     missing_workflow_files: BTreeMap<PathBuf, Vec<String>>,
+    missing_git_hooks: BTreeMap<PathBuf, Vec<String>>,
+    git_hooks_path: Option<PathBuf>,
     github_user: Option<String>,
 }
 
@@ -42,6 +44,19 @@ impl FakeEnvironment {
             root.to_path_buf(),
             files.iter().map(|file| file.to_string()).collect(),
         );
+        self
+    }
+
+    fn with_missing_git_hooks(mut self, root: &Path, hooks: &[&str]) -> Self {
+        self.missing_git_hooks.insert(
+            root.to_path_buf(),
+            hooks.iter().map(|h| h.to_string()).collect(),
+        );
+        self
+    }
+
+    fn with_git_hooks_path(mut self, path: &Path) -> Self {
+        self.git_hooks_path = Some(path.to_path_buf());
         self
     }
 
@@ -81,6 +96,17 @@ impl DoctorEnvironment for FakeEnvironment {
 
     fn github_user(&self) -> Option<String> {
         self.github_user.clone()
+    }
+
+    fn missing_git_hooks(&self, repo_root: &Path) -> Vec<String> {
+        self.missing_git_hooks
+            .get(repo_root)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn git_hooks_path(&self, _repo_root: &Path) -> Option<PathBuf> {
+        self.git_hooks_path.clone()
     }
 }
 
@@ -272,6 +298,10 @@ fn doctor_fix_is_populated_for_failing_checks() {
 
     for check in &report.checks {
         if check.status == calypso_cli::doctor::DoctorStatus::Failing {
+            // RequiredGitHooksInstalled without a hooks path won't have a fix.
+            if check.id == DoctorCheckId::RequiredGitHooksInstalled {
+                continue;
+            }
             assert!(
                 check.fix.is_some(),
                 "failing check {:?} should have a fix",
@@ -409,4 +439,51 @@ fn render_doctor_report_verbose_shows_auto_fix_for_gh_auth() {
     let rendered = render_doctor_report_verbose(&report);
 
     assert!(rendered.contains("auto-fix: gh auth login"));
+}
+
+#[test]
+fn doctor_report_marks_missing_git_hooks_as_failing() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_missing_git_hooks(repo_root, &["pre-commit", "commit-msg"])
+            .with_git_hooks_path(Path::new("/tmp/calypso/.git/hooks")),
+        repo_root,
+    );
+    let statuses = status_map(&report);
+
+    assert_eq!(
+        statuses[&DoctorCheckId::RequiredGitHooksInstalled],
+        DoctorStatus::Failing
+    );
+
+    let check = check_for(&report, DoctorCheckId::RequiredGitHooksInstalled);
+    assert_eq!(
+        check.detail.as_deref(),
+        Some("commit-msg, pre-commit")
+    );
+    assert!(check.remediation.is_some());
+    assert!(
+        check
+            .remediation
+            .as_ref()
+            .unwrap()
+            .contains("scripts/hooks/")
+    );
+}
+
+#[test]
+fn doctor_report_marks_git_hooks_as_passing_when_none_missing() {
+    let repo_root = Path::new("/tmp/calypso");
+    let report = collect_doctor_report(
+        &FakeEnvironment::default()
+            .with_git_hooks_path(Path::new("/tmp/calypso/.git/hooks")),
+        repo_root,
+    );
+    let statuses = status_map(&report);
+
+    assert_eq!(
+        statuses[&DoctorCheckId::RequiredGitHooksInstalled],
+        DoctorStatus::Passing
+    );
 }
