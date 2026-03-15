@@ -185,6 +185,19 @@ gate_groups:
           - implementation
           - qa-validation
           - release-ready
+      - id: required-git-hooks-installed
+        label: Required git hooks installed
+        task: required-git-hooks-installed
+        pr_checklist_label: All required git hooks are installed from scripts/hooks/
+        applies_to:
+          - new
+          - prd-review
+          - architecture-plan
+          - scaffold-tdd
+          - architecture-review
+          - implementation
+          - qa-validation
+          - release-ready
 
   # Specification gates — new → prd-review
   - id: specification
