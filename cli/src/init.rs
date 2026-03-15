@@ -1122,7 +1122,10 @@ mod tests {
     #[test]
     fn extract_repo_name_malformed_input() {
         // Bare word with no slashes or colons
-        assert_eq!(extract_repo_name("just-a-word"), Some("just-a-word".to_string()));
+        assert_eq!(
+            extract_repo_name("just-a-word"),
+            Some("just-a-word".to_string())
+        );
         // Only a scheme prefix
         assert_eq!(extract_repo_name("https://"), None);
     }
