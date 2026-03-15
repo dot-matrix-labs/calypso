@@ -1198,6 +1198,29 @@ Secure-element support may vary by platform and device; Calypso should expose ca
 - New gates and state machines must be configurable without redesigning the core product model.
 - Proxy backends, certificate providers, and GitHub auth modes should be swappable behind stable interfaces.
 
+### Concurrency and runtime model
+
+Calypso CLI uses a synchronous, thread-per-concern concurrency model with channel-based coordination. There is no async runtime.
+
+The rationale:
+
+- The CLI multiplexes a bounded number of I/O sources: agent subprocess streams, a local HTTP server, outbound HTTP calls, TUI input, and file-system events. At peak this is tens of concurrent streams, not thousands.
+- OS threads are adequate for this scale. An async runtime solves connection-count and I/O-multiplexing problems that do not apply to a single-operator developer tool.
+- A synchronous model produces readable stack traces, straightforward control flow, and no hidden executor state. Every thread has a clear purpose.
+- Avoiding an async runtime eliminates a large transitive dependency tree and keeps the binary lean.
+
+The concurrency primitives are:
+
+- `std::thread` for dedicated I/O concerns such as subprocess stream readers, the HTTP server listener, and file-watch dispatchers.
+- `std::sync::mpsc` or `crossbeam-channel` for funneling events from worker threads into a central coordination loop.
+- Standard synchronization types (`Mutex`, `Arc`) where shared mutable state is unavoidable.
+- Blocking HTTP via a minimal client (candidates include `minreq` and `ureq`) for outbound provider, GitHub, and Kubernetes API calls.
+- A blocking, thread-per-connection HTTP server for the locally served web control surface, webhook receiver, and ACME challenge responder.
+
+The TUI event loop on the main thread acts as the central select point, draining channels from all worker threads on each tick.
+
+If a future workload genuinely requires high-fanout I/O multiplexing beyond what threads and channels can cover, the preferred migration path is `smol` rather than `tokio`, to preserve the minimal-dependency constraint.
+
 ## 15. Security and Trust Model
 
 - Calypso is trusted to orchestrate work, but not to bypass repository policy.
@@ -1258,3 +1281,7 @@ The following decisions remain intentionally open at product-spec stage:
 21. What additional containerized service classes, if any, must be part of the default Calypso application model beyond static-files, API, and worker services?
 22. What studio preview contract is required in the first release: full embedded browser preview, linked preview URL only, or both?
 23. What branch-to-preview update mechanism should be primary in studio mode: GitHub event-driven, polling, or a hybrid model?
+
+### Resolved decisions
+
+1. **Concurrency model**: synchronous thread-per-concern with channels, no async runtime. See §14 Extensibility, Concurrency and runtime model.
