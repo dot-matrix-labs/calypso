@@ -68,9 +68,7 @@ fn main() {
         [command, flag] if command == "doctor" && flag == "--fix" => {
             let results = run_doctor_fix_all(&cwd);
             println!("{}", render_fix_results(&results));
-            let any_failed = results
-                .iter()
-                .any(|r| r.validated == Some(false));
+            let any_failed = results.iter().any(|r| r.validated == Some(false));
             if any_failed {
                 std::process::exit(1);
             }

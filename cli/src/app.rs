@@ -78,7 +78,11 @@ pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptRes
         None
     } else {
         let post_report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
-        post_report.checks.iter().find(|c| c.id.label() == check_id).map(|c| c.status == DoctorStatus::Passing)
+        post_report
+            .checks
+            .iter()
+            .find(|c| c.id.label() == check_id)
+            .map(|c| c.status == DoctorStatus::Passing)
     };
 
     Ok(FixAttemptResult {
@@ -129,8 +133,7 @@ pub fn run_doctor_fix_all(cwd: &Path) -> Vec<FixAttemptResult> {
             Some(fix) => match apply_fix(fix, &repo_root) {
                 Ok(output) => {
                     // Re-run check to validate the fix.
-                    let post_report =
-                        collect_doctor_report(&HostDoctorEnvironment, &repo_root);
+                    let post_report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
                     let validated = post_report
                         .checks
                         .iter()
