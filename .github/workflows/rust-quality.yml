@@ -11,6 +11,18 @@ jobs:
   format:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        include:
+          - name: stable / rust stable
+            toolchain: stable
+          - name: msrv / rust 1.85.0
+            toolchain: "1.85.0"
+          - name: coverage-pinned / rust 1.94.0
+            toolchain: "1.94.0"
+
+    name: format (${{ matrix.name }})
+
     steps:
       - uses: actions/checkout@v5
         with:
@@ -19,9 +31,10 @@ jobs:
         run: git submodule update --init
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
-          components: rustfmt, clippy
+          toolchain: ${{ matrix.toolchain }}
+          components: rustfmt
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -36,6 +49,18 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        include:
+          - name: stable / rust stable
+            toolchain: stable
+          - name: msrv / rust 1.85.0
+            toolchain: "1.85.0"
+          - name: coverage-pinned / rust 1.94.0
+            toolchain: "1.94.0"
+
+    name: clippy (${{ matrix.name }})
+
     steps:
       - uses: actions/checkout@v5
         with:
@@ -44,8 +69,9 @@ jobs:
         run: git submodule update --init
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ matrix.toolchain }}
           components: clippy
 
       - name: Cache cargo artifacts
@@ -61,6 +87,18 @@ jobs:
   build:
     runs-on: ubuntu-latest
 
+    strategy:
+      matrix:
+        include:
+          - name: stable / rust stable
+            toolchain: stable
+          - name: msrv / rust 1.85.0
+            toolchain: "1.85.0"
+          - name: coverage-pinned / rust 1.94.0
+            toolchain: "1.94.0"
+
+    name: build (${{ matrix.name }})
+
     steps:
       - uses: actions/checkout@v5
         with:
@@ -69,7 +107,9 @@ jobs:
         run: git submodule update --init
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
 
       - name: Cache cargo artifacts
         uses: Swatinem/rust-cache@v2
