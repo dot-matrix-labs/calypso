@@ -19,7 +19,7 @@ name = "calypso-cli"
 version = "0.1.0"
 dependencies = [
  "crossterm",
- "regex-lite",
+ "nightshift",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -131,6 +131,17 @@ dependencies = [
  "log",
  "wasi",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "nightshift"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]

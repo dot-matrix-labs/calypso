@@ -1,0 +1,8 @@
+# Phony prompts for testing
+prompts:
+  phony-alpha-task: |
+    You are the phony alpha agent. Complete the alpha step and emit [CALYPSO:OK].
+  phony-beta-task: |
+    You are the phony beta agent. Complete the beta step and emit [CALYPSO:OK].
+  phony-gamma-task: |
+    You are the phony gamma agent. Complete the gamma step and emit [CALYPSO:OK].
