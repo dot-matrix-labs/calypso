@@ -1,4 +1,4 @@
-Done. All tasks for #150, #167 are complete. TUI surfaces are functional, headless tracing is in place.
+Done. CI fixes for PR #168 are complete — formatting, clippy lints, and coverage threshold all pass.
 
 ---
 

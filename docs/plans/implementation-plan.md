@@ -20,3 +20,9 @@
 - [x] Change headless default verbosity to Debug
 - [x] Add pre-step and post-step transition tracing in headless driver loop
 - [x] Add tests (11 new navigator tests, 1 new headless test)
+
+## PR #168 CI fixes: formatting, clippy collapsible-if, coverage threshold
+
+- [x] cargo fmt to fix formatting in tui.rs, headless.rs, tests/tui.rs
+- [x] Collapse 4 nested if-let/if patterns in tui.rs for clippy::collapsible_if
+- [x] Add 34 new tests to raise coverage from 89.49% to 90.04%

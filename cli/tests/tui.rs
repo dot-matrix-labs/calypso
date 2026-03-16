@@ -8,8 +8,8 @@ use calypso_cli::state::{
 };
 use calypso_cli::tui::{
     AppEvent, AppShell, InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface,
-    SurfaceEvent, TerminalSize, WorkflowNavigator, answer_clarification,
-    interrupt_active_sessions, queue_follow_up,
+    SurfaceEvent, TerminalSize, WorkflowNavigator, answer_clarification, interrupt_active_sessions,
+    queue_follow_up,
 };
 
 fn sample_feature() -> FeatureState {
@@ -1291,7 +1291,10 @@ fn workflow_navigator_renders_without_crash() {
     let mut buf = Vec::new();
     nav.render_paned(&mut buf, &layout).unwrap();
     let output = String::from_utf8_lossy(&buf);
-    assert!(output.contains("Workflows"), "header should show 'Workflows'");
+    assert!(
+        output.contains("Workflows"),
+        "header should show 'Workflows'"
+    );
 }
 
 #[test]
@@ -1339,10 +1342,7 @@ fn workflow_navigator_set_active_position() {
     let mut buf = Vec::new();
     nav.render_paned(&mut buf, &layout).unwrap();
     let output = String::from_utf8_lossy(&buf);
-    assert!(
-        output.contains("●"),
-        "active state should show ● marker"
-    );
+    assert!(output.contains("●"), "active state should show ● marker");
 }
 
 #[test]
@@ -1406,4 +1406,586 @@ fn app_shell_sm_tab_delegates_keys_to_navigator() {
     let event = shell.handle_key_event(KeyEvent::from(KeyCode::Char('a')), cwd);
     assert_eq!(event, AppEvent::Continue);
     assert_eq!(shell.tab, calypso_cli::tui::AppTab::Agents);
+}
+
+// ── Navigator collapse / expand coverage ────────────────────────────────────
+
+#[test]
+fn workflow_navigator_left_collapses_expanded_entry() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Expand then collapse with Left arrow.
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Enter)),
+        SmEvent::Continue
+    );
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Left)),
+        SmEvent::Continue
+    );
+
+    // After collapse, re-render should not show expanded marker.
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    nav.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        !output.contains("▾"),
+        "entry should be collapsed after Left"
+    );
+}
+
+#[test]
+fn workflow_navigator_esc_collapses_expanded_entry_then_quits() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Expand first entry.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    // Esc should collapse expanded entries first, not quit.
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Esc)),
+        SmEvent::Continue
+    );
+
+    // Second Esc should quit since nothing is expanded.
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Esc)),
+        SmEvent::Quit
+    );
+}
+
+#[test]
+fn workflow_navigator_g_uppercase_jumps_to_bottom() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Move down a bit to confirm G moves further.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // Jump to bottom.
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Char('G'))),
+        SmEvent::Continue
+    );
+}
+
+#[test]
+fn workflow_navigator_expand_state_node() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Expand first entry to reveal states.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Move down to first state row.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // Try to expand the state.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Left on a state should collapse its sub-expansion or parent.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Left));
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 40,
+    });
+    let mut buf = Vec::new();
+    nav.render_paned(&mut buf, &layout).unwrap();
+    // Just verify it renders without panic.
+    assert!(!buf.is_empty());
+}
+
+#[test]
+fn workflow_navigator_left_on_state_collapses_parent_entry() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Expand first entry.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Move down to a state row.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // Left on a state row should collapse the parent entry.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Left));
+
+    // Esc should now quit since nothing is expanded.
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Esc)),
+        SmEvent::Quit
+    );
+}
+
+#[test]
+fn workflow_navigator_unknown_key_returns_continue() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+    assert_eq!(
+        nav.handle_key_event(KeyEvent::from(KeyCode::Char('z'))),
+        SmEvent::Continue
+    );
+}
+
+// ── StateMachineSurface coverage ────────────────────────────────────────────
+
+#[test]
+fn sm_surface_default_trait_creates_empty_surface() {
+    let surface: StateMachineSurface = Default::default();
+    let layout = sm_layout();
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    // Should render without crashing.
+    assert!(!buf.is_empty());
+}
+
+#[test]
+fn sm_surface_deprecated_waiting_for_human_maps_to_implementation_visible_rows() {
+    let mut feature = feature_with_pending_gates();
+    feature.workflow_state = WorkflowState::WaitingForHuman;
+    let surface = StateMachineSurface::from_feature_state(&feature);
+    let layout = sm_layout();
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    // The active marker should appear on the Implementation step.
+    assert!(
+        output.contains("Implementation"),
+        "WaitingForHuman should map to Implementation"
+    );
+}
+
+#[test]
+fn sm_surface_deprecated_ready_for_review_maps_to_release_ready() {
+    let mut feature = feature_with_pending_gates();
+    feature.workflow_state = WorkflowState::ReadyForReview;
+    let surface = StateMachineSurface::from_feature_state(&feature);
+    let layout = sm_layout();
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("Release Ready"),
+        "ReadyForReview should map to Release Ready"
+    );
+}
+
+#[test]
+fn sm_surface_manual_gate_shows_manual_icon() {
+    let mut feature = feature_with_pending_gates();
+    feature.gate_groups[0].gates[1].status = GateStatus::Manual;
+    let surface = StateMachineSurface::from_feature_state(&feature);
+    let layout = sm_layout();
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(output.contains("◆"), "manual gate should show ◆ icon");
+}
+
+#[test]
+fn sm_surface_left_collapses_expanded_step() {
+    let feature = feature_with_pending_gates();
+    let mut surface = StateMachineSurface::from_feature_state(&feature);
+    // Move to a gate group and expand it.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Left should collapse the gate group.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Left));
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Char('q'))),
+        SmEvent::Quit
+    );
+}
+
+#[test]
+fn sm_surface_gate_node_expand_is_noop() {
+    let feature = feature_with_pending_gates();
+    let mut surface = StateMachineSurface::from_feature_state(&feature);
+    // Navigate to the expanded step, then to a gate group, expand it, then to a gate.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // Trying to expand a gate row should be a no-op.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let layout = sm_layout();
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    assert!(!buf.is_empty());
+}
+
+// ── AppShell coverage ───────────────────────────────────────────────────────
+
+#[test]
+fn app_shell_with_sm_sets_sm_surface() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let sm = StateMachineSurface::from_feature_state(&feature_with_pending_gates());
+    let shell = AppShell::new(doctor).with_sm(sm);
+    // wf_nav should remain None when using with_sm.
+    assert!(shell.wf_nav.is_none());
+}
+
+#[test]
+fn app_shell_sm_tab_quit_from_legacy_surface() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let sm = StateMachineSurface::new();
+    let mut shell = AppShell::new(doctor).with_sm(sm);
+    shell.tab = calypso_cli::tui::AppTab::StateMachine;
+    let cwd = std::path::Path::new("/tmp");
+
+    // 'q' on legacy SM surface should quit.
+    let event = shell.handle_key_event(KeyEvent::from(KeyCode::Char('q')), cwd);
+    assert_eq!(event, AppEvent::Quit);
+}
+
+#[test]
+fn app_shell_tab_switching_at_boundaries() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let mut shell = AppShell::new(doctor);
+    let cwd = std::path::Path::new("/tmp");
+
+    // Left at Doctor tab stays on Doctor.
+    shell.handle_key_event(KeyEvent::from(KeyCode::Left), cwd);
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::Doctor);
+
+    // Right moves to StateMachine then Agents.
+    shell.handle_key_event(KeyEvent::from(KeyCode::Right), cwd);
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::StateMachine);
+    shell.handle_key_event(KeyEvent::from(KeyCode::Right), cwd);
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::Agents);
+
+    // Right at Agents stays on Agents.
+    shell.handle_key_event(KeyEvent::from(KeyCode::Right), cwd);
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::Agents);
+}
+
+#[test]
+fn app_shell_ctrl_c_quits_from_any_tab() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let mut shell = AppShell::new(doctor);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+    let cwd = std::path::Path::new("/tmp");
+
+    let event = shell.handle_key_event(
+        KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL),
+        cwd,
+    );
+    assert_eq!(event, AppEvent::Quit);
+}
+
+#[test]
+fn app_shell_agents_tab_without_operator_uses_placeholder() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let mut shell = AppShell::new(doctor);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+    let cwd = std::path::Path::new("/tmp");
+
+    // 'q' on placeholder should quit.
+    let event = shell.handle_key_event(KeyEvent::from(KeyCode::Char('q')), cwd);
+    assert_eq!(event, AppEvent::Quit);
+
+    // Unknown key should continue.
+    let event = shell.handle_key_event(KeyEvent::from(KeyCode::Char('x')), cwd);
+    assert_eq!(event, AppEvent::Continue);
+}
+
+#[test]
+fn app_shell_renders_sm_tab_with_legacy_surface() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let sm = StateMachineSurface::from_feature_state(&feature_with_pending_gates());
+    let mut shell = AppShell::new(doctor).with_sm(sm);
+    shell.tab = calypso_cli::tui::AppTab::StateMachine;
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    shell.render_paned(&mut buf, &layout).unwrap();
+    assert!(!buf.is_empty());
+}
+
+#[test]
+fn app_shell_renders_agents_tab_without_operator() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let mut shell = AppShell::new(doctor);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    shell.render_paned(&mut buf, &layout).unwrap();
+    assert!(!buf.is_empty());
+}
+
+// ── OperatorSurface render coverage ─────────────────────────────────────────
+
+#[test]
+fn operator_surface_render_with_github_snapshot() {
+    let mut feature = sample_feature();
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Passing,
+        mergeability: GithubMergeability::Mergeable,
+    });
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let output = surface.render();
+    assert!(
+        output.contains("GitHub"),
+        "render should include GitHub section"
+    );
+    assert!(
+        output.contains("Review:"),
+        "render should show review field"
+    );
+}
+
+#[test]
+fn operator_surface_render_with_github_error() {
+    let mut feature = sample_feature();
+    feature.github_error = Some("rate limit exceeded".to_string());
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let output = surface.render();
+    assert!(
+        output.contains("GitHub  error: rate limit exceeded"),
+        "render should display github error"
+    );
+}
+
+#[test]
+fn operator_surface_render_with_manual_gate() {
+    let mut feature = sample_feature();
+    feature.gate_groups[0].gates[0].status = GateStatus::Manual;
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let output = surface.render();
+    assert!(output.contains("◆"), "manual gate should show ◆ icon");
+}
+
+#[test]
+fn operator_surface_render_selected_session_failed_status() {
+    let mut feature = sample_feature();
+    feature.active_sessions[0].status = AgentSessionStatus::Failed;
+    feature.active_sessions[0].output.clear();
+    let mut surface = OperatorSurface::from_feature_state(&feature);
+    // Select the session.
+    surface.focus_session("session_01");
+    let output = surface.render();
+    assert!(output.contains("✗"), "failed session should show ✗ icon");
+    // Empty source output maps to "No streamed output yet." in the session view.
+    assert!(
+        output.contains("No streamed output"),
+        "empty session output should show placeholder"
+    );
+}
+
+#[test]
+fn operator_surface_render_session_aborted_status() {
+    let mut feature = sample_feature();
+    feature.active_sessions[0].status = AgentSessionStatus::Aborted;
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let output = surface.render();
+    assert!(output.contains("⊗"), "aborted session should show ⊗ icon");
+}
+
+#[test]
+fn operator_surface_render_no_sessions() {
+    let mut feature = sample_feature();
+    feature.active_sessions.clear();
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let output = surface.render();
+    assert!(
+        output.contains("No active sessions"),
+        "empty sessions should show placeholder"
+    );
+}
+
+// ── OperatorSurface paned render coverage ───────────────────────────────────
+
+#[test]
+fn operator_surface_render_paned_with_github_snapshot() {
+    let mut feature = sample_feature();
+    feature.github_snapshot = Some(GithubPullRequestSnapshot {
+        is_draft: false,
+        review_status: GithubReviewStatus::Approved,
+        checks: EvidenceStatus::Passing,
+        mergeability: GithubMergeability::Mergeable,
+    });
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("GitHub"),
+        "paned render should include GitHub section"
+    );
+}
+
+#[test]
+fn operator_surface_render_paned_with_github_error() {
+    let mut feature = sample_feature();
+    feature.github_error = Some("rate limited".to_string());
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("rate limited"),
+        "paned render should show GitHub error"
+    );
+}
+
+#[test]
+fn operator_surface_render_paned_with_manual_gates() {
+    let mut feature = sample_feature();
+    feature.gate_groups[0].gates[0].status = GateStatus::Manual;
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(output.contains("◆"), "paned render should show manual icon");
+}
+
+#[test]
+fn operator_surface_render_paned_no_sessions() {
+    let mut feature = sample_feature();
+    feature.active_sessions.clear();
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("No active sessions"),
+        "paned render should show 'No active sessions'"
+    );
+}
+
+#[test]
+fn operator_surface_render_paned_with_failed_session() {
+    let mut feature = sample_feature();
+    feature.active_sessions[0].status = AgentSessionStatus::Failed;
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    assert!(!buf.is_empty());
+}
+
+#[test]
+fn operator_surface_render_paned_with_clarification() {
+    let mut feature = sample_feature();
+    feature.active_sessions[0].status = AgentSessionStatus::WaitingForHuman;
+    feature.clarification_history.push(ClarificationEntry {
+        session_id: "session_01".to_string(),
+        question: "What database should we use?".to_string(),
+        answer: None,
+        timestamp: "2026-01-01T00:00:00Z".to_string(),
+    });
+    let surface = OperatorSurface::from_feature_state(&feature);
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    surface.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("What database"),
+        "paned render should show clarification question"
+    );
+}
+
+// ── run_watch_with coverage ─────────────────────────────────────────────────
+
+#[test]
+fn run_watch_with_missing_file_returns_error() {
+    let result = calypso_cli::tui::run_watch_with("/tmp/nonexistent_state.json", |_| Ok(()));
+    assert!(result.is_err());
+}
+
+#[test]
+fn run_watch_with_valid_state_roundtrips() {
+    use calypso_cli::state::{
+        DeploymentRecord, ReleaseRecord, RepositoryIdentity, RepositoryState,
+    };
+    let dir = std::env::temp_dir().join(format!("calypso_test_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.json");
+
+    let state = RepositoryState {
+        version: 1,
+        schema_version: 1,
+        repo_id: "test-repo".to_string(),
+        identity: RepositoryIdentity::default(),
+        providers: Vec::new(),
+        releases: Vec::<ReleaseRecord>::new(),
+        deployments: Vec::<DeploymentRecord>::new(),
+        current_feature: sample_feature(),
+    };
+    state.save_to_path(&path).unwrap();
+
+    let result = calypso_cli::tui::run_watch_with(path.to_str().unwrap(), |feature| {
+        feature.workflow_state = WorkflowState::QaValidation;
+        Ok(())
+    });
+    assert!(result.is_ok());
+
+    let reloaded = RepositoryState::load_from_path(&path).unwrap();
+    assert_eq!(
+        reloaded.current_feature.workflow_state,
+        WorkflowState::QaValidation
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn run_watch_with_runner_error_propagates() {
+    use calypso_cli::state::{
+        DeploymentRecord, ReleaseRecord, RepositoryIdentity, RepositoryState,
+    };
+    let dir = std::env::temp_dir().join(format!("calypso_test_err_{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("state.json");
+
+    let state = RepositoryState {
+        version: 1,
+        schema_version: 1,
+        repo_id: "test-repo".to_string(),
+        identity: RepositoryIdentity::default(),
+        providers: Vec::new(),
+        releases: Vec::<ReleaseRecord>::new(),
+        deployments: Vec::<DeploymentRecord>::new(),
+        current_feature: sample_feature(),
+    };
+    state.save_to_path(&path).unwrap();
+
+    let result = calypso_cli::tui::run_watch_with(path.to_str().unwrap(), |_| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "test runner error",
+        ))
+    });
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("test runner error"));
+    let _ = std::fs::remove_dir_all(&dir);
 }

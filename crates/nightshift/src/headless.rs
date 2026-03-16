@@ -282,10 +282,7 @@ fn run_driver_loop(
             }
             DriverStepResult::Unchanged => {
                 logger
-                    .entry(
-                        LogLevel::Debug,
-                        &format!("{from_state} → unchanged"),
-                    )
+                    .entry(LogLevel::Debug, &format!("{from_state} → unchanged"))
                     .component(Component::StateMachine)
                     .event(LogEvent::StateTransition)
                     .field("from_state", &from_state)

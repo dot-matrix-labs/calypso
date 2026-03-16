@@ -1562,8 +1562,15 @@ struct NavSubState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NavNodeId {
     Entry(usize),
-    State { entry: usize, state: usize },
-    SubState { entry: usize, state: usize, sub: usize },
+    State {
+        entry: usize,
+        state: usize,
+    },
+    SubState {
+        entry: usize,
+        state: usize,
+        sub: usize,
+    },
 }
 
 /// A flat visible row in the navigator.
@@ -1629,14 +1636,14 @@ fn topo_order_states(
         ordered.push(name.clone());
 
         // Follow all transition targets from this state.
-        if let Some(cfg) = states.get(&name) {
-            if let Some(ref next) = cfg.next {
-                for key in next.all_event_keys() {
-                    if let Some(target) = next.target_for(key) {
-                        if !visited.contains(target) {
-                            queue.push_back(target.to_string());
-                        }
-                    }
+        if let Some(cfg) = states.get(&name)
+            && let Some(ref next) = cfg.next
+        {
+            for key in next.all_event_keys() {
+                if let Some(target) = next.target_for(key)
+                    && !visited.contains(target)
+                {
+                    queue.push_back(target.to_string());
                 }
             }
         }
@@ -1714,9 +1721,9 @@ impl WorkflowNavigator {
                     };
                     (workflow.clone(), label, "⚡")
                 }
-                EntryPoint::CronScheduled {
-                    workflow, cron, ..
-                } => (workflow.clone(), format!("cron: {cron}"), "⏱"),
+                EntryPoint::CronScheduled { workflow, cron, .. } => {
+                    (workflow.clone(), format!("cron: {cron}"), "⏱")
+                }
                 EntryPoint::AutoStart { workflow, .. } => {
                     (workflow.clone(), "auto-start".to_string(), "▶")
                 }
@@ -1725,10 +1732,7 @@ impl WorkflowNavigator {
             // Build states for this workflow.
             let wf = interp.registry.get(&workflow_name);
             let states = if let Some(wf) = wf {
-                let ordered = topo_order_states(
-                    wf.initial_state.as_deref(),
-                    &wf.states,
-                );
+                let ordered = topo_order_states(wf.initial_state.as_deref(), &wf.states);
                 ordered
                     .iter()
                     .map(|state_name| {
@@ -1740,9 +1744,10 @@ impl WorkflowNavigator {
                         // For kind=workflow states, resolve sub-workflow states.
                         let sub_states = if matches!(kind, Some(StateKind::Workflow)) {
                             let sub_wf_name = cfg.and_then(|c| c.workflow.as_deref());
-                            if let (Some(_sub_name), Some(sub_wf)) =
-                                (sub_wf_name, sub_wf_name.and_then(|n| interp.registry.get(n)))
-                            {
+                            if let (Some(_sub_name), Some(sub_wf)) = (
+                                sub_wf_name,
+                                sub_wf_name.and_then(|n| interp.registry.get(n)),
+                            ) {
                                 let sub_ordered = topo_order_states(
                                     sub_wf.initial_state.as_deref(),
                                     &sub_wf.states,
@@ -1853,7 +1858,10 @@ impl WorkflowNavigator {
                     let has_sub = !state.sub_states.is_empty();
 
                     rows.push(NavRow {
-                        node_id: NavNodeId::State { entry: ei, state: si },
+                        node_id: NavNodeId::State {
+                            entry: ei,
+                            state: si,
+                        },
                         depth: 1,
                         label: state.state_name.clone(),
                         icon: state.kind_icon,
@@ -1929,7 +1937,11 @@ impl WorkflowNavigator {
                 break;
             }
 
-            let cursor = if list_idx == self.selected { "▶" } else { " " };
+            let cursor = if list_idx == self.selected {
+                "▶"
+            } else {
+                " "
+            };
             let expand_icon = if nav_row.is_expandable {
                 if nav_row.is_expanded { "▾" } else { "▸" }
             } else {
@@ -1984,17 +1996,18 @@ impl WorkflowNavigator {
             }
             KeyCode::Enter | KeyCode::Right => {
                 // Expand the selected row.
-                if let Some(row) = rows.get(self.selected) {
-                    if row.is_expandable && !row.is_expanded {
-                        match &row.node_id {
-                            NavNodeId::Entry(i) => {
-                                self.expanded_entries.insert(*i);
-                            }
-                            NavNodeId::State { entry, state } => {
-                                self.expanded_sub = Some((*entry, *state));
-                            }
-                            NavNodeId::SubState { .. } => {}
+                if let Some(row) = rows.get(self.selected)
+                    && row.is_expandable
+                    && !row.is_expanded
+                {
+                    match &row.node_id {
+                        NavNodeId::Entry(i) => {
+                            self.expanded_entries.insert(*i);
                         }
+                        NavNodeId::State { entry, state } => {
+                            self.expanded_sub = Some((*entry, *state));
+                        }
+                        NavNodeId::SubState { .. } => {}
                     }
                 }
                 SmEvent::Continue
@@ -2864,10 +2877,10 @@ fn load_navigator_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) 
 
         // If a workflow execution state exists, highlight the active position.
         let exec_path = repo_root.join(".calypso").join("workflow-state.json");
-        if let Ok(json) = std::fs::read_to_string(&exec_path) {
-            if let Ok(exec) = serde_json::from_str::<WorkflowExecutionState>(&json) {
-                nav.set_active_position(&exec);
-            }
+        if let Ok(json) = std::fs::read_to_string(&exec_path)
+            && let Ok(exec) = serde_json::from_str::<WorkflowExecutionState>(&json)
+        {
+            nav.set_active_position(&exec);
         }
 
         shell.wf_nav = Some(nav);
