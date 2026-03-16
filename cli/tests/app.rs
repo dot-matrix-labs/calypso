@@ -233,7 +233,16 @@ fn resolve_current_pull_request_returns_error_when_no_github_remote() {
         .output()
         .expect("git init should run");
     std::process::Command::new("git")
-        .args(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git commit should run");
@@ -262,13 +271,27 @@ fn resolve_current_pull_request_parses_successful_output() {
         .output()
         .expect("git init should run");
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/dot-matrix-labs/calypso.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
     std::fs::write(temp_dir.join("README"), "init").expect("readme should write");
     std::process::Command::new("git")
-        .args(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git commit should run");
@@ -413,12 +436,26 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
         .output()
         .expect("git init should run");
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/dot-matrix-labs/calypso.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
     std::process::Command::new("git")
-        .args(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git commit should run");
@@ -469,7 +506,12 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
     let repo_root = init_git_repo("feat/run-status-gh-error");
     // Add a GitHub remote so resolve_owner_repo works.
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/dot-matrix-labs/calypso.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
         .current_dir(&repo_root)
         .output()
         .expect("git remote add should run");
@@ -547,12 +589,26 @@ fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_js
         .output()
         .expect("git init should run");
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/dot-matrix-labs/calypso.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
     std::process::Command::new("git")
-        .args(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git commit should run");
@@ -597,12 +653,26 @@ fn resolve_current_pull_request_returns_none_when_gh_returns_empty_array() {
         .output()
         .expect("git init should run");
     std::process::Command::new("git")
-        .args(["remote", "add", "origin", "https://github.com/dot-matrix-labs/calypso.git"])
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
     std::process::Command::new("git")
-        .args(["-c", "user.email=test@test.com", "-c", "user.name=Test", "commit", "--allow-empty", "-m", "init"])
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
         .current_dir(&temp_dir)
         .output()
         .expect("git commit should run");

@@ -536,10 +536,12 @@ impl InitEnvironment for HostInitEnvironment {
         }
         // Try to extract clone_url from the response JSON; fall back to constructed URL.
         let stdout = String::from_utf8_lossy(&output.stdout);
-        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
-            if let Some(clone_url) = value.get("clone_url").and_then(|v| v.as_str()) {
-                return Ok(clone_url.to_string());
-            }
+        if let Ok(clone_url) = serde_json::from_str::<serde_json::Value>(&stdout)
+            .ok()
+            .and_then(|v| v.get("clone_url")?.as_str().map(String::from))
+            .ok_or(())
+        {
+            return Ok(clone_url);
         }
         Ok(format!("https://github.com/{org}/{repo}.git"))
     }

@@ -16,3 +16,4 @@
 - [x] Replace `gh pr view <branch>` with REST call in `feature_start.rs`
 - [x] Replace `gh pr edit` with `gh api --method PATCH` in `feature_start.rs`
 - [x] Update all test fixtures to match new `gh api` command shapes
+- [x] Fix cargo fmt and clippy warnings
