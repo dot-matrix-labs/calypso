@@ -53,7 +53,7 @@ Options:
   -h, --help          Show this help output
   -v, --version       Show build version information
   --headless          Run the orchestrator without the TUI (CI / daemon mode)
-  -v, -vv             Verbosity in headless mode: -v = info, -vv = debug
+  -v, -vv             Verbosity in headless mode (default: debug): -v = info, -vv = trace
   --json              Emit JSON-lines instead of human-readable text (headless)
 
 Positional:

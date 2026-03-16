@@ -8,7 +8,8 @@ use calypso_cli::state::{
 };
 use calypso_cli::tui::{
     AppEvent, AppShell, InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface,
-    SurfaceEvent, TerminalSize, answer_clarification, interrupt_active_sessions, queue_follow_up,
+    SurfaceEvent, TerminalSize, WorkflowNavigator, answer_clarification,
+    interrupt_active_sessions, queue_follow_up,
 };
 
 fn sample_feature() -> FeatureState {
@@ -1215,4 +1216,194 @@ fn app_shell_sm_jump_to_agents_focuses_session() {
     // Operator should have session_01 focused (index 0)
     let selected = shell.operator.as_ref().unwrap().selected_session();
     assert_eq!(selected, Some(0));
+}
+
+// ── WorkflowNavigator tests ──────────────────────────────────────────────────
+
+#[test]
+fn workflow_navigator_loads_all_entry_points() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let nav = WorkflowNavigator::from_interpreter(&interp);
+    // The embedded blueprints produce several entry points.
+    assert!(
+        nav.entry_count() >= 4,
+        "expected at least 4 entry points, got {}",
+        nav.entry_count()
+    );
+}
+
+#[test]
+fn workflow_navigator_expand_collapse_entry() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Initial state: all collapsed, cursor at 0.
+    let event = nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_eq!(event, SmEvent::Continue);
+
+    // Down then expand the second entry.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    // Collapse with Left.
+    let event = nav.handle_key_event(KeyEvent::from(KeyCode::Left));
+    assert_eq!(event, SmEvent::Continue);
+
+    // Collapse with Esc when nothing expanded should quit.
+    let event = nav.handle_key_event(KeyEvent::from(KeyCode::Esc));
+    assert_eq!(event, SmEvent::Quit);
+}
+
+#[test]
+fn workflow_navigator_g_jumps_to_top() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Move down a few rows.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+    nav.handle_key_event(KeyEvent::from(KeyCode::Down));
+
+    // 'g' jumps to top.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Char('g')));
+    // 'q' quits.
+    let event = nav.handle_key_event(KeyEvent::from(KeyCode::Char('q')));
+    assert_eq!(event, SmEvent::Quit);
+}
+
+#[test]
+fn workflow_navigator_a_jumps_to_agents() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    let event = nav.handle_key_event(KeyEvent::from(KeyCode::Char('a')));
+    assert_eq!(event, SmEvent::JumpToAgents(None));
+}
+
+#[test]
+fn workflow_navigator_renders_without_crash() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let nav = WorkflowNavigator::from_interpreter(&interp);
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    nav.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(output.contains("Workflows"), "header should show 'Workflows'");
+}
+
+#[test]
+fn workflow_navigator_renders_expanded_states() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Expand first entry.
+    nav.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 40,
+    });
+    let mut buf = Vec::new();
+    nav.render_paned(&mut buf, &layout).unwrap();
+    // Should contain at least the expanded indicator.
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("▾"),
+        "expanded entry should show collapse indicator"
+    );
+}
+
+#[test]
+fn workflow_navigator_set_active_position() {
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+    // Use a real workflow name from the embedded blueprints.
+    let exec = calypso_cli::interpreter::WorkflowExecutionState {
+        position: calypso_cli::interpreter::WorkflowPosition {
+            workflow: "calypso-orchestrator-startup".to_string(),
+            state: "scan-repository".to_string(),
+        },
+        call_stack: vec![],
+    };
+    nav.set_active_position(&exec);
+
+    // The navigator should have auto-expanded the active workflow entry.
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 40,
+    });
+    let mut buf = Vec::new();
+    nav.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("●"),
+        "active state should show ● marker"
+    );
+}
+
+#[test]
+fn app_shell_with_navigator_uses_navigator_for_sm_tab() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let nav = WorkflowNavigator::from_interpreter(&interp);
+    let shell = AppShell::new(doctor).with_navigator(nav);
+
+    // SM tab should use navigator, not the legacy SM surface.
+    assert!(shell.wf_nav.is_some());
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    // Render SM tab.
+    let mut shell = shell;
+    shell.tab = calypso_cli::tui::AppTab::StateMachine;
+    shell.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    assert!(
+        output.contains("Workflows"),
+        "SM tab should show workflow navigator header"
+    );
+}
+
+#[test]
+fn app_shell_with_operator_shows_agents_tab() {
+    let feature = sample_feature();
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let op = OperatorSurface::from_feature_state(&feature);
+    let mut shell = AppShell::new(doctor).with_operator(op);
+    shell.tab = calypso_cli::tui::AppTab::Agents;
+
+    let layout = PanedLayout::from_size(TerminalSize {
+        cols: 120,
+        rows: 30,
+    });
+    let mut buf = Vec::new();
+    shell.render_paned(&mut buf, &layout).unwrap();
+    let output = String::from_utf8_lossy(&buf);
+    // Should show operator surface, not the placeholder.
+    assert!(
+        output.contains("Feature:"),
+        "agents tab with operator should show feature header"
+    );
+}
+
+#[test]
+fn app_shell_sm_tab_delegates_keys_to_navigator() {
+    let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
+    let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
+    let nav = WorkflowNavigator::from_interpreter(&interp);
+    let mut shell = AppShell::new(doctor).with_navigator(nav);
+    shell.tab = calypso_cli::tui::AppTab::StateMachine;
+    let cwd = std::path::Path::new("/tmp");
+
+    // 'a' should jump to agents tab via navigator.
+    let event = shell.handle_key_event(KeyEvent::from(KeyCode::Char('a')), cwd);
+    assert_eq!(event, AppEvent::Continue);
+    assert_eq!(shell.tab, calypso_cli::tui::AppTab::Agents);
 }

@@ -19,7 +19,7 @@ use crossterm::terminal::{
 
 use crate::state::{
     AgentSessionStatus, AgentTerminalOutcome, EvidenceStatus, FeatureState, GateGroupStatus,
-    GateStatus, GithubMergeability, GithubReviewStatus, WorkflowState,
+    GateStatus, GithubMergeability, GithubReviewStatus, RepositoryState, WorkflowState,
 };
 
 // TODO: browser view — serve operator surface as WASM inside the binary (no external bundle files).
@@ -1526,7 +1526,550 @@ fn doctor_check_views_from_report(report: &crate::doctor::DoctorReport) -> Vec<D
         .collect()
 }
 
-// ── State Machine TUI surface ─────────────────────────────────────────────────
+// ── Workflow Navigator TUI surface ─────────────────────────────────────────────
+
+use crate::blueprint_workflows::StateKind;
+use crate::interpreter::{EntryPoint, WorkflowExecutionState, WorkflowInterpreter};
+
+/// A classified entry point row in the navigator.
+#[derive(Debug, Clone)]
+struct NavEntry {
+    workflow_name: String,
+    entry_type_label: String,
+    entry_type_icon: &'static str,
+    states: Vec<NavState>,
+}
+
+/// A state within a workflow.
+#[derive(Debug, Clone)]
+struct NavState {
+    state_name: String,
+    kind_icon: &'static str,
+    kind_label: &'static str,
+    /// If kind=workflow, the name of the sub-workflow and its states.
+    sub_states: Vec<NavSubState>,
+}
+
+/// A state within a sub-workflow (expanded inline).
+#[derive(Debug, Clone)]
+struct NavSubState {
+    state_name: String,
+    kind_icon: &'static str,
+    kind_label: &'static str,
+}
+
+/// Identity of a node in the navigator tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NavNodeId {
+    Entry(usize),
+    State { entry: usize, state: usize },
+    SubState { entry: usize, state: usize, sub: usize },
+}
+
+/// A flat visible row in the navigator.
+#[derive(Debug, Clone)]
+struct NavRow {
+    node_id: NavNodeId,
+    depth: usize,
+    label: String,
+    icon: &'static str,
+    is_active: bool,
+    is_expandable: bool,
+    is_expanded: bool,
+    right_label: String,
+}
+
+fn state_kind_icon(kind: &Option<StateKind>) -> &'static str {
+    match kind {
+        Some(StateKind::Human) => "👤",
+        Some(StateKind::Agent) => "🤖",
+        Some(StateKind::Deterministic) => "⚙",
+        Some(StateKind::Github) | Some(StateKind::Ci) => "⬡",
+        Some(StateKind::Workflow) => "▶",
+        Some(StateKind::Terminal) => "■",
+        Some(StateKind::Function) => "ƒ",
+        Some(StateKind::GitHook) => "⚡",
+        None => "○",
+    }
+}
+
+fn state_kind_label(kind: &Option<StateKind>) -> &'static str {
+    match kind {
+        Some(StateKind::Human) => "human",
+        Some(StateKind::Agent) => "agent",
+        Some(StateKind::Deterministic) => "deterministic",
+        Some(StateKind::Github) => "github",
+        Some(StateKind::Ci) => "ci",
+        Some(StateKind::Workflow) => "workflow",
+        Some(StateKind::Terminal) => "terminal",
+        Some(StateKind::Function) => "function",
+        Some(StateKind::GitHook) => "git-hook",
+        None => "",
+    }
+}
+
+/// Compute a topological ordering of states starting from `initial_state` and following
+/// transitions. States unreachable from the initial state are appended at the end.
+fn topo_order_states(
+    initial: Option<&str>,
+    states: &std::collections::HashMap<String, crate::blueprint_workflows::StateConfig>,
+) -> Vec<String> {
+    let mut ordered = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+
+    if let Some(init) = initial {
+        queue.push_back(init.to_string());
+    }
+
+    while let Some(name) = queue.pop_front() {
+        if !visited.insert(name.clone()) {
+            continue;
+        }
+        ordered.push(name.clone());
+
+        // Follow all transition targets from this state.
+        if let Some(cfg) = states.get(&name) {
+            if let Some(ref next) = cfg.next {
+                for key in next.all_event_keys() {
+                    if let Some(target) = next.target_for(key) {
+                        if !visited.contains(target) {
+                            queue.push_back(target.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Append any unreachable states (sorted for stability).
+    let mut remaining: Vec<_> = states
+        .keys()
+        .filter(|k| !visited.contains(k.as_str()))
+        .cloned()
+        .collect();
+    remaining.sort();
+    ordered.extend(remaining);
+
+    ordered
+}
+
+/// Interactive workflow navigator showing entry points and their states.
+///
+/// Top-level rows are workflow entry points discovered from the embedded blueprints.
+/// Expanding an entry point reveals its states in topological order. States that are
+/// `kind: workflow` can be further expanded to show the sub-workflow's states inline.
+pub struct WorkflowNavigator {
+    entries: Vec<NavEntry>,
+    /// Active execution position, if a WorkflowExecutionState is loaded.
+    active_workflow: Option<String>,
+    active_state: Option<String>,
+    /// Which entry point indices are expanded.
+    expanded_entries: std::collections::BTreeSet<usize>,
+    /// Which (entry, state) is expanded to show sub-workflow states.
+    expanded_sub: Option<(usize, usize)>,
+    selected: usize,
+    scroll: usize,
+}
+
+impl Default for WorkflowNavigator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WorkflowNavigator {
+    /// Create an empty navigator (no workflows loaded).
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            active_workflow: None,
+            active_state: None,
+            expanded_entries: std::collections::BTreeSet::new(),
+            expanded_sub: None,
+            selected: 0,
+            scroll: 0,
+        }
+    }
+
+    /// Build the navigator from the embedded blueprint workflows.
+    pub fn from_interpreter(interp: &WorkflowInterpreter) -> Self {
+        let entry_points = interp.entry_points();
+        let mut entries = Vec::new();
+
+        for ep in &entry_points {
+            let (workflow_name, entry_type_label, entry_type_icon) = match ep {
+                EntryPoint::UserAction { workflow, .. } => {
+                    (workflow.clone(), "operator action".to_string(), "👤")
+                }
+                EntryPoint::EventTriggered {
+                    workflow,
+                    event,
+                    pattern,
+                    ..
+                } => {
+                    let label = match pattern {
+                        Some(p) => format!("event: {event}  {p}"),
+                        None => format!("event: {event}"),
+                    };
+                    (workflow.clone(), label, "⚡")
+                }
+                EntryPoint::CronScheduled {
+                    workflow, cron, ..
+                } => (workflow.clone(), format!("cron: {cron}"), "⏱"),
+                EntryPoint::AutoStart { workflow, .. } => {
+                    (workflow.clone(), "auto-start".to_string(), "▶")
+                }
+            };
+
+            // Build states for this workflow.
+            let wf = interp.registry.get(&workflow_name);
+            let states = if let Some(wf) = wf {
+                let ordered = topo_order_states(
+                    wf.initial_state.as_deref(),
+                    &wf.states,
+                );
+                ordered
+                    .iter()
+                    .map(|state_name| {
+                        let cfg = wf.states.get(state_name);
+                        let kind = cfg.and_then(|c| c.kind.clone());
+                        let kind_icon = state_kind_icon(&kind);
+                        let kind_label = state_kind_label(&kind);
+
+                        // For kind=workflow states, resolve sub-workflow states.
+                        let sub_states = if matches!(kind, Some(StateKind::Workflow)) {
+                            let sub_wf_name = cfg.and_then(|c| c.workflow.as_deref());
+                            if let (Some(_sub_name), Some(sub_wf)) =
+                                (sub_wf_name, sub_wf_name.and_then(|n| interp.registry.get(n)))
+                            {
+                                let sub_ordered = topo_order_states(
+                                    sub_wf.initial_state.as_deref(),
+                                    &sub_wf.states,
+                                );
+                                sub_ordered
+                                    .iter()
+                                    .map(|sub_state_name| {
+                                        let sub_cfg = sub_wf.states.get(sub_state_name);
+                                        let sub_kind = sub_cfg.and_then(|c| c.kind.clone());
+                                        NavSubState {
+                                            state_name: sub_state_name.clone(),
+                                            kind_icon: state_kind_icon(&sub_kind),
+                                            kind_label: state_kind_label(&sub_kind),
+                                        }
+                                    })
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            }
+                        } else {
+                            Vec::new()
+                        };
+
+                        NavState {
+                            state_name: state_name.clone(),
+                            kind_icon,
+                            kind_label,
+                            sub_states,
+                        }
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+
+            entries.push(NavEntry {
+                workflow_name,
+                entry_type_label,
+                entry_type_icon,
+                states,
+            });
+        }
+
+        Self {
+            entries,
+            active_workflow: None,
+            active_state: None,
+            expanded_entries: std::collections::BTreeSet::new(),
+            expanded_sub: None,
+            selected: 0,
+            scroll: 0,
+        }
+    }
+
+    /// Set the active execution position (highlights the current state).
+    pub fn set_active_position(&mut self, exec: &WorkflowExecutionState) {
+        self.active_workflow = Some(exec.position.workflow.clone());
+        self.active_state = Some(exec.position.state.clone());
+
+        // Auto-expand the active workflow entry.
+        for (i, entry) in self.entries.iter().enumerate() {
+            if entry.workflow_name == exec.position.workflow {
+                self.expanded_entries.insert(i);
+                // Place cursor on the active state.
+                let rows = self.visible_rows();
+                if let Some(pos) = rows.iter().position(|r| {
+                    matches!(&r.node_id, NavNodeId::State { entry, state }
+                        if self.entries[*entry].workflow_name == exec.position.workflow
+                        && self.entries[*entry].states[*state].state_name == exec.position.state)
+                }) {
+                    self.selected = pos;
+                }
+                break;
+            }
+        }
+    }
+
+    /// Build the flat visible row list.
+    fn visible_rows(&self) -> Vec<NavRow> {
+        let mut rows = Vec::new();
+
+        for (ei, entry) in self.entries.iter().enumerate() {
+            let is_expanded = self.expanded_entries.contains(&ei);
+            let is_active_entry = self
+                .active_workflow
+                .as_deref()
+                .is_some_and(|w| w == entry.workflow_name);
+
+            rows.push(NavRow {
+                node_id: NavNodeId::Entry(ei),
+                depth: 0,
+                label: entry.workflow_name.clone(),
+                icon: entry.entry_type_icon,
+                is_active: is_active_entry,
+                is_expandable: !entry.states.is_empty(),
+                is_expanded,
+                right_label: entry.entry_type_label.clone(),
+            });
+
+            if is_expanded {
+                for (si, state) in entry.states.iter().enumerate() {
+                    let is_active_state = is_active_entry
+                        && self
+                            .active_state
+                            .as_deref()
+                            .is_some_and(|s| s == state.state_name);
+                    let sub_expanded = self.expanded_sub == Some((ei, si));
+                    let has_sub = !state.sub_states.is_empty();
+
+                    rows.push(NavRow {
+                        node_id: NavNodeId::State { entry: ei, state: si },
+                        depth: 1,
+                        label: state.state_name.clone(),
+                        icon: state.kind_icon,
+                        is_active: is_active_state,
+                        is_expandable: has_sub,
+                        is_expanded: sub_expanded,
+                        right_label: state.kind_label.to_string(),
+                    });
+
+                    if sub_expanded {
+                        for (ssi, sub) in state.sub_states.iter().enumerate() {
+                            let is_active_sub = false;
+                            rows.push(NavRow {
+                                node_id: NavNodeId::SubState {
+                                    entry: ei,
+                                    state: si,
+                                    sub: ssi,
+                                },
+                                depth: 2,
+                                label: sub.state_name.clone(),
+                                icon: sub.kind_icon,
+                                is_active: is_active_sub,
+                                is_expandable: false,
+                                is_expanded: false,
+                                right_label: sub.kind_label.to_string(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        rows
+    }
+
+    /// Render the navigator into the paned layout.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        const HEADER_ROWS: u16 = 4;
+        let w = layout.cols as usize;
+        let content_rows = layout.content_rows;
+        let viewport_height = content_rows.saturating_sub(HEADER_ROWS) as usize;
+
+        // Header box
+        write_at(
+            stdout,
+            0,
+            0,
+            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 1, "│  Workflows", w)?;
+        write_at(
+            stdout,
+            0,
+            2,
+            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 3, "", w)?;
+
+        let rows = self.visible_rows();
+        let visible_start = self.scroll.min(rows.len().saturating_sub(1));
+
+        let mut render_row: u16 = HEADER_ROWS;
+        for (list_idx, nav_row) in rows.iter().enumerate() {
+            if render_row >= content_rows {
+                break;
+            }
+            if list_idx < visible_start {
+                continue;
+            }
+            if list_idx >= visible_start + viewport_height {
+                break;
+            }
+
+            let cursor = if list_idx == self.selected { "▶" } else { " " };
+            let expand_icon = if nav_row.is_expandable {
+                if nav_row.is_expanded { "▾" } else { "▸" }
+            } else {
+                " "
+            };
+            let indent: String = "  ".repeat(nav_row.depth);
+            let active_marker = if nav_row.is_active { "●" } else { "○" };
+
+            let line = format!(
+                "  {} {} {} [{}] {}{}",
+                cursor, expand_icon, active_marker, nav_row.icon, indent, nav_row.label,
+            );
+
+            // Right-align the type label
+            let right = &nav_row.right_label;
+            let left_len = line.chars().count();
+            let pad = w.saturating_sub(left_len + right.len() + 2);
+            let full_line = format!("{}{}{}", line, " ".repeat(pad), right);
+
+            write_at(stdout, 0, render_row, &full_line, w)?;
+            render_row += 1;
+        }
+
+        // Clear remaining rows
+        while render_row < content_rows {
+            write_at(stdout, 0, render_row, "", w)?;
+            render_row += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Handle a key event, returning an `SmEvent`.
+    pub fn handle_key_event(&mut self, event: KeyEvent) -> SmEvent {
+        let rows = self.visible_rows();
+        let row_count = rows.len();
+
+        match event.code {
+            KeyCode::Up => {
+                if self.selected > 0 {
+                    self.selected -= 1;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Down => {
+                if self.selected + 1 < row_count {
+                    self.selected += 1;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Enter | KeyCode::Right => {
+                // Expand the selected row.
+                if let Some(row) = rows.get(self.selected) {
+                    if row.is_expandable && !row.is_expanded {
+                        match &row.node_id {
+                            NavNodeId::Entry(i) => {
+                                self.expanded_entries.insert(*i);
+                            }
+                            NavNodeId::State { entry, state } => {
+                                self.expanded_sub = Some((*entry, *state));
+                            }
+                            NavNodeId::SubState { .. } => {}
+                        }
+                    }
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Left => {
+                // Collapse the selected row or its parent.
+                if let Some(row) = rows.get(self.selected) {
+                    match &row.node_id {
+                        NavNodeId::Entry(i) => {
+                            self.expanded_entries.remove(i);
+                        }
+                        NavNodeId::State { entry, .. } => {
+                            if self.expanded_sub.is_some() {
+                                self.expanded_sub = None;
+                            } else {
+                                self.expanded_entries.remove(entry);
+                            }
+                        }
+                        NavNodeId::SubState { .. } => {
+                            self.expanded_sub = None;
+                        }
+                    }
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Esc => {
+                // Collapse from innermost outward; quit when nothing remains open.
+                if self.expanded_sub.is_some() {
+                    self.expanded_sub = None;
+                    SmEvent::Continue
+                } else if !self.expanded_entries.is_empty() {
+                    self.expanded_entries.clear();
+                    SmEvent::Continue
+                } else {
+                    SmEvent::Quit
+                }
+            }
+            KeyCode::Char('g') => {
+                self.selected = 0;
+                self.scroll = 0;
+                SmEvent::Continue
+            }
+            KeyCode::Char('G') => {
+                if row_count > 0 {
+                    self.selected = row_count - 1;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Char('a') => SmEvent::JumpToAgents(None),
+            KeyCode::Char('q') => SmEvent::Quit,
+            _ => SmEvent::Continue,
+        }
+    }
+
+    /// Adjust the scroll offset to keep the cursor within the visible viewport.
+    fn adjust_scroll(&mut self, total_rows: usize) {
+        const VIEWPORT: usize = 15;
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + VIEWPORT {
+            self.scroll = self.selected + 1 - VIEWPORT;
+        }
+        if total_rows > VIEWPORT && self.scroll + VIEWPORT > total_rows {
+            self.scroll = total_rows - VIEWPORT;
+        }
+    }
+
+    /// Returns the number of entry point workflows.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+}
+
+// ── State Machine TUI surface (legacy feature-state pipeline) ─────────────────
 
 /// The ordered feature lifecycle pipeline steps (excludes side states Blocked/Aborted).
 fn sm_pipeline() -> [WorkflowState; 9] {
@@ -2083,7 +2626,7 @@ impl AppTab {
     fn screen_hints(self) -> &'static str {
         match self {
             AppTab::Doctor => "[↑/↓] Select  [f] Fix  [r] Refresh",
-            AppTab::StateMachine => "[↑/↓] Navigate  [Enter] Expand  [Esc] Collapse  [a] Agent",
+            AppTab::StateMachine => "[↑/↓] Navigate  [→/Enter] Expand  [←/Esc] Collapse  [a] Agent",
             AppTab::Agents => "[Tab] Sessions  [↑/↓] Navigate  [Ctrl+C] Interrupt",
         }
     }
@@ -2126,8 +2669,10 @@ pub enum AppEvent {
 pub struct AppShell {
     pub tab: AppTab,
     pub doctor: DoctorSurface,
-    /// State machine surface (always present; populated from feature state when available).
+    /// Legacy feature-state pipeline view (used when no workflow navigator is loaded).
     pub sm: StateMachineSurface,
+    /// Workflow navigator (preferred over `sm` when populated).
+    pub wf_nav: Option<WorkflowNavigator>,
     /// Operator surface used for the Agents tab (absent when no feature is active).
     pub operator: Option<OperatorSurface>,
 }
@@ -2138,12 +2683,18 @@ impl AppShell {
             tab: AppTab::Doctor,
             doctor,
             sm: StateMachineSurface::new(),
+            wf_nav: None,
             operator: None,
         }
     }
 
     pub fn with_sm(mut self, sm: StateMachineSurface) -> Self {
         self.sm = sm;
+        self
+    }
+
+    pub fn with_navigator(mut self, nav: WorkflowNavigator) -> Self {
+        self.wf_nav = Some(nav);
         self
     }
 
@@ -2175,17 +2726,24 @@ impl AppShell {
                 DoctorSurfaceEvent::Continue => AppEvent::Continue,
                 DoctorSurfaceEvent::Quit => AppEvent::Quit,
             },
-            AppTab::StateMachine => match self.sm.handle_key_event(event) {
-                SmEvent::Continue => AppEvent::Continue,
-                SmEvent::Quit => AppEvent::Quit,
-                SmEvent::JumpToAgents(session_id) => {
-                    self.tab = AppTab::Agents;
-                    if let (Some(id), Some(op)) = (session_id, &mut self.operator) {
-                        op.focus_session(&id);
+            AppTab::StateMachine => {
+                let sm_event = if let Some(nav) = &mut self.wf_nav {
+                    nav.handle_key_event(event)
+                } else {
+                    self.sm.handle_key_event(event)
+                };
+                match sm_event {
+                    SmEvent::Continue => AppEvent::Continue,
+                    SmEvent::Quit => AppEvent::Quit,
+                    SmEvent::JumpToAgents(session_id) => {
+                        self.tab = AppTab::Agents;
+                        if let (Some(id), Some(op)) = (session_id, &mut self.operator) {
+                            op.focus_session(&id);
+                        }
+                        AppEvent::Continue
                     }
-                    AppEvent::Continue
                 }
-            },
+            }
             AppTab::Agents => {
                 if let Some(op) = &mut self.operator {
                     match op.handle_key_event(event) {
@@ -2208,7 +2766,13 @@ impl AppShell {
     pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
         match self.tab {
             AppTab::Doctor => self.doctor.render_paned(stdout, layout)?,
-            AppTab::StateMachine => self.sm.render_paned(stdout, layout)?,
+            AppTab::StateMachine => {
+                if let Some(nav) = &self.wf_nav {
+                    nav.render_paned(stdout, layout)?;
+                } else {
+                    self.sm.render_paned(stdout, layout)?;
+                }
+            }
             AppTab::Agents => {
                 if let Some(op) = &self.operator {
                     op.render_paned(stdout, layout)?;
@@ -2293,6 +2857,33 @@ fn render_agents_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::
     )
 }
 
+/// Try to load the workflow navigator from embedded blueprints.
+fn load_navigator_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) {
+    if let Ok(interp) = WorkflowInterpreter::new() {
+        let mut nav = WorkflowNavigator::from_interpreter(&interp);
+
+        // If a workflow execution state exists, highlight the active position.
+        let exec_path = repo_root.join(".calypso").join("workflow-state.json");
+        if let Ok(json) = std::fs::read_to_string(&exec_path) {
+            if let Ok(exec) = serde_json::from_str::<WorkflowExecutionState>(&json) {
+                nav.set_active_position(&exec);
+            }
+        }
+
+        shell.wf_nav = Some(nav);
+    }
+}
+
+/// Try to load feature state from `.calypso/state.json` and populate the SM and operator surfaces.
+fn load_feature_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) {
+    let state_path = repo_root.join(".calypso").join("state.json");
+    if let Ok(repo_state) = RepositoryState::load_from_path(&state_path) {
+        let feature = &repo_state.current_feature;
+        shell.sm = StateMachineSurface::from_feature_state(feature);
+        shell.operator = Some(OperatorSurface::from_feature_state(feature));
+    }
+}
+
 /// Run the interactive app shell (three-tab TUI) from the given working directory.
 ///
 /// This is the entry point for the default `calypso` invocation when no state file is present.
@@ -2305,10 +2896,17 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     };
     use std::time::Duration;
 
+    use std::time::Instant;
+
     let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
     let doctor = DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
     let mut shell = AppShell::new(doctor);
+
+    // Load workflow navigator from embedded blueprints.
+    load_navigator_into_shell(&mut shell, &repo_root);
+    // Load feature state on startup if available.
+    load_feature_into_shell(&mut shell, &repo_root);
 
     let mut stdout = io::stdout();
     enable_raw_mode()?;
@@ -2319,7 +2917,16 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
         .map(|(cols, rows)| PanedLayout::from_size(TerminalSize { cols, rows }));
     queue!(stdout, Clear(ClearType::All))?;
 
+    let mut last_state_refresh = Instant::now();
+    const STATE_REFRESH_INTERVAL: Duration = Duration::from_secs(2);
+
     let loop_result = loop {
+        // Periodically reload state from disk so the TUI stays live.
+        if last_state_refresh.elapsed() >= STATE_REFRESH_INTERVAL {
+            load_feature_into_shell(&mut shell, &repo_root);
+            last_state_refresh = Instant::now();
+        }
+
         match &layout {
             Some(l) => shell.render_paned(&mut stdout, l)?,
             None => {
@@ -2358,6 +2965,11 @@ pub fn run_doctor_surface(cwd: &std::path::Path) -> io::Result<()> {
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
     let doctor = DoctorSurface::new(doctor_check_views_from_report(&report), cwd.to_path_buf());
     let mut shell = AppShell::new(doctor);
+
+    // Load workflow navigator from embedded blueprints.
+    load_navigator_into_shell(&mut shell, &repo_root);
+    // Load feature state on startup if available.
+    load_feature_into_shell(&mut shell, &repo_root);
 
     let mut stdout = io::sink();
     let mut layout: Option<PanedLayout> = None;

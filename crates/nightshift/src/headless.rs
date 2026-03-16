@@ -21,7 +21,7 @@ use crate::template::load_embedded_template_set;
 /// Configuration resolved from CLI flags when `--headless` is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadlessConfig {
-    /// Resolved verbosity: Warn (default), Info (`-v`), or Debug (`-vv`).
+    /// Resolved verbosity: Debug (default), Info (`-v`), or Trace (`-vv`).
     pub verbosity: LogLevel,
     /// Output format for log lines.
     pub log_format: LogFormat,
@@ -237,83 +237,104 @@ fn run_driver_loop(
             return signal.exit_code();
         }
 
+        // Read current state before stepping so we can log the transition.
+        let from_state = RepositoryState::load_from_path(state_path)
+            .map(|s| s.current_feature.workflow_state.as_str().to_string())
+            .unwrap_or_else(|_| "unknown".to_string());
+
+        let step_type = driver.template.step_type_for_state(&from_state);
+        logger
+            .entry(
+                LogLevel::Debug,
+                &format!("stepping {from_state} ({step_type:?})"),
+            )
+            .component(Component::StateMachine)
+            .event(LogEvent::StateTransition)
+            .field("state", &from_state)
+            .field("step_type", format!("{step_type:?}"))
+            .emit();
+
         let result = driver.step();
 
         match &result {
-            DriverStepResult::Advanced(state) => {
-                let mut fields = BTreeMap::new();
-                fields.insert(
-                    "to_state".to_string(),
-                    serde_json::Value::String(state.as_str().to_string()),
-                );
-                logger.log_event(
-                    LogLevel::Warn,
-                    Component::StateMachine,
-                    LogEvent::StateTransition,
-                    &format!("advanced to {}", state.as_str()),
-                    fields,
-                );
+            DriverStepResult::Advanced(to_state) => {
+                logger
+                    .entry(
+                        LogLevel::Debug,
+                        &format!("{from_state} → {}", to_state.as_str()),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("from_state", &from_state)
+                    .field("to_state", to_state.as_str())
+                    .field("outcome", "advanced")
+                    .emit();
             }
             DriverStepResult::Terminal => {
-                logger.log_event(
-                    LogLevel::Warn,
-                    Component::StateMachine,
-                    LogEvent::StateTransition,
-                    "state machine reached terminal state",
-                    BTreeMap::new(),
-                );
+                logger
+                    .entry(LogLevel::Debug, &format!("{from_state} → terminal"))
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("from_state", &from_state)
+                    .field("outcome", "terminal")
+                    .emit();
                 return 0;
             }
             DriverStepResult::Unchanged => {
-                logger.log_event(
-                    LogLevel::Info,
-                    Component::StateMachine,
-                    LogEvent::StateTransition,
-                    "state unchanged after step",
-                    BTreeMap::new(),
-                );
+                logger
+                    .entry(
+                        LogLevel::Debug,
+                        &format!("{from_state} → unchanged"),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("from_state", &from_state)
+                    .field("outcome", "unchanged")
+                    .emit();
                 return 0;
             }
             DriverStepResult::ClarificationRequired(question) => {
-                let mut fields = BTreeMap::new();
-                fields.insert(
-                    "question".to_string(),
-                    serde_json::Value::String(question.clone()),
-                );
-                logger.log_event(
-                    LogLevel::Error,
-                    Component::Agent,
-                    LogEvent::AgentCompleted,
-                    "clarification required (non-interactive — failing)",
-                    fields,
-                );
+                logger
+                    .entry(
+                        LogLevel::Error,
+                        &format!(
+                            "{from_state}: clarification required (non-interactive — failing)"
+                        ),
+                    )
+                    .component(Component::Agent)
+                    .event(LogEvent::AgentCompleted)
+                    .field("from_state", &from_state)
+                    .field("outcome", "clarification_required")
+                    .field("question", question)
+                    .emit();
                 return 3;
             }
             DriverStepResult::Failed { reason } => {
-                let mut fields = BTreeMap::new();
-                fields.insert(
-                    "reason".to_string(),
-                    serde_json::Value::String(reason.clone()),
-                );
-                logger.log_event(
-                    LogLevel::Error,
-                    Component::Agent,
-                    LogEvent::AgentCompleted,
-                    &format!("step failed: {reason}"),
-                    fields,
-                );
+                logger
+                    .entry(
+                        LogLevel::Error,
+                        &format!("{from_state}: step failed — {reason}"),
+                    )
+                    .component(Component::Agent)
+                    .event(LogEvent::AgentCompleted)
+                    .field("from_state", &from_state)
+                    .field("outcome", "failed")
+                    .field("reason", reason)
+                    .emit();
                 return 3;
             }
             DriverStepResult::Error(e) => {
-                let mut fields = BTreeMap::new();
-                fields.insert("error".to_string(), serde_json::Value::String(e.clone()));
-                logger.log_event(
-                    LogLevel::Error,
-                    Component::StateMachine,
-                    LogEvent::StateTransition,
-                    &format!("driver error: {e}"),
-                    fields,
-                );
+                logger
+                    .entry(
+                        LogLevel::Error,
+                        &format!("{from_state}: driver error — {e}"),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("from_state", &from_state)
+                    .field("outcome", "error")
+                    .field("error", e)
+                    .emit();
                 return 2;
             }
         }
@@ -924,6 +945,32 @@ mod tests {
         assert!(
             output.contains("shutting down"),
             "expected shutdown message in output: {output}"
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_logs_stepping_before_error() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
+        let _exit = run_driver_loop(&logger, bogus_path, &shutdown);
+
+        let output = writer.contents();
+        // Should log a stepping event (with "unknown" since state can't be read)
+        // followed by the driver error.
+        assert!(
+            output.contains("stepping"),
+            "expected stepping log before error: {output}"
+        );
+        assert!(
+            output.contains("\"from_state\""),
+            "expected from_state field in error output: {output}"
+        );
+        assert!(
+            output.contains("\"outcome\""),
+            "expected outcome field in output: {output}"
         );
     }
 }

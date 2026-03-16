@@ -9,3 +9,14 @@
 - [x] Update init tests: counts (9→10), assertions, YAML validity test
 - [x] Commit and push calypso-blueprint submodule changes
 - [x] Fix MSRV (1.88.0) rustfmt formatting
+
+## Issues #150, #167: Working TUI surfaces, workflow navigator, headless tracing
+
+- [x] Create GH issue #167 for loading feature state into AppShell
+- [x] Implement WorkflowNavigator from WorkflowInterpreter entry points
+- [x] Load feature state into AppShell on startup (SM + Agents tabs)
+- [x] Add periodic state refresh (2s) in event loop
+- [x] Wire WorkflowNavigator into AppShell SM tab
+- [x] Change headless default verbosity to Debug
+- [x] Add pre-step and post-step transition tracing in headless driver loop
+- [x] Add tests (11 new navigator tests, 1 new headless test)
