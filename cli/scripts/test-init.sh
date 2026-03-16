@@ -3,8 +3,8 @@
 # Exit on any command failure
 set -e
 
-# Base path for tests, default to ~/code/tmp_calypso_test
-BASE_PATH="${CALYPSO_TEST_BASE_PATH:-$HOME/code/tmp_calypso_test}"
+# Base path for tests, default to ~/calypso-tests
+BASE_PATH="${CALYPSO_TEST_BASE_PATH:-$HOME/calypso-tests}"
 
 # Generate a unique directory name using Unix timestamp
 TIMESTAMP=$(date +%s)
@@ -14,7 +14,7 @@ TEST_PATH="${BASE_PATH}/${TIMESTAMP}"
 mkdir -p "$BASE_PATH"
 
 # Get the absolute path to the project root
-REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "--------------------------------------------------------"
 echo "🧪 Calypso CLI Local Test Environment"
