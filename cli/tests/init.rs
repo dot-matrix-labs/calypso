@@ -480,7 +480,10 @@ fn real_init_state_machine_audit_passes() {
     }
 
     // Verify git hooks were installed
-    assert!(dir.join(".git/hooks/pre-push").exists(), "pre-push hook should exist");
+    assert!(
+        dir.join(".git/hooks/pre-push").exists(),
+        "pre-push hook should exist"
+    );
 
     // Run state machine audit — must report zero errors
     let result = calypso_cli::sm_audit::run_audit(&dir);
@@ -739,12 +742,24 @@ fn scaffold_github_actions_writes_three_workflow_files() {
         "missing pr-depends-on.yml"
     );
     assert!(names.contains(&"ci.yml"), "missing ci.yml");
-    assert!(names.contains(&"rust-quality.yml"), "missing rust-quality.yml");
+    assert!(
+        names.contains(&"rust-quality.yml"),
+        "missing rust-quality.yml"
+    );
     assert!(names.contains(&"rust-unit.yml"), "missing rust-unit.yml");
-    assert!(names.contains(&"rust-integration.yml"), "missing rust-integration.yml");
+    assert!(
+        names.contains(&"rust-integration.yml"),
+        "missing rust-integration.yml"
+    );
     assert!(names.contains(&"rust-e2e.yml"), "missing rust-e2e.yml");
-    assert!(names.contains(&"rust-coverage.yml"), "missing rust-coverage.yml");
-    assert!(names.contains(&"release-cli.yml"), "missing release-cli.yml");
+    assert!(
+        names.contains(&"rust-coverage.yml"),
+        "missing rust-coverage.yml"
+    );
+    assert!(
+        names.contains(&"release-cli.yml"),
+        "missing release-cli.yml"
+    );
     assert_eq!(scaffolded.len(), 9);
 }
 

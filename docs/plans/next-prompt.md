@@ -1,1 +1,1 @@
-Issue #152 is complete. package.json with noop scripts unblocks pre-push hook for Rust-only repo.
+Apply cargo fmt — push to feat/init-audit-integration to fix format CI failure on PR #153.
