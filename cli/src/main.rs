@@ -804,6 +804,9 @@ fn run_state_machine_auto(state_path: &std::path::Path) {
 fn run_state_machine_step(state_path: &std::path::Path) {
     use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
     use calypso_cli::execution::ExecutionConfig;
+    use calypso_cli::pinned_prompt::{
+        Confirmation, PinnedPrompt, format_initial_prompt, format_transition_prompt,
+    };
     use calypso_cli::state::RepositoryState;
     use calypso_cli::template::load_embedded_template_set;
 
@@ -816,44 +819,63 @@ fn run_state_machine_step(state_path: &std::path::Path) {
         executor: None,
     };
 
+    let mut prompt = match PinnedPrompt::new() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("failed to initialize pinned prompt: {e}");
+            std::process::exit(1);
+        }
+    };
+
     loop {
-        match RepositoryState::load_from_path(state_path) {
-            Ok(state) => {
-                let current = state.current_feature.workflow_state.as_str();
-                println!("state: {current} — press Enter to step, q to quit");
-            }
+        let current = match RepositoryState::load_from_path(state_path) {
+            Ok(state) => state.current_feature.workflow_state.as_str().to_string(),
             Err(e) => {
+                let _ = prompt.cleanup();
                 eprintln!("error loading state: {e}");
+                std::process::exit(1);
+            }
+        };
+
+        let prompt_text = format_initial_prompt(&current);
+        if let Err(e) = prompt.show_prompt(&prompt_text) {
+            let _ = prompt.cleanup();
+            eprintln!("prompt error: {e}");
+            std::process::exit(1);
+        }
+
+        match prompt.read_confirmation() {
+            Ok(Confirmation::Yes) => {}
+            Ok(Confirmation::No | Confirmation::Quit) => break,
+            Err(e) => {
+                let _ = prompt.cleanup();
+                eprintln!("input error: {e}");
                 std::process::exit(1);
             }
         }
 
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).ok();
-        let trimmed = input.trim();
-        if trimmed == "q" || trimmed == "quit" {
-            break;
-        }
-
         match driver.step() {
-            DriverStepResult::Advanced(state) => {
-                println!("→ advanced to: {}", state.as_str());
+            DriverStepResult::Advanced(next_state) => {
+                let next = next_state.as_str();
+                let _ = prompt.log(&format!("→ advanced to: {next}"));
+                let transition_prompt = format_transition_prompt(&current, next);
+                let _ = prompt.show_prompt(&transition_prompt);
             }
             DriverStepResult::Terminal => {
-                println!("done");
+                let _ = prompt.log("done");
                 break;
             }
             DriverStepResult::Unchanged => {
-                println!("step complete (state unchanged)");
+                let _ = prompt.log("step complete (state unchanged)");
             }
             DriverStepResult::ClarificationRequired(q) => {
-                println!("clarification required: {q}");
+                let _ = prompt.log(&format!("clarification required: {q}"));
             }
             DriverStepResult::Failed { reason } => {
-                println!("step failed: {reason}");
-                println!("press Enter to retry, q to quit");
+                let _ = prompt.log(&format!("step failed: {reason}"));
             }
             DriverStepResult::Error(e) => {
+                let _ = prompt.cleanup();
                 eprintln!("error: {e}");
                 std::process::exit(1);
             }
