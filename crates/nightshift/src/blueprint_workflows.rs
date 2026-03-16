@@ -89,6 +89,7 @@ pub struct BlueprintWorkflow {
     pub pull_request_template: Option<PullRequestTemplate>,
     pub plan: Option<PlanConfig>,
     pub trigger: Option<TriggerConfig>,
+    pub schedule: Option<ScheduleConfig>,
     pub release_requirements: Option<ReleaseRequirements>,
     pub artifact_requirements: Option<ArtifactRequirements>,
     pub rollout_order: Option<Vec<String>>,
@@ -162,6 +163,20 @@ pub struct TriggerConfig {
     pub pattern: Option<String>,
     pub branch_constraint: Option<String>,
     pub ci_entry: Option<String>,
+}
+
+// ── schedule ─────────────────────────────────────────────────────────────────
+
+/// Cron-based schedule for entry-point workflows. The orchestrator evaluates
+/// these expressions and dispatches the workflow on match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleConfig {
+    /// Cron expression with second-level granularity: "sec min hour day month weekday".
+    /// Examples: `"*/30 * * * * *"` (every 30s), `"0 */5 * * * *"` (every 5 min),
+    /// `"0 0 2 * * *"` (daily at 02:00 UTC).
+    pub cron: String,
+    /// Human-readable description of what this schedule triggers.
+    pub description: Option<String>,
 }
 
 // ── release_requirements ─────────────────────────────────────────────────────
@@ -316,6 +331,73 @@ impl NextSpec {
         }
 
         None
+    }
+
+    /// Returns all event key names from this transition spec.
+    ///
+    /// For `{ on: { event: target } }` → returns the event names.
+    /// For `{ on_success: s, on_failure: s }` → returns `["on_success", "on_failure"]`.
+    /// This is useful for cross-workflow handoff validation where the event keys
+    /// should match terminal state names in the sub-workflow.
+    pub fn all_event_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        let Some(map) = self.0.as_mapping() else {
+            return keys;
+        };
+
+        for (key, value) in map {
+            if let Some(key_str) = key.as_str() {
+                if key_str == "on" {
+                    // Nested event dispatch: { on: { event: target, ... } }
+                    if let Some(on_map) = value.as_mapping() {
+                        for (k, _) in on_map {
+                            if let Some(s) = k.as_str() {
+                                keys.push(s);
+                            }
+                        }
+                    }
+                } else {
+                    // Top-level key: on_success, on_failure, etc.
+                    keys.push(key_str);
+                }
+            }
+        }
+
+        keys
+    }
+
+    /// Returns all target state names reachable from this transition spec.
+    ///
+    /// Handles all YAML shapes:
+    /// - `{ on_success: s, on_failure: s, on_rejection: s, ... }` — top-level string values
+    /// - `{ on: { event: target, ... } }` — nested event dispatch map
+    /// - `{ pass: s, fail: s }` — github routing
+    /// - `{ on_complete: s }` — terminal transition
+    pub fn all_targets(&self) -> Vec<&str> {
+        let mut targets = Vec::new();
+        let Some(map) = self.0.as_mapping() else {
+            return targets;
+        };
+
+        for (key, value) in map {
+            if let Some(key_str) = key.as_str() {
+                if key_str == "on" {
+                    // Nested event dispatch: { on: { event: target, ... } }
+                    if let Some(on_map) = value.as_mapping() {
+                        for (_, v) in on_map {
+                            if let Some(s) = v.as_str() {
+                                targets.push(s);
+                            }
+                        }
+                    }
+                } else if let Some(s) = value.as_str() {
+                    // Top-level key: on_success, on_failure, pass, fail, on_complete, on_rejection, etc.
+                    targets.push(s);
+                }
+            }
+        }
+
+        targets
     }
 }
 
