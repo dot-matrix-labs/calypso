@@ -8,3 +8,4 @@
 - [x] Update `ruleset.json` with `merge-queue` required status check
 - [x] Update init tests: counts (9→10), assertions, YAML validity test
 - [x] Commit and push calypso-blueprint submodule changes
+- [x] Fix MSRV (1.88.0) rustfmt formatting

@@ -819,8 +819,8 @@ fn workflow_pr_depends_on_content_is_valid_yaml() {
 
 #[test]
 fn workflow_merge_queue_content_is_valid_yaml() {
-    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_MERGE_QUEUE)
-        .expect("merge-queue.yml should be valid YAML");
+    let val: serde_yaml::Value =
+        serde_yaml::from_str(WORKFLOW_MERGE_QUEUE).expect("merge-queue.yml should be valid YAML");
     let map = val.as_mapping().expect("top-level should be a mapping");
     assert!(map.contains_key(serde_yaml::Value::String("name".into())));
     assert!(map.contains_key(serde_yaml::Value::String("on".into())));
