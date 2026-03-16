@@ -34,6 +34,11 @@ pub struct ExecutionConfig {
     /// Maximum number of retry attempts on transient provider failure.
     /// A value of 0 means no retries (attempt once and surface the error).
     pub max_transient_retries: u32,
+    /// Optional task-specific prompt context injected from `prompts.yml`.
+    pub task_context: Option<String>,
+    /// When set, restricts advancement to only these next states (from YAML transitions).
+    /// Overrides the hardcoded `WorkflowState::valid_next_states()`.
+    pub allowed_next_states: Option<Vec<WorkflowState>>,
 }
 
 impl Default for ExecutionConfig {
@@ -41,6 +46,8 @@ impl Default for ExecutionConfig {
         Self {
             claude: ClaudeConfig::default(),
             max_transient_retries: 2,
+            task_context: None,
+            allowed_next_states: None,
         }
     }
 }
@@ -111,9 +118,14 @@ pub fn run_supervised_session(
     let session = ClaudeSession::new(config.claude.clone());
     let transcript_path = transcripts_dir.join(format!("{}.jsonl", session.session_id));
 
-    let prompt = build_prompt(role, &state);
+    let prompt = build_prompt(role, &state, config.task_context.as_deref());
     let context = SessionContext {
-        working_directory: Some(state.current_feature.worktree_path.clone()),
+        working_directory: if state.current_feature.worktree_path.is_empty() {
+            // Fall back to the repo root (parent of .calypso/).
+            state_dir.parent().map(|p| p.to_string_lossy().into_owned())
+        } else {
+            Some(state.current_feature.worktree_path.clone())
+        },
     };
 
     // ── Register session as running ───────────────────────────────────────────
@@ -221,7 +233,7 @@ pub fn run_supervised_session(
                 Ok(o) => o,
             };
 
-            apply_outcome(state_path, &mut state, &session.session_id, role, outcome)
+            apply_outcome(state_path, &mut state, &session.session_id, role, outcome, config.allowed_next_states.as_deref())
         }
     }
 }
@@ -229,13 +241,17 @@ pub fn run_supervised_session(
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 /// Build the system prompt for the session, injecting role and stage context.
-fn build_prompt(role: &str, state: &RepositoryState) -> String {
+fn build_prompt(role: &str, state: &RepositoryState, task_context: Option<&str>) -> String {
     let feature = &state.current_feature;
+    let task_section = task_context
+        .map(|ctx| format!("\nTask instructions:\n{ctx}\n"))
+        .unwrap_or_default();
     format!(
         "You are the `{role}` agent for feature `{feature_id}`.\n\
          Current workflow stage: {stage}\n\
          Branch: {branch}\n\
-         Pull request: #{pr_number} {pr_url}\n\n\
+         Pull request: #{pr_number} {pr_url}\n\
+         {task_section}\n\
          Complete your role's tasks for this stage, then emit exactly one outcome \
          marker on a line by itself:\n\
            [CALYPSO:OK]{{\"summary\":\"...\",\"artifact_refs\":[...],\"suggested_next_state\":\"...\"}}\n\
@@ -249,6 +265,7 @@ fn build_prompt(role: &str, state: &RepositoryState) -> String {
         branch = feature.branch,
         pr_number = feature.pull_request.number,
         pr_url = feature.pull_request.url,
+        task_section = task_section,
     )
 }
 
@@ -314,6 +331,7 @@ fn apply_outcome(
     session_id: &str,
     _role: &str,
     outcome: ClaudeOutcome,
+    allowed_next_states: Option<&[WorkflowState]>,
 ) -> Result<ExecutionOutcome, ExecutionError> {
     match outcome {
         ClaudeOutcome::Ok {
@@ -327,7 +345,7 @@ fn apply_outcome(
             // Attempt forward state transition.
             let prev_state = state.current_feature.workflow_state.clone();
             let facts = forward_facts();
-            let advanced_to = advance_if_gates_pass(state, &facts);
+            let advanced_to = advance_if_gates_pass(state, &facts, allowed_next_states);
 
             finish_session(
                 state,
@@ -447,6 +465,7 @@ fn forward_facts() -> TransitionFacts {
 fn advance_if_gates_pass(
     state: &mut RepositoryState,
     facts: &TransitionFacts,
+    allowed_next_states: Option<&[WorkflowState]>,
 ) -> Option<WorkflowState> {
     let all_passing = state
         .current_feature
@@ -459,6 +478,16 @@ fn advance_if_gates_pass(
 
     if !should_advance {
         return None;
+    }
+
+    if let Some(allowed) = allowed_next_states {
+        // Template-defined transitions: bypass hardcoded validation and advance directly.
+        let next = allowed
+            .iter()
+            .find(|s| !matches!(s, WorkflowState::Blocked | WorkflowState::Aborted))
+            .cloned()?;
+        state.current_feature.workflow_state = next.clone();
+        return Some(next);
     }
 
     let valid = state.current_feature.workflow_state.valid_next_states();
@@ -633,7 +662,7 @@ mod tests {
     #[test]
     fn build_prompt_contains_role_and_stage() {
         let state = minimal_state(WorkflowState::Implementation);
-        let prompt = build_prompt("implementer", &state);
+        let prompt = build_prompt("implementer", &state, None);
         assert!(prompt.contains("implementer"), "prompt missing role");
         assert!(prompt.contains("implementation"), "prompt missing stage");
         assert!(prompt.contains("test-feature"), "prompt missing feature id");
@@ -670,7 +699,7 @@ mod tests {
         let mut state = minimal_state(WorkflowState::Implementation);
         // No gate groups → should advance.
         let facts = forward_facts();
-        let advanced = advance_if_gates_pass(&mut state, &facts);
+        let advanced = advance_if_gates_pass(&mut state, &facts, None);
         assert!(advanced.is_some(), "should advance when gates are empty");
         assert_eq!(
             state.current_feature.workflow_state,
@@ -692,7 +721,7 @@ mod tests {
             }],
         }];
         let facts = forward_facts();
-        let advanced = advance_if_gates_pass(&mut state, &facts);
+        let advanced = advance_if_gates_pass(&mut state, &facts, None);
         assert!(advanced.is_none(), "should not advance with failing gates");
         assert_eq!(
             state.current_feature.workflow_state,

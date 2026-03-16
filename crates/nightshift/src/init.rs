@@ -233,7 +233,7 @@ states:
   - name: implementation
     type: agent
   - name: done
-    type: agent
+    type: function
 gate_groups:
   - id: hello-world-gates
     label: Hello World Gates
@@ -255,12 +255,18 @@ on:
 pub const HELLO_WORLD_AGENTS_YAML: &str = "tasks:
   - name: hello-task
     kind: agent
-    role: hello-role
+    role: new
+  - name: hello-implementation-task
+    kind: agent
+    role: implementation
 ";
 
 pub const HELLO_WORLD_PROMPTS_YAML: &str = "prompts:
   hello-task: |
     Produce a 'hello world' file in the root of the repository.
+  hello-implementation-task: |
+    Create a file named 'hello.txt' in the root of the repository containing the text 'Hello, World!'.
+    The file should exist and contain exactly that text.
 ";
 
 pub const HELLO_WORLD_GITHUB_WORKFLOW: &str = "name: Hello World
