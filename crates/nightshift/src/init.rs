@@ -471,6 +471,8 @@ pub trait InitEnvironment {
     fn set_remote(&self, path: &Path, url: &str) -> Result<(), InitError>;
     /// Write a GitHub Actions workflow file under `.github/workflows/<name>`.
     fn write_workflow_file(&self, path: &Path, name: &str, content: &str) -> Result<(), InitError>;
+    /// Configure core.hooksPath to .githooks
+    fn configure_githooks(&self, path: &Path) -> Result<(), InitError>;
     /// Resolve the hooks directory via `git rev-parse --git-path hooks`.
     /// Handles worktrees and `core.hooksPath` correctly.
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError>;
@@ -633,6 +635,20 @@ impl InitEnvironment for HostInitEnvironment {
         fs::create_dir_all(&workflows_dir).map_err(InitError::Io)?;
         let file_path = workflows_dir.join(name);
         fs::write(file_path, content).map_err(InitError::Io)
+    }
+
+    fn configure_githooks(&self, path: &Path) -> Result<(), InitError> {
+        let output = Command::new("git")
+            .args(["-C", &path.to_string_lossy(), "config", "core.hooksPath", ".githooks"])
+            .output()
+            .map_err(InitError::Io)?;
+        if !output.status.success() {
+            return Err(InitError::git(
+                "git config core.hooksPath .githooks",
+                String::from_utf8_lossy(&output.stderr).trim(),
+            ));
+        }
+        Ok(())
     }
 
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
@@ -1241,6 +1257,7 @@ fn do_init_steps(
     templates_written.push("prompts.yml".to_string());
 
     // Step 7: install git hook
+    env.configure_githooks(&request.repo_path)?;
     let hooks_dir = env.git_hooks_path(&request.repo_path)?;
     env.create_dir(&hooks_dir)?;
 

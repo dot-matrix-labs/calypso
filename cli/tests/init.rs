@@ -19,6 +19,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn unique_tmpdir(prefix: &str) -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::SeqCst);
     let path = std::env::temp_dir().join(format!("calypso-init-test-{prefix}-{id}"));
+    std::fs::remove_dir_all(&path).ok();
     std::fs::create_dir_all(&path).expect("tmpdir creation");
     path
 }
@@ -173,6 +174,10 @@ impl InitEnvironment for FakeEnv {
         self.remotes_set
             .borrow_mut()
             .push((path.to_path_buf(), url.to_string()));
+        Ok(())
+    }
+
+    fn configure_githooks(&self, _path: &Path) -> Result<(), InitError> {
         Ok(())
     }
 
@@ -435,7 +440,7 @@ fn real_init_creates_files_and_executable_hook() {
     assert!(dir.join(".calypso/prompts.yml").exists());
 
     // hook exists and is executable
-    let hook_path = dir.join(".git/hooks/pre-push");
+    let hook_path = dir.join(".githooks/pre-push");
     assert!(hook_path.exists(), "pre-push hook should exist");
     let metadata = std::fs::metadata(&hook_path).expect("hook metadata");
     let mode = metadata.permissions().mode();
@@ -488,7 +493,7 @@ fn real_init_state_machine_audit_passes() {
 
     // Verify git hooks were installed
     assert!(
-        dir.join(".git/hooks/pre-push").exists(),
+        dir.join(".githooks/pre-push").exists(),
         "pre-push hook should exist"
     );
 
