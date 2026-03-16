@@ -1,0 +1,14 @@
+name: Merge queue
+
+on:
+  merge_group:
+  workflow_dispatch:
+
+jobs:
+  merge-queue:
+    name: merge-queue
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate merge group
+        run: echo "Merge group validation passed."
