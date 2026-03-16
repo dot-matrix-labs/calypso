@@ -154,15 +154,15 @@ pub fn run_structural_audit() -> StateMachineAudit {
 
 /// Returns the names of all top-level entry point workflows — those that are
 /// not exclusively used as sub-workflows by other workflows.
-fn entry_point_roots<'a>(workflows: &'a BTreeMap<String, BlueprintWorkflow>) -> Vec<&'a str> {
+fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&str> {
     // Collect all sub-workflow names referenced by kind: workflow states.
     let mut sub_names: BTreeSet<&str> = BTreeSet::new();
     for wf in workflows.values() {
         for state in wf.states.values() {
-            if state.kind.as_ref() == Some(&StateKind::Workflow) {
-                if let Some(ref target) = state.workflow {
-                    sub_names.insert(target.as_str());
-                }
+            if state.kind.as_ref() == Some(&StateKind::Workflow)
+                && let Some(ref target) = state.workflow
+            {
+                sub_names.insert(target.as_str());
             }
         }
     }
@@ -173,9 +173,7 @@ fn entry_point_roots<'a>(workflows: &'a BTreeMap<String, BlueprintWorkflow>) -> 
         .keys()
         .filter(|name| {
             let wf = &workflows[*name];
-            !sub_names.contains(name.as_str())
-                || wf.schedule.is_some()
-                || wf.trigger.is_some()
+            !sub_names.contains(name.as_str()) || wf.schedule.is_some() || wf.trigger.is_some()
         })
         .map(|s| s.as_str())
         .collect()
@@ -220,37 +218,37 @@ fn audit_workflow_graph(
 
         // Follow kind: workflow references to sub-workflows
         for (state_name, cfg) in &wf.states {
-            if cfg.kind.as_ref() == Some(&StateKind::Workflow) {
-                if let Some(ref sub_wf_name) = cfg.workflow {
-                    // Validate the reference exists
-                    if !workflows.contains_key(sub_wf_name.as_str()) {
-                        findings.push(AuditFinding {
-                            severity: AuditSeverity::Error,
-                            source: wf_name.to_string(),
-                            message: format!(
-                                "state '{state_name}' references workflow '{sub_wf_name}' \
-                                 which is not in the embedded workflow library"
-                            ),
-                            suggestion: None,
-                        });
-                        continue;
-                    }
+            if cfg.kind.as_ref() == Some(&StateKind::Workflow)
+                && let Some(ref sub_wf_name) = cfg.workflow
+            {
+                // Validate the reference exists
+                if !workflows.contains_key(sub_wf_name.as_str()) {
+                    findings.push(AuditFinding {
+                        severity: AuditSeverity::Error,
+                        source: wf_name.to_string(),
+                        message: format!(
+                            "state '{state_name}' references workflow '{sub_wf_name}' \
+                             which is not in the embedded workflow library"
+                        ),
+                        suggestion: None,
+                    });
+                    continue;
+                }
 
-                    // Validate cross-workflow handoff: the parent's next.on: events
-                    // should match the sub-workflow's terminal state names
-                    audit_workflow_handoff(
-                        wf_name,
-                        state_name,
-                        sub_wf_name,
-                        cfg.next.as_ref(),
-                        workflows.get(sub_wf_name.as_str()).unwrap(),
-                        findings,
-                    );
+                // Validate cross-workflow handoff: the parent's next.on: events
+                // should match the sub-workflow's terminal state names
+                audit_workflow_handoff(
+                    wf_name,
+                    state_name,
+                    sub_wf_name,
+                    cfg.next.as_ref(),
+                    workflows.get(sub_wf_name.as_str()).unwrap(),
+                    findings,
+                );
 
-                    // Enqueue for traversal
-                    if visited.insert(sub_wf_name.as_str()) {
-                        queue.push_back(sub_wf_name.as_str());
-                    }
+                // Enqueue for traversal
+                if visited.insert(sub_wf_name.as_str()) {
+                    queue.push_back(sub_wf_name.as_str());
                 }
             }
         }
@@ -262,9 +260,7 @@ fn audit_workflow_graph(
             findings.push(AuditFinding {
                 severity: AuditSeverity::Warning,
                 source: wf_name.clone(),
-                message: format!(
-                    "workflow '{wf_name}' is not reachable from any entry point"
-                ),
+                message: format!("workflow '{wf_name}' is not reachable from any entry point"),
                 suggestion: Some(
                     "add a kind: workflow reference from a reachable workflow, or remove it"
                         .to_string(),
@@ -344,11 +340,7 @@ fn audit_workflow_handoff(
 /// 2. Every non-terminal state can reach at least one terminal state (no dead branches)
 ///
 /// A state is terminal if its `kind` is `Terminal` or it has no `next` spec.
-fn audit_reachability(
-    stem: &str,
-    wf: &BlueprintWorkflow,
-    findings: &mut Vec<AuditFinding>,
-) {
+fn audit_reachability(stem: &str, wf: &BlueprintWorkflow, findings: &mut Vec<AuditFinding>) {
     let initial_state = match &wf.initial_state {
         Some(s) => s.as_str(),
         None => return, // No initial_state means no state machine graph to audit
@@ -391,9 +383,7 @@ fn audit_reachability(
                 message: format!(
                     "state '{state}' is not reachable from initial_state '{initial_state}'"
                 ),
-                suggestion: Some(
-                    "add a transition targeting this state or remove it".to_string(),
-                ),
+                suggestion: Some("add a transition targeting this state or remove it".to_string()),
             });
         }
     }
@@ -446,9 +436,7 @@ fn audit_reachability(
             findings.push(AuditFinding {
                 severity: AuditSeverity::Error,
                 source: stem.to_string(),
-                message: format!(
-                    "state '{state}' cannot reach any terminal state (dead branch)"
-                ),
+                message: format!("state '{state}' cannot reach any terminal state (dead branch)"),
                 suggestion: Some(
                     "add a transition path from this state to a terminal state".to_string(),
                 ),
@@ -458,7 +446,10 @@ fn audit_reachability(
 }
 
 /// BFS from a start node, returning all reachable node names.
-fn bfs_reachable<'a>(start: &'a str, edges: &BTreeMap<&'a str, BTreeSet<&'a str>>) -> BTreeSet<&'a str> {
+fn bfs_reachable<'a>(
+    start: &'a str,
+    edges: &BTreeMap<&'a str, BTreeSet<&'a str>>,
+) -> BTreeSet<&'a str> {
     let mut visited = BTreeSet::new();
     let mut queue = VecDeque::new();
     visited.insert(start);
@@ -1392,7 +1383,8 @@ states:
     fn workflow_graph_detects_orphan_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let root: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: root
 initial_state: start
@@ -1403,9 +1395,12 @@ states:
       on_success: done
   done:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let orphan: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let orphan: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: orphan-wf
 initial_state: begin
@@ -1416,7 +1411,9 @@ states:
       on_success: end
   end:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         workflows.insert("root".to_string(), root);
         workflows.insert("orphan-wf".to_string(), orphan);
@@ -1436,7 +1433,8 @@ states:
     fn workflow_graph_detects_missing_sub_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let root: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: root
 initial_state: start
@@ -1449,7 +1447,9 @@ states:
         done: finish
   finish:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         workflows.insert("root".to_string(), root);
 
@@ -1468,7 +1468,8 @@ states:
     fn workflow_graph_detects_handoff_mismatch() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let parent: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: parent
 initial_state: dispatch
@@ -1482,9 +1483,12 @@ states:
         wrong-event: finish
   finish:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let child: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: child
 initial_state: work
@@ -1498,7 +1502,9 @@ states:
     kind: terminal
   aborted:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         workflows.insert("parent".to_string(), parent);
         workflows.insert("child".to_string(), child);
@@ -1527,7 +1533,8 @@ states:
     fn workflow_graph_valid_handoff_no_errors() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let parent: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: parent
 initial_state: dispatch
@@ -1541,9 +1548,12 @@ states:
         aborted: finish
   finish:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(r#"
+        let child: BlueprintWorkflow = serde_yaml::from_str(
+            r#"
 version: 1
 name: child
 initial_state: work
@@ -1557,7 +1567,9 @@ states:
     kind: terminal
   aborted:
     kind: terminal
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         workflows.insert("parent".to_string(), parent);
         workflows.insert("child".to_string(), child);
@@ -1574,10 +1586,8 @@ states:
     #[test]
     fn next_spec_all_targets_extracts_on_map() {
         use crate::blueprint_workflows::NextSpec;
-        let yaml: serde_yaml::Value = serde_yaml::from_str(
-            "on:\n  ok: state-a\n  fail: state-b\n",
-        )
-        .unwrap();
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str("on:\n  ok: state-a\n  fail: state-b\n").unwrap();
         let spec = NextSpec(yaml);
         let mut targets = spec.all_targets();
         targets.sort();
@@ -1600,10 +1610,8 @@ states:
     #[test]
     fn next_spec_all_event_keys_extracts_on_map_keys() {
         use crate::blueprint_workflows::NextSpec;
-        let yaml: serde_yaml::Value = serde_yaml::from_str(
-            "on:\n  done: state-a\n  aborted: state-b\n",
-        )
-        .unwrap();
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str("on:\n  done: state-a\n  aborted: state-b\n").unwrap();
         let spec = NextSpec(yaml);
         let mut keys = spec.all_event_keys();
         keys.sort();
@@ -1613,10 +1621,8 @@ states:
     #[test]
     fn next_spec_all_event_keys_extracts_top_level() {
         use crate::blueprint_workflows::NextSpec;
-        let yaml: serde_yaml::Value = serde_yaml::from_str(
-            "on_success: state-a\non_failure: state-b\n",
-        )
-        .unwrap();
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str("on_success: state-a\non_failure: state-b\n").unwrap();
         let spec = NextSpec(yaml);
         let mut keys = spec.all_event_keys();
         keys.sort();

@@ -169,10 +169,10 @@ impl WorkflowRegistry {
         let mut names = BTreeSet::new();
         for wf in self.workflows.values() {
             for state in wf.states.values() {
-                if matches!(state.kind, Some(StateKind::Workflow)) {
-                    if let Some(ref target) = state.workflow {
-                        names.insert(target.clone());
-                    }
+                if matches!(state.kind, Some(StateKind::Workflow))
+                    && let Some(ref target) = state.workflow
+                {
+                    names.insert(target.clone());
                 }
             }
         }
@@ -208,10 +208,7 @@ impl WorkflowRegistry {
                     pattern: trigger.pattern.clone(),
                 });
             } else {
-                let initial_cfg = wf
-                    .initial_state
-                    .as_deref()
-                    .and_then(|s| wf.states.get(s));
+                let initial_cfg = wf.initial_state.as_deref().and_then(|s| wf.states.get(s));
                 let initial_kind = initial_cfg.and_then(|c| c.kind.clone());
 
                 if matches!(initial_kind, Some(StateKind::Human)) {
@@ -302,7 +299,7 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "state '{}' not found in workflow '{}'",
                     exec.position.state, exec.position.workflow
-                ))
+                ));
             }
         };
 
@@ -312,7 +309,7 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "state '{}' in '{}' has no next transitions",
                     exec.position.state, exec.position.workflow
-                ))
+                ));
             }
         };
 
@@ -322,21 +319,18 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "state '{}' in '{}' has no transition for event '{event}'",
                     exec.position.state, exec.position.workflow
-                ))
+                ));
             }
         };
 
         // Look up the target state config
-        let target_cfg = match self
-            .registry
-            .get_state(&exec.position.workflow, &target)
-        {
+        let target_cfg = match self.registry.get_state(&exec.position.workflow, &target) {
             Some(cfg) => cfg,
             None => {
                 return StepOutcome::Error(format!(
                     "transition target '{target}' not found in workflow '{}'",
                     exec.position.workflow
-                ))
+                ));
             }
         };
 
@@ -372,7 +366,7 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "parent state '{}' in '{}' not found when popping call stack",
                     frame.state, frame.workflow
-                ))
+                ));
             }
         };
 
@@ -382,7 +376,7 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "parent state '{}' in '{}' has no next transitions",
                     frame.state, frame.workflow
-                ))
+                ));
             }
         };
 
@@ -392,7 +386,7 @@ impl WorkflowInterpreter {
                 return StepOutcome::Error(format!(
                     "parent state '{}' in '{}' has no handler for terminal '{terminal_name}'",
                     frame.state, frame.workflow
-                ))
+                ));
             }
         };
 
@@ -419,7 +413,7 @@ impl WorkflowInterpreter {
             None => {
                 return StepOutcome::Error(format!(
                     "state '{delegating_state}' is kind: workflow but has no workflow field"
-                ))
+                ));
             }
         };
 
@@ -428,7 +422,7 @@ impl WorkflowInterpreter {
             None => {
                 return StepOutcome::Error(format!(
                     "sub-workflow '{sub_wf_name}' not found in registry"
-                ))
+                ));
             }
         };
 
@@ -437,7 +431,7 @@ impl WorkflowInterpreter {
             None => {
                 return StepOutcome::Error(format!(
                     "sub-workflow '{sub_wf_name}' has no initial_state"
-                ))
+                ));
             }
         };
 
@@ -547,7 +541,10 @@ mod tests {
             .entry_points()
             .into_iter()
             .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-release-request"));
-        assert!(entry.is_some(), "expected calypso-release-request as EventTriggered");
+        assert!(
+            entry.is_some(),
+            "expected calypso-release-request as EventTriggered"
+        );
         if let Some(EntryPoint::EventTriggered { event, .. }) = entry {
             assert_eq!(event, "git-tag-push");
         }
@@ -560,7 +557,10 @@ mod tests {
             .entry_points()
             .into_iter()
             .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-deployment-request"));
-        assert!(entry.is_some(), "expected calypso-deployment-request as UserAction");
+        assert!(
+            entry.is_some(),
+            "expected calypso-deployment-request as UserAction"
+        );
     }
 
     #[test]
@@ -570,7 +570,10 @@ mod tests {
             .entry_points()
             .into_iter()
             .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-feature-request"));
-        assert!(entry.is_some(), "expected calypso-feature-request as UserAction");
+        assert!(
+            entry.is_some(),
+            "expected calypso-feature-request as UserAction"
+        );
     }
 
     #[test]
@@ -580,7 +583,10 @@ mod tests {
             .entry_points()
             .into_iter()
             .find(|e| matches!(e, EntryPoint::AutoStart { workflow, .. } if workflow == "calypso-orchestrator-startup"));
-        assert!(entry.is_some(), "expected calypso-orchestrator-startup as AutoStart");
+        assert!(
+            entry.is_some(),
+            "expected calypso-orchestrator-startup as AutoStart"
+        );
     }
 
     // ── Cron scheduling ──────────────────────────────────────────────────────
