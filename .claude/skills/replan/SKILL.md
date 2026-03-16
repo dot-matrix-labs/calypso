@@ -199,10 +199,11 @@ if capacity allows, but sequential execution is the default assumption.
 
 Rules for the rewritten plan:
 - Use `**Batch N — {description}**` headings (replacing any prior Phase/Batch headings).
-- Entries are plain list items — NO checkboxes. Completion is tracked by issue state.
+- Entries are plain list items — **NEVER checkboxes**. A `- [ ]` or `- [x]` MUST NOT appear anywhere in the Plan body. Completion is determined solely by whether the linked GitHub issue is open or closed.
 - Include the `[risk: N]` annotation on each entry.
 - Preserve any cross-cutting block-quote notes from the prior plan that are still relevant.
 - Do NOT include already-closed issues.
+- Before submitting the edit, scan the proposed body for `[ ]` or `[x]` — if any are found, remove them and replace with plain `- ` list items.
 
 Show the user the full proposed new body before editing. Ask for confirmation.
 
@@ -250,5 +251,6 @@ Top 3 highest-risk issues (address early):
 - **User confirms before writes** — show diffs and ask before editing any issue or the Plan.
 - **Dependency cycles are fatal** — stop and report; do not attempt to replan a cyclic graph.
 - **Closed issues are ignored** — do not include closed issues in the new plan.
+- **No checkboxes in the Plan — ever** — the Plan body must never contain `- [ ]` or `- [x]`. Task completion is read from issue state (open/closed), not from checkbox markup. If you find yourself writing a checkbox, stop and use a plain list item instead.
 - **`gh` CLI only** — all GitHub operations use the gh CLI.
 - **Plan is the source of truth** — `docs/plan.md` (if it exists) is NOT updated; the GitHub issue is authoritative.
