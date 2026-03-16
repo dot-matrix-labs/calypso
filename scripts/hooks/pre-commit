@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
-# pre-commit: Hard violation scans (blocks) + planning gate (blocks) +
-#             commit size advisory + lint/format auto-fix.
+# pre-commit: Hard violation scans (blocks) + commit size advisory + lint/format auto-fix.
 
 STAGED=$(git diff --cached --name-only)
 STAGED_DIFF=$(git diff --cached)
@@ -45,37 +44,9 @@ if [ ${#VIOLATIONS[@]} -gt 0 ]; then
   exit 1
 fi
 
-# ── 2. Planning documents gate ──────────────────────────────────────────────
+# ── 2. Commit size advisory ─────────────────────────────────────────────────
 
-PLAN_ERRORS=()
-
-if ! echo "$STAGED" | grep -q "^docs/plans/implementation-plan\.md$"; then
-  PLAN_ERRORS+=("docs/plans/implementation-plan.md")
-fi
-
-if ! echo "$STAGED" | grep -q "^docs/plans/next-prompt\.md$"; then
-  PLAN_ERRORS+=("docs/plans/next-prompt.md")
-fi
-
-if [ ${#PLAN_ERRORS[@]} -gt 0 ]; then
-  echo "" >&2
-  echo "COMMIT BLOCKED: The following planning files were not staged:" >&2
-  for f in "${PLAN_ERRORS[@]}"; do
-    echo "  - $f" >&2
-  done
-  echo "" >&2
-  echo "At every commit:" >&2
-  echo "  implementation-plan.md — check off completed tasks; add or reorder discovered tasks." >&2
-  echo "  next-prompt.md         — overwrite with the complete prompt for the next commit." >&2
-  echo "" >&2
-  exit 1
-fi
-
-# ── 3. Commit size advisory ─────────────────────────────────────────────────
-
-PLANNING_DOCS="docs/plans/implementation-plan.md
-docs/plans/next-prompt.md"
-STAGED_COUNT=$(echo "$STAGED" | grep -v "^$" | grep -vF "$PLANNING_DOCS" | wc -l | tr -d ' ')
+STAGED_COUNT=$(echo "$STAGED" | grep -v "^$" | wc -l | tr -d ' ')
 COMMIT_FILE_LIMIT=10
 
 if [ "$STAGED_COUNT" -gt "$COMMIT_FILE_LIMIT" ]; then
@@ -83,44 +54,39 @@ if [ "$STAGED_COUNT" -gt "$COMMIT_FILE_LIMIT" ]; then
   echo "COMMIT SIZE WARNING: This commit touches ${STAGED_COUNT} files (limit: ${COMMIT_FILE_LIMIT})." >&2
   echo "Consider splitting this into smaller, more focused commits." >&2
   echo "" >&2
-
-  cat >> docs/plans/next-prompt.md <<EOF
-
----
-
-## Commit Size Warning
-
-The previous commit touched ${STAGED_COUNT} files (limit: ${COMMIT_FILE_LIMIT}).
-Commits should be small and focused. If the next task touches many files, split it.
-EOF
 fi
 
-# ── 4. Lint/format auto-fix + flag unfixable ────────────────────────────────
+# ── 3. Lint/format auto-fix + flag unfixable ────────────────────────────────
 
-bun run eslint . --fix 2>&1 || true
-bun run prettier --write . 2>&1 || true
+if [ -f Cargo.toml ]; then
+  cargo fmt 2>&1 || true
+  # Re-stage any formatted Rust files
+  RUST_STAGED=$(echo "$STAGED" | grep -E '\.rs$' || true)
+  [ -n "$RUST_STAGED" ] && echo "$RUST_STAGED" | xargs git add
 
-UNFIXED_ESLINT=$(bun run eslint . --max-warnings=0 2>&1) && ESLINT_CLEAN=1 || ESLINT_CLEAN=0
-UNFIXED_PRETTIER=$(bun run prettier --check . 2>&1) && PRETTIER_CLEAN=1 || PRETTIER_CLEAN=0
+  FMT_CHECK=$(cargo fmt --check 2>&1) && FMT_CLEAN=1 || FMT_CLEAN=0
+  if [ $FMT_CLEAN -eq 0 ]; then
+    echo "" >&2
+    echo "LINT/FORMAT: cargo fmt could not fully fix formatting:" >&2
+    echo "$FMT_CHECK" >&2
+    echo "" >&2
+    echo "Commit allowed. These issues WILL block your next push." >&2
+  fi
+else
+  bun run eslint . --fix 2>&1 || true
+  bun run prettier --write . 2>&1 || true
 
-if [ $ESLINT_CLEAN -eq 0 ] || [ $PRETTIER_CLEAN -eq 0 ]; then
-  echo "" >&2
-  echo "LINT/FORMAT: auto-fix applied. The following could not be fixed automatically:" >&2
-  [ $ESLINT_CLEAN -eq 0 ] && echo "$UNFIXED_ESLINT" >&2
-  [ $PRETTIER_CLEAN -eq 0 ] && echo "$UNFIXED_PRETTIER" >&2
-  echo "" >&2
-  echo "Commit allowed. These issues WILL block your next push." >&2
-  echo "They have been appended to next-prompt.md." >&2
+  UNFIXED_ESLINT=$(bun run eslint . --max-warnings=0 2>&1) && ESLINT_CLEAN=1 || ESLINT_CLEAN=0
+  UNFIXED_PRETTIER=$(bun run prettier --check . 2>&1) && PRETTIER_CLEAN=1 || PRETTIER_CLEAN=0
 
-  cat >> docs/plans/next-prompt.md <<EOF
-
----
-
-## Unfixed Lint/Format Issues — Must resolve before next push
-
-$([ $ESLINT_CLEAN -eq 0 ] && echo "### ESLint\n\`\`\`\n${UNFIXED_ESLINT}\n\`\`\`")
-$([ $PRETTIER_CLEAN -eq 0 ] && echo "### Prettier\n\`\`\`\n${UNFIXED_PRETTIER}\n\`\`\`")
-EOF
+  if [ $ESLINT_CLEAN -eq 0 ] || [ $PRETTIER_CLEAN -eq 0 ]; then
+    echo "" >&2
+    echo "LINT/FORMAT: auto-fix applied. The following could not be fixed automatically:" >&2
+    [ $ESLINT_CLEAN -eq 0 ] && echo "$UNFIXED_ESLINT" >&2
+    [ $PRETTIER_CLEAN -eq 0 ] && echo "$UNFIXED_PRETTIER" >&2
+    echo "" >&2
+    echo "Commit allowed. These issues WILL block your next push." >&2
+  fi
 fi
 
 exit 0
