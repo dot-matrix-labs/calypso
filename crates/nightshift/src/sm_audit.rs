@@ -88,6 +88,50 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 
 // ── Core audit logic ────────────────────────────────────────────────────────
 
+/// Run a structural audit of all embedded blueprint workflows and the default
+/// template — no filesystem access required.
+///
+/// Validates:
+/// - All embedded blueprint workflows parse as valid YAML
+/// - Check reference integrity (no dangling or orphan checks) within each workflow
+/// - The default template set loads and passes `validate()`
+///
+/// This is suitable for compile-time / test-time validation of the embedded
+/// state machine bytes without needing a real repo on disk.
+pub fn run_structural_audit() -> StateMachineAudit {
+    let mut findings = Vec::new();
+
+    // 1) Parse and validate check references in all embedded blueprint workflows
+    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+        let wf = match BlueprintWorkflowLibrary::parse(yaml) {
+            Ok(wf) => wf,
+            Err(e) => {
+                findings.push(AuditFinding {
+                    severity: AuditSeverity::Error,
+                    source: (*stem).to_string(),
+                    message: format!("failed to parse blueprint workflow: {e}"),
+                    suggestion: None,
+                });
+                continue;
+            }
+        };
+
+        audit_check_references(stem, &wf, &mut findings);
+    }
+
+    // 2) Validate the default template set loads and passes cross-reference checks
+    if let Err(e) = template::load_embedded_template_set() {
+        findings.push(AuditFinding {
+            severity: AuditSeverity::Error,
+            source: "default-template".to_string(),
+            message: format!("embedded template failed to load: {e}"),
+            suggestion: None,
+        });
+    }
+
+    StateMachineAudit { findings }
+}
+
 /// Run the full state machine audit against the given repo root.
 pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
     let mut findings = Vec::new();
@@ -836,5 +880,27 @@ checks:
         assert!(output.contains("[ERROR]"));
         assert!(output.contains("[WARN]"));
         assert!(output.contains("suggestion: did you mean foo.yml?"));
+    }
+
+    #[test]
+    fn structural_audit_embedded_workflows_have_no_errors() {
+        let audit = run_structural_audit();
+
+        let errors: Vec<_> = audit
+            .findings
+            .iter()
+            .filter(|f| f.severity == AuditSeverity::Error)
+            .collect();
+
+        assert!(
+            errors.is_empty(),
+            "embedded state machine structural audit produced {} error(s):\n{}",
+            errors.len(),
+            errors
+                .iter()
+                .map(|f| format!("  [{}] {}", f.source, f.message))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
     }
 }
