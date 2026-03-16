@@ -89,6 +89,7 @@ pub struct BlueprintWorkflow {
     pub pull_request_template: Option<PullRequestTemplate>,
     pub plan: Option<PlanConfig>,
     pub trigger: Option<TriggerConfig>,
+    pub schedule: Option<ScheduleConfig>,
     pub release_requirements: Option<ReleaseRequirements>,
     pub artifact_requirements: Option<ArtifactRequirements>,
     pub rollout_order: Option<Vec<String>>,
@@ -162,6 +163,20 @@ pub struct TriggerConfig {
     pub pattern: Option<String>,
     pub branch_constraint: Option<String>,
     pub ci_entry: Option<String>,
+}
+
+// ── schedule ─────────────────────────────────────────────────────────────────
+
+/// Cron-based schedule for entry-point workflows. The orchestrator evaluates
+/// these expressions and dispatches the workflow on match.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScheduleConfig {
+    /// Cron expression with second-level granularity: "sec min hour day month weekday".
+    /// Examples: `"*/30 * * * * *"` (every 30s), `"0 */5 * * * *"` (every 5 min),
+    /// `"0 0 2 * * *"` (daily at 02:00 UTC).
+    pub cron: String,
+    /// Human-readable description of what this schedule triggers.
+    pub description: Option<String>,
 }
 
 // ── release_requirements ─────────────────────────────────────────────────────
