@@ -201,6 +201,29 @@ impl InitProgress {
 }
 
 // ---------------------------------------------------------------------------
+// GitHub Actions workflow templates — from calypso-blueprint examples
+// ---------------------------------------------------------------------------
+
+pub const WORKFLOW_RUST_QUALITY: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/rust-quality.yml"
+);
+pub const WORKFLOW_RUST_UNIT: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/rust-unit.yml"
+);
+pub const WORKFLOW_RUST_INTEGRATION: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/rust-integration.yml"
+);
+pub const WORKFLOW_RUST_E2E: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/rust-e2e.yml"
+);
+pub const WORKFLOW_RUST_COVERAGE: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/rust-coverage.yml"
+);
+pub const WORKFLOW_RELEASE_CLI: &str = include_str!(
+    "../../../calypso-blueprint/examples/github-workflows/release-cli.yml"
+);
+
+// ---------------------------------------------------------------------------
 // GitHub Actions workflow templates
 // ---------------------------------------------------------------------------
 
@@ -885,6 +908,12 @@ pub fn refresh_workflows(
         ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
         ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
         ("ci.yml", WORKFLOW_CI),
+        ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
+        ("rust-unit.yml", WORKFLOW_RUST_UNIT),
+        ("rust-integration.yml", WORKFLOW_RUST_INTEGRATION),
+        ("rust-e2e.yml", WORKFLOW_RUST_E2E),
+        ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
+        ("release-cli.yml", WORKFLOW_RELEASE_CLI),
     ];
 
     let mut refreshed = Vec::new();
@@ -976,6 +1005,12 @@ pub fn scaffold_github_actions(
         ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
         ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
         ("ci.yml", WORKFLOW_CI),
+        ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
+        ("rust-unit.yml", WORKFLOW_RUST_UNIT),
+        ("rust-integration.yml", WORKFLOW_RUST_INTEGRATION),
+        ("rust-e2e.yml", WORKFLOW_RUST_E2E),
+        ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
+        ("release-cli.yml", WORKFLOW_RELEASE_CLI),
     ];
 
     let mut scaffolded = Vec::new();

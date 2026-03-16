@@ -441,6 +441,60 @@ fn real_init_creates_files_and_executable_hook() {
 }
 
 #[test]
+fn real_init_state_machine_audit_passes() {
+    let dir = unique_tmpdir("init-audit");
+    // Clean up in case a previous test run left behind a stale directory.
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).expect("tmpdir creation");
+    make_git_repo_with_github_remote(&dir);
+
+    use calypso_cli::init::HostInitEnvironment;
+    let request = InitRequest {
+        repo_path: dir.clone(),
+        provider: Some("claude".to_string()),
+        allow_reinit: false,
+        create_git_repo: false,
+        github_org: None,
+        github_repo_name: None,
+    };
+    init_repository(&request, &HostInitEnvironment).expect("init should succeed");
+    scaffold_github_actions(&dir, &HostInitEnvironment).expect("scaffold workflows should succeed");
+
+    // Verify all blueprint-required workflow files were scaffolded
+    let workflows_dir = dir.join(".github/workflows");
+    for wf in &[
+        "pr-checklist.yml",
+        "pr-depends-on.yml",
+        "ci.yml",
+        "rust-quality.yml",
+        "rust-unit.yml",
+        "rust-integration.yml",
+        "rust-e2e.yml",
+        "rust-coverage.yml",
+        "release-cli.yml",
+    ] {
+        assert!(
+            workflows_dir.join(wf).exists(),
+            "workflow file should exist after init: {wf}"
+        );
+    }
+
+    // Verify git hooks were installed
+    assert!(dir.join(".git/hooks/pre-push").exists(), "pre-push hook should exist");
+
+    // Run state machine audit — must report zero errors
+    let result = calypso_cli::sm_audit::run_audit(&dir);
+    assert_eq!(
+        result.error_count(),
+        0,
+        "state machine audit must have zero errors after init:\n{}",
+        result.format_errors()
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn real_init_non_git_dir_returns_error() {
     let dir = unique_tmpdir("not-git");
     use calypso_cli::init::{HostInitEnvironment, init_repository};
@@ -673,7 +727,7 @@ fn scaffold_github_actions_writes_three_workflow_files() {
     let scaffolded = scaffold_github_actions(&repo_path, &env).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 3, "should scaffold 3 workflow files");
+    assert_eq!(workflows.len(), 9, "should scaffold 9 workflow files");
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -685,7 +739,13 @@ fn scaffold_github_actions_writes_three_workflow_files() {
         "missing pr-depends-on.yml"
     );
     assert!(names.contains(&"ci.yml"), "missing ci.yml");
-    assert_eq!(scaffolded.len(), 3);
+    assert!(names.contains(&"rust-quality.yml"), "missing rust-quality.yml");
+    assert!(names.contains(&"rust-unit.yml"), "missing rust-unit.yml");
+    assert!(names.contains(&"rust-integration.yml"), "missing rust-integration.yml");
+    assert!(names.contains(&"rust-e2e.yml"), "missing rust-e2e.yml");
+    assert!(names.contains(&"rust-coverage.yml"), "missing rust-coverage.yml");
+    assert!(names.contains(&"release-cli.yml"), "missing release-cli.yml");
+    assert_eq!(scaffolded.len(), 9);
 }
 
 #[test]
@@ -704,10 +764,10 @@ fn scaffold_github_actions_skips_existing_workflow_files() {
     let workflows = env.workflows_written.borrow();
     assert_eq!(
         workflows.len(),
-        2,
+        8,
         "should skip existing workflow file; got: {workflows:?}"
     );
-    assert_eq!(scaffolded.len(), 2);
+    assert_eq!(scaffolded.len(), 8);
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -858,13 +918,19 @@ fn refresh_workflows_overwrites_all_three_files() {
 
     let refreshed = refresh_workflows(&repo_path, &env).expect("refresh should succeed");
 
-    assert_eq!(refreshed.len(), 3, "should refresh all 3 workflow files");
+    assert_eq!(refreshed.len(), 9, "should refresh all 9 workflow files");
     assert!(refreshed.contains(&"pr-checklist.yml".to_string()));
     assert!(refreshed.contains(&"pr-depends-on.yml".to_string()));
     assert!(refreshed.contains(&"ci.yml".to_string()));
+    assert!(refreshed.contains(&"rust-quality.yml".to_string()));
+    assert!(refreshed.contains(&"rust-unit.yml".to_string()));
+    assert!(refreshed.contains(&"rust-integration.yml".to_string()));
+    assert!(refreshed.contains(&"rust-e2e.yml".to_string()));
+    assert!(refreshed.contains(&"rust-coverage.yml".to_string()));
+    assert!(refreshed.contains(&"release-cli.yml".to_string()));
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 3);
+    assert_eq!(workflows.len(), 9);
 }
 
 // ── init progress persistence tests (real filesystem) ──────────────────────────

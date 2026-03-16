@@ -61,6 +61,16 @@ impl StateMachineAudit {
             .filter(|f| f.severity == AuditSeverity::Warning)
             .count()
     }
+
+    /// Format all error findings as a human-readable multi-line string.
+    pub fn format_errors(&self) -> String {
+        self.findings
+            .iter()
+            .filter(|f| f.severity == AuditSeverity::Error)
+            .map(|f| format!("[{}] {}", f.source, f.message))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 // ── Minimal GHA YAML parser ─────────────────────────────────────────────────
@@ -574,6 +584,11 @@ fn audit_blueprint_workflow(
 ) {
     // a) Collect all workflow paths from checks and validate them
     for (check_name, check_cfg) in &wf.checks {
+        // Skip checks that are marked as proposed — they reference workflows
+        // that don't exist yet and are intentionally not validated.
+        if check_cfg.status.as_deref() == Some("proposed") {
+            continue;
+        }
         if let Some(wf_path) = &check_cfg.workflow {
             // Only validate paths that look like GHA file references
             if wf_path.starts_with(".github/workflows/") {

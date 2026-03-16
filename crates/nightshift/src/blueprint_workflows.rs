@@ -410,6 +410,10 @@ pub struct CheckConfig {
     pub role: Option<String>,
     pub description: Option<String>,
 
+    /// Lifecycle status — `"proposed"` checks are not yet implemented and are
+    /// skipped by the audit validator.
+    pub status: Option<String>,
+
     // Deterministic check fields
     pub cmd: Option<String>,
     pub source: Option<CheckSource>,
