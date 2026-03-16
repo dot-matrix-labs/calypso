@@ -144,43 +144,69 @@ fn sample_pull_request() -> PullRequestRef {
 
 #[test]
 fn gh_cli_pull_request_resolver_reads_pull_request_from_gh_cli_output() {
+    // The resolver now calls `gh api repos/{o}/{r}/pulls?head=...` which returns a JSON array.
+    // It also needs `git remote get-url origin` to resolve owner/repo, so we need a real git repo.
+    let repo_root = init_repo("feat/runtime-context");
+    run_git(
+        &repo_root,
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
+    );
+
     with_fake_gh(
-        "#!/bin/sh\nprintf '[{\"number\":19,\"url\":\"https://github.com/org/repo/pull/19\"}]'\n",
+        "#!/bin/sh\nprintf '[{\"number\":19,\"html_url\":\"https://github.com/org/repo/pull/19\",\"url\":\"https://api.github.com/repos/org/repo/pulls/19\"}]'\n",
         || {
             let resolver = GhCliPullRequestResolver;
             let pull_request = resolver
-                .resolve_for_branch(Path::new("."), "feat/runtime-context")
+                .resolve_for_branch(&repo_root, "feat/runtime-context")
                 .expect("resolver should parse fake gh output");
 
             assert_eq!(pull_request, sample_pull_request());
         },
     );
+
+    fs::remove_dir_all(repo_root).expect("temp repo root should be removed");
 }
 
 #[test]
 fn gh_cli_pull_request_resolver_reports_command_failures() {
+    let repo_root = init_repo("feat/runtime-context");
+    run_git(
+        &repo_root,
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
+    );
+
     with_fake_gh("#!/bin/sh\necho 'boom' >&2\nexit 1\n", || {
         let resolver = GhCliPullRequestResolver;
         let error = resolver
-            .resolve_for_branch(Path::new("."), "feat/runtime-context")
+            .resolve_for_branch(&repo_root, "feat/runtime-context")
             .expect_err("resolver should report gh failures");
 
         assert!(matches!(error, RuntimeError::CommandFailed { .. }));
         assert!(error.to_string().contains("boom"));
     });
+
+    fs::remove_dir_all(repo_root).expect("temp repo root should be removed");
 }
 
 #[test]
 fn gh_cli_pull_request_resolver_reports_missing_pull_requests() {
+    let repo_root = init_repo("feat/runtime-context");
+    run_git(
+        &repo_root,
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
+    );
+
     with_fake_gh("#!/bin/sh\nprintf '[]'\n", || {
         let resolver = GhCliPullRequestResolver;
         let error = resolver
-            .resolve_for_branch(Path::new("."), "feat/runtime-context")
+            .resolve_for_branch(&repo_root, "feat/runtime-context")
             .expect_err("resolver should fail when no PR is returned");
 
         assert!(matches!(error, RuntimeError::PullRequestNotFound(_)));
         assert!(error.to_string().contains("feat/runtime-context"));
     });
+
+    fs::remove_dir_all(repo_root).expect("temp repo root should be removed");
 }
 
 #[test]
@@ -216,9 +242,13 @@ fn repository_context_discovers_git_root_branch_and_feature_binding() {
 #[test]
 fn discover_current_repository_context_uses_gh_cli_resolver() {
     with_fake_gh(
-        "#!/bin/sh\nprintf '[{\"number\":19,\"url\":\"https://github.com/org/repo/pull/19\"}]'\n",
+        "#!/bin/sh\nprintf '[{\"number\":19,\"html_url\":\"https://github.com/org/repo/pull/19\",\"url\":\"https://api.github.com/repos/org/repo/pulls/19\"}]'\n",
         || {
             let repo_root = init_repo("feat/runtime-context");
+            run_git(
+                &repo_root,
+                &["remote", "add", "origin", "https://github.com/org/repo.git"],
+            );
             let context = discover_current_repository_context(&repo_root)
                 .expect("current repository context should resolve");
 
@@ -320,9 +350,13 @@ fn load_or_initialize_runtime_resumes_existing_repository_state() {
 #[test]
 fn load_or_initialize_current_runtime_uses_gh_cli_resolver() {
     with_fake_gh(
-        "#!/bin/sh\nprintf '[{\"number\":19,\"url\":\"https://github.com/org/repo/pull/19\"}]'\n",
+        "#!/bin/sh\nprintf '[{\"number\":19,\"html_url\":\"https://github.com/org/repo/pull/19\",\"url\":\"https://api.github.com/repos/org/repo/pulls/19\"}]'\n",
         || {
             let repo_root = init_repo("feat/runtime-context");
+            run_git(
+                &repo_root,
+                &["remote", "add", "origin", "https://github.com/org/repo.git"],
+            );
             let runtime = load_or_initialize_current_runtime(&repo_root)
                 .expect("current runtime should load through gh");
 

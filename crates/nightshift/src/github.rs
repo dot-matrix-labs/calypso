@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::process::Command;
 
 use serde::Deserialize;
@@ -5,6 +6,68 @@ use serde::Deserialize;
 use crate::state::{BuiltinEvidence, EvidenceStatus, PullRequestRef};
 
 pub use crate::state::{GithubMergeability, GithubPullRequestSnapshot, GithubReviewStatus};
+
+// ---------------------------------------------------------------------------
+// Owner/repo resolution from git remote
+// ---------------------------------------------------------------------------
+
+/// Parse the origin remote URL to extract `(owner, repo)`.
+///
+/// Handles:
+///   - `https://github.com/owner/repo.git`
+///   - `https://github.com/owner/repo`
+///   - `git@github.com:owner/repo.git`
+pub fn resolve_owner_repo(repo_root: &Path) -> Result<(String, String), GithubSnapshotError> {
+    let output = Command::new("git")
+        .args([
+            "-C",
+            &repo_root.to_string_lossy(),
+            "remote",
+            "get-url",
+            "origin",
+        ])
+        .output()
+        .map_err(|_| {
+            GithubSnapshotError::MissingField("git remote get-url origin failed to spawn")
+        })?;
+
+    if !output.status.success() {
+        return Err(GithubSnapshotError::MissingField(
+            "git remote get-url origin returned a non-zero exit status",
+        ));
+    }
+
+    let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    parse_owner_repo_from_url(&url)
+}
+
+/// Extract `(owner, repo)` from a GitHub remote URL.
+pub fn parse_owner_repo_from_url(url: &str) -> Result<(String, String), GithubSnapshotError> {
+    let trimmed = url.trim_end_matches(".git");
+
+    // Try HTTPS: https://github.com/owner/repo
+    if let Some(rest) = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+    {
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Ok((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    // Try SSH: git@github.com:owner/repo
+    if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Ok((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    Err(GithubSnapshotError::MissingField(
+        "could not parse owner/repo from remote URL",
+    ))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum GithubCheckId {
@@ -57,15 +120,45 @@ pub trait GithubEnvironment {
     ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError>;
 }
 
-#[derive(Debug, Default, Clone, Copy)]
-pub struct HostGithubEnvironment;
+#[derive(Debug, Default, Clone)]
+pub struct HostGithubEnvironment {
+    /// Pre-resolved `(owner, repo)` pair. When `None`, will be resolved from
+    /// the current working directory's git remote at call time.
+    pub owner_repo: Option<(String, String)>,
+}
 
 impl GithubEnvironment for HostGithubEnvironment {
     fn pull_request_snapshot(
         &self,
         pull_request: &PullRequestRef,
     ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
-        fetch_pull_request_snapshot(pull_request)
+        let (owner, repo) = match &self.owner_repo {
+            Some(pair) => pair.clone(),
+            None => {
+                // Fall back to resolving from the PR URL.
+                parse_owner_repo_from_pr_url(&pull_request.url)?
+            }
+        };
+        fetch_pull_request_snapshot(&owner, &repo, pull_request)
+    }
+}
+
+/// Extract `(owner, repo)` from a pull request URL like
+/// `https://github.com/owner/repo/pull/123`.
+fn parse_owner_repo_from_pr_url(url: &str) -> Result<(String, String), GithubSnapshotError> {
+    let rest = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .ok_or(GithubSnapshotError::MissingField(
+            "pull request URL is not a GitHub URL",
+        ))?;
+    let parts: Vec<&str> = rest.splitn(4, '/').collect();
+    if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    } else {
+        Err(GithubSnapshotError::MissingField(
+            "could not parse owner/repo from pull request URL",
+        ))
     }
 }
 
@@ -159,25 +252,88 @@ impl std::fmt::Display for GithubSnapshotError {
 
 impl std::error::Error for GithubSnapshotError {}
 
+// ---------------------------------------------------------------------------
+// REST API deserialization types
+// ---------------------------------------------------------------------------
+
+/// Partial pull request object from `GET /repos/{o}/{r}/pulls/{n}`.
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrView {
+struct RestPullRequest {
     state: String,
-    is_draft: bool,
-    review_decision: Option<String>,
-    merge_state_status: String,
-    status_check_rollup: Vec<CheckRollup>,
+    draft: Option<bool>,
+    mergeable_state: Option<String>,
+    head: RestPullRequestHead,
 }
 
 #[derive(Deserialize)]
-struct CheckRollup {
-    status: Option<String>,
+struct RestPullRequestHead {
+    sha: String,
+}
+
+/// A single review from `GET /repos/{o}/{r}/pulls/{n}/reviews`.
+#[derive(Deserialize)]
+struct RestReview {
+    user: RestUser,
+    state: String,
+}
+
+#[derive(Deserialize)]
+struct RestUser {
+    login: String,
+}
+
+/// A single check run from `GET /repos/{o}/{r}/commits/{sha}/check-runs`.
+#[derive(Deserialize)]
+struct RestCheckRunsResponse {
+    check_runs: Vec<RestCheckRun>,
+}
+
+#[derive(Deserialize)]
+struct RestCheckRun {
+    status: String,
     conclusion: Option<String>,
 }
 
+// ---------------------------------------------------------------------------
+// Parsing helpers — kept public for tests
+// ---------------------------------------------------------------------------
+
+/// Parse the REST pull request JSON from `gh api repos/{o}/{r}/pulls/{n}`.
 pub fn parse_pull_request_view_json(
     json: &str,
 ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+    // Support both the old GraphQL format (camelCase) and the new REST format.
+    // Try REST first (has `draft` field), fall back to GraphQL (has `isDraft`).
+    if let Ok(rest) = serde_json::from_str::<RestPullRequest>(json) {
+        return parse_rest_pull_request(&rest, &[], &[]);
+    }
+
+    // Legacy GraphQL format (for tests that still pass camelCase JSON).
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct PrView {
+        state: String,
+        is_draft: bool,
+        review_decision: Option<String>,
+        merge_state_status: String,
+        status_check_rollup: Vec<LegacyCheckRollup>,
+    }
+
+    #[derive(Deserialize)]
+    struct LegacyCheckRollup {
+        status: Option<String>,
+        conclusion: Option<String>,
+    }
+
+    impl AsCheckRollup for LegacyCheckRollup {
+        fn status_field(&self) -> Option<&str> {
+            self.status.as_deref()
+        }
+        fn conclusion_field(&self) -> Option<&str> {
+            self.conclusion.as_deref()
+        }
+    }
+
     let view: PrView = serde_json::from_str(json).map_err(GithubSnapshotError::Json)?;
     if view.state != "OPEN" && view.state != "MERGED" {
         return Err(GithubSnapshotError::UnsupportedValue {
@@ -189,9 +345,71 @@ pub fn parse_pull_request_view_json(
     Ok(GithubPullRequestSnapshot {
         is_draft: view.is_draft,
         review_status: parse_review_status(view.review_decision.as_deref())?,
-        checks: parse_checks_status(&view.status_check_rollup)?,
-        mergeability: parse_mergeability(view.merge_state_status.as_str())?,
+        checks: parse_legacy_checks_status(&view.status_check_rollup)?,
+        mergeability: parse_mergeability_graphql(view.merge_state_status.as_str())?,
     })
+}
+
+/// Build a snapshot from REST API data (PR + reviews + check runs).
+fn parse_rest_pull_request(
+    pr: &RestPullRequest,
+    reviews: &[RestReview],
+    check_runs: &[RestCheckRun],
+) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+    let state_lower = pr.state.to_lowercase();
+    if state_lower != "open" && state_lower != "closed" {
+        return Err(GithubSnapshotError::UnsupportedValue {
+            field: "state",
+            value: pr.state.clone(),
+        });
+    }
+
+    let is_draft = pr.draft.unwrap_or(false);
+    let review_status = derive_review_decision(reviews);
+    let checks = parse_rest_check_runs(check_runs);
+    let mergeability = parse_mergeability_rest(pr.mergeable_state.as_deref())?;
+
+    Ok(GithubPullRequestSnapshot {
+        is_draft,
+        review_status,
+        checks,
+        mergeability,
+    })
+}
+
+/// Derive the review decision from the list of reviews.
+///
+/// Algorithm: take the latest review per user. If any is `CHANGES_REQUESTED`,
+/// the decision is `ChangesRequested`. If any is `APPROVED` (and none are
+/// `CHANGES_REQUESTED`), the decision is `Approved`. Otherwise `ReviewRequired`.
+fn derive_review_decision(reviews: &[RestReview]) -> GithubReviewStatus {
+    use std::collections::HashMap;
+
+    let mut latest_by_user: HashMap<&str, &str> = HashMap::new();
+    for review in reviews {
+        // Only consider actionable review states.
+        match review.state.as_str() {
+            "APPROVED" | "CHANGES_REQUESTED" | "DISMISSED" => {
+                latest_by_user.insert(&review.user.login, &review.state);
+            }
+            _ => {}
+        }
+    }
+
+    if latest_by_user.is_empty() {
+        return GithubReviewStatus::ReviewRequired;
+    }
+
+    let has_changes_requested = latest_by_user.values().any(|s| *s == "CHANGES_REQUESTED");
+    let has_approved = latest_by_user.values().any(|s| *s == "APPROVED");
+
+    if has_changes_requested {
+        GithubReviewStatus::ChangesRequested
+    } else if has_approved {
+        GithubReviewStatus::Approved
+    } else {
+        GithubReviewStatus::ReviewRequired
+    }
 }
 
 fn parse_review_status(
@@ -208,7 +426,40 @@ fn parse_review_status(
     }
 }
 
-fn parse_checks_status(checks: &[CheckRollup]) -> Result<EvidenceStatus, GithubSnapshotError> {
+fn parse_rest_check_runs(check_runs: &[RestCheckRun]) -> EvidenceStatus {
+    if check_runs.is_empty() {
+        return EvidenceStatus::Pending;
+    }
+
+    let mut saw_pending = false;
+    for run in check_runs {
+        match run.status.as_str() {
+            "queued" | "in_progress" => {
+                saw_pending = true;
+            }
+            "completed" => {
+                let conclusion = run.conclusion.as_deref().unwrap_or("");
+                if !matches!(conclusion, "success" | "neutral" | "skipped") {
+                    return EvidenceStatus::Failing;
+                }
+            }
+            _ => {
+                saw_pending = true;
+            }
+        }
+    }
+
+    if saw_pending {
+        EvidenceStatus::Pending
+    } else {
+        EvidenceStatus::Passing
+    }
+}
+
+/// Legacy: parse check rollup from GraphQL-style JSON.
+fn parse_legacy_checks_status(
+    checks: &[impl AsCheckRollup],
+) -> Result<EvidenceStatus, GithubSnapshotError> {
     if checks.is_empty() {
         return Ok(EvidenceStatus::Pending);
     }
@@ -216,8 +467,7 @@ fn parse_checks_status(checks: &[CheckRollup]) -> Result<EvidenceStatus, GithubS
     let mut saw_pending = false;
     for check in checks {
         let status = check
-            .status
-            .as_deref()
+            .status_field()
             .ok_or(GithubSnapshotError::MissingField(
                 "statusCheckRollup entry is missing status",
             ))?;
@@ -229,8 +479,7 @@ fn parse_checks_status(checks: &[CheckRollup]) -> Result<EvidenceStatus, GithubS
             "COMPLETED" => {
                 let conclusion =
                     check
-                        .conclusion
-                        .as_deref()
+                        .conclusion_field()
                         .ok_or(GithubSnapshotError::MissingField(
                             "statusCheckRollup entry is missing conclusion",
                         ))?;
@@ -255,7 +504,27 @@ fn parse_checks_status(checks: &[CheckRollup]) -> Result<EvidenceStatus, GithubS
     }
 }
 
-fn parse_mergeability(value: &str) -> Result<GithubMergeability, GithubSnapshotError> {
+trait AsCheckRollup {
+    fn status_field(&self) -> Option<&str>;
+    fn conclusion_field(&self) -> Option<&str>;
+}
+
+/// Map REST `mergeable_state` values to our enum.
+fn parse_mergeability_rest(value: Option<&str>) -> Result<GithubMergeability, GithubSnapshotError> {
+    match value {
+        Some("clean") | Some("has_hooks") | Some("unstable") => Ok(GithubMergeability::Mergeable),
+        Some("dirty") => Ok(GithubMergeability::Conflicting),
+        Some("blocked") | Some("behind") | Some("draft") => Ok(GithubMergeability::Blocked),
+        Some("unknown") | None => Ok(GithubMergeability::Unknown),
+        Some(other) => Err(GithubSnapshotError::UnsupportedValue {
+            field: "mergeable_state",
+            value: other.to_string(),
+        }),
+    }
+}
+
+/// Map GraphQL `mergeStateStatus` values to our enum (kept for backward compat).
+fn parse_mergeability_graphql(value: &str) -> Result<GithubMergeability, GithubSnapshotError> {
     match value {
         "CLEAN" | "HAS_HOOKS" | "UNSTABLE" => Ok(GithubMergeability::Mergeable),
         "DIRTY" => Ok(GithubMergeability::Conflicting),
@@ -268,21 +537,55 @@ fn parse_mergeability(value: &str) -> Result<GithubMergeability, GithubSnapshotE
     }
 }
 
-fn fetch_pull_request_snapshot(
-    pull_request: &PullRequestRef,
-) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
-    let mut command = Command::new("gh");
-    command.args([
-        "pr",
-        "view",
-        &pull_request.number.to_string(),
-        "--json",
-        "state,isDraft,reviewDecision,mergeStateStatus,statusCheckRollup",
-    ]);
+// ---------------------------------------------------------------------------
+// REST fetch implementation
+// ---------------------------------------------------------------------------
 
-    fetch_pull_request_snapshot_with_command(&mut command)
+fn run_gh_api(args: &[&str]) -> Result<String, GithubSnapshotError> {
+    let mut cmd = Command::new("gh");
+    cmd.arg("api");
+    cmd.args(args);
+
+    let output = cmd
+        .output()
+        .map_err(|_| GithubSnapshotError::MissingField("gh command failed to spawn"))?;
+
+    if !output.status.success() {
+        return Err(GithubSnapshotError::MissingField(
+            "gh command returned a non-zero exit status",
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+fn fetch_pull_request_snapshot(
+    owner: &str,
+    repo: &str,
+    pull_request: &PullRequestRef,
+) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+    // 1. Get PR details
+    let pr_endpoint = format!("repos/{owner}/{repo}/pulls/{}", pull_request.number);
+    let pr_json = run_gh_api(&[&pr_endpoint])?;
+    let pr: RestPullRequest = serde_json::from_str(&pr_json).map_err(GithubSnapshotError::Json)?;
+
+    // 2. Get reviews
+    let reviews_endpoint = format!("repos/{owner}/{repo}/pulls/{}/reviews", pull_request.number);
+    let reviews_json = run_gh_api(&[&reviews_endpoint])?;
+    let reviews: Vec<RestReview> =
+        serde_json::from_str(&reviews_json).map_err(GithubSnapshotError::Json)?;
+
+    // 3. Get check runs for head SHA
+    let checks_endpoint = format!("repos/{owner}/{repo}/commits/{}/check-runs", pr.head.sha);
+    let checks_json = run_gh_api(&[&checks_endpoint])?;
+    let checks_response: RestCheckRunsResponse =
+        serde_json::from_str(&checks_json).map_err(GithubSnapshotError::Json)?;
+
+    parse_rest_pull_request(&pr, &reviews, &checks_response.check_runs)
+}
+
+/// Fetch a pull request snapshot using an arbitrary command (for tests).
+#[cfg(test)]
 fn fetch_pull_request_snapshot_with_command(
     command: &mut Command,
 ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
@@ -403,27 +706,44 @@ mod tests {
     }
 
     #[test]
-    fn fetch_pull_request_status_uses_gh_command_for_pr_number() {
-        with_fake_gh(
-            "printf '{\"state\":\"OPEN\",\"isDraft\":false,\"reviewDecision\":\"APPROVED\",\"mergeStateStatus\":\"CLEAN\",\"statusCheckRollup\":[]}'",
-            || {
-                let status = fetch_pull_request_snapshot(&PullRequestRef {
+    fn fetch_pull_request_status_uses_gh_api_for_pr_number() {
+        // This fake gh script handles the three REST API calls.
+        let script = r#"
+if echo "$*" | grep -q "pulls/42/reviews"; then
+  printf '[]'
+  exit 0
+fi
+if echo "$*" | grep -q "check-runs"; then
+  printf '{"check_runs":[]}'
+  exit 0
+fi
+if echo "$*" | grep -q "pulls/42"; then
+  printf '{"state":"open","draft":false,"mergeable_state":"unknown","head":{"sha":"abc123"}}'
+  exit 0
+fi
+exit 1
+"#;
+        with_fake_gh(script, || {
+            let status = fetch_pull_request_snapshot(
+                "dot-matrix-labs",
+                "calypso",
+                &PullRequestRef {
                     number: 42,
                     url: "https://github.com/dot-matrix-labs/calypso/pull/42".to_string(),
-                })
-                .expect("status should parse");
+                },
+            )
+            .expect("status should parse");
 
-                assert!(!status.is_draft);
-                assert_eq!(status.review_status, GithubReviewStatus::Approved);
-                assert_eq!(status.checks, EvidenceStatus::Pending);
-            },
-        );
+            assert!(!status.is_draft);
+            assert_eq!(status.review_status, GithubReviewStatus::ReviewRequired);
+            assert_eq!(status.checks, EvidenceStatus::Pending);
+        });
     }
 
     #[test]
     fn host_github_environment_reports_missing_pull_request_as_failing() {
         with_fake_gh("exit 1", || {
-            let environment = HostGithubEnvironment;
+            let environment = HostGithubEnvironment::default();
             let pull_request = PullRequestRef {
                 number: 99,
                 url: "https://github.com/dot-matrix-labs/calypso/pull/99".to_string(),
@@ -437,5 +757,106 @@ mod tests {
                     .contains("non-zero exit status")
             );
         });
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_handles_https() {
+        let (owner, repo) = parse_owner_repo_from_url("https://github.com/org/repo.git").unwrap();
+        assert_eq!(owner, "org");
+        assert_eq!(repo, "repo");
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_handles_ssh() {
+        let (owner, repo) = parse_owner_repo_from_url("git@github.com:org/repo.git").unwrap();
+        assert_eq!(owner, "org");
+        assert_eq!(repo, "repo");
+    }
+
+    #[test]
+    fn derive_review_decision_with_no_reviews_is_review_required() {
+        assert_eq!(
+            derive_review_decision(&[]),
+            GithubReviewStatus::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn derive_review_decision_approved() {
+        let reviews = vec![RestReview {
+            user: RestUser {
+                login: "alice".to_string(),
+            },
+            state: "APPROVED".to_string(),
+        }];
+        assert_eq!(
+            derive_review_decision(&reviews),
+            GithubReviewStatus::Approved
+        );
+    }
+
+    #[test]
+    fn derive_review_decision_changes_requested_overrides_approval() {
+        let reviews = vec![
+            RestReview {
+                user: RestUser {
+                    login: "alice".to_string(),
+                },
+                state: "APPROVED".to_string(),
+            },
+            RestReview {
+                user: RestUser {
+                    login: "bob".to_string(),
+                },
+                state: "CHANGES_REQUESTED".to_string(),
+            },
+        ];
+        assert_eq!(
+            derive_review_decision(&reviews),
+            GithubReviewStatus::ChangesRequested
+        );
+    }
+
+    #[test]
+    fn parse_rest_check_runs_empty_is_pending() {
+        assert_eq!(parse_rest_check_runs(&[]), EvidenceStatus::Pending);
+    }
+
+    #[test]
+    fn parse_rest_check_runs_all_success_is_passing() {
+        let runs = vec![RestCheckRun {
+            status: "completed".to_string(),
+            conclusion: Some("success".to_string()),
+        }];
+        assert_eq!(parse_rest_check_runs(&runs), EvidenceStatus::Passing);
+    }
+
+    #[test]
+    fn parse_rest_check_runs_failure_is_failing() {
+        let runs = vec![RestCheckRun {
+            status: "completed".to_string(),
+            conclusion: Some("failure".to_string()),
+        }];
+        assert_eq!(parse_rest_check_runs(&runs), EvidenceStatus::Failing);
+    }
+
+    #[test]
+    fn parse_mergeability_rest_maps_correctly() {
+        assert_eq!(
+            parse_mergeability_rest(Some("clean")).unwrap(),
+            GithubMergeability::Mergeable
+        );
+        assert_eq!(
+            parse_mergeability_rest(Some("dirty")).unwrap(),
+            GithubMergeability::Conflicting
+        );
+        assert_eq!(
+            parse_mergeability_rest(Some("blocked")).unwrap(),
+            GithubMergeability::Blocked
+        );
+        assert_eq!(
+            parse_mergeability_rest(None).unwrap(),
+            GithubMergeability::Unknown
+        );
     }
 }

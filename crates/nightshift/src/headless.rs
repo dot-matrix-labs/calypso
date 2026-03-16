@@ -391,7 +391,8 @@ fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &Repository
     let doctor_evidence =
         collect_doctor_report(&HostDoctorEnvironment, repo_root).to_builtin_evidence();
 
-    let github_report = collect_github_report(&HostGithubEnvironment, &feature.pull_request);
+    let github_report =
+        collect_github_report(&HostGithubEnvironment::default(), &feature.pull_request);
     let github_evidence = github_report.to_builtin_evidence();
 
     let policy_evidence = collect_policy_evidence(&HostPolicyEnvironment, repo_root, &template);

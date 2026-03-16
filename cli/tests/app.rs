@@ -223,24 +223,85 @@ fn parse_pull_request_ref_accepts_valid_json() {
 }
 
 #[test]
-fn resolve_current_pull_request_returns_none_when_gh_cannot_spawn() {
+fn resolve_current_pull_request_returns_error_when_no_github_remote() {
     let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
+    let temp_dir = make_temp_dir("calypso-cli-no-remote");
+    // Init a git repo but with no remote.
+    std::process::Command::new("git")
+        .args(["init", "-b", "feat/test"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init should run");
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit should run");
+
+    let error = resolve_current_pull_request_with_program(&temp_dir, "/definitely/missing-binary")
+        .expect_err("missing remote should return an error");
+
     assert!(
-        resolve_current_pull_request_with_program(Path::new("."), "/definitely/missing-binary")
-            .expect_err("missing gh should return an error")
-            .contains("failed to spawn")
+        error.contains("could not resolve owner/repo"),
+        "error should mention owner/repo resolution: {error}"
     );
+
+    std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
 
 #[test]
 fn resolve_current_pull_request_parses_successful_output() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
+    // Need a real git repo with a GitHub remote and a branch for
+    // resolve_current_pull_request_with_program to work (it resolves owner/repo and branch).
     let temp_dir = make_temp_dir("calypso-cli-resolve-pr");
+    // Init a git repo with a GitHub remote.
+    std::process::Command::new("git")
+        .args(["init", "-b", "feat/test-pr"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init should run");
+    std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git remote add should run");
+    std::fs::write(temp_dir.join("README"), "init").expect("readme should write");
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit should run");
+
     let gh_path = temp_dir.join("fake-gh.sh");
     {
         use std::io::Write as _;
         let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
-        f.write_all(b"#!/bin/sh\nprintf '{\"number\":7,\"url\":\"https://github.com/dot-matrix-labs/calypso/pull/7\"}'\n")
+        // Return a JSON array with one PR (REST format).
+        f.write_all(b"#!/bin/sh\nprintf '[{\"number\":7,\"html_url\":\"https://github.com/dot-matrix-labs/calypso/pull/7\",\"url\":\"https://api.github.com/repos/dot-matrix-labs/calypso/pulls/7\"}]'\n")
             .expect("fake gh should be written");
         f.sync_all().expect("fake gh should be synced");
     }
@@ -368,6 +429,37 @@ fn resolve_current_branch_returns_none_for_non_git_directory() {
 fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-error");
+    // Init a git repo with a GitHub remote.
+    std::process::Command::new("git")
+        .args(["init", "-b", "feat/test-err"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init should run");
+    std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git remote add should run");
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit should run");
+
     let gh_path = temp_dir.join("fake-gh.sh");
     {
         use std::io::Write as _;
@@ -412,6 +504,17 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
     let _guard = PATH_LOCK.lock().expect("path lock should be available");
 
     let repo_root = init_git_repo("feat/run-status-gh-error");
+    // Add a GitHub remote so resolve_owner_repo works.
+    std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
+        .current_dir(&repo_root)
+        .output()
+        .expect("git remote add should run");
     // Make an initial commit so the repo is valid
     std::fs::write(repo_root.join("README"), "init").expect("readme should write");
     std::process::Command::new("git")
@@ -479,6 +582,37 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
 fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_json() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-malformed");
+    // Init a git repo with a GitHub remote.
+    std::process::Command::new("git")
+        .args(["init", "-b", "feat/test-malformed"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init should run");
+    std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git remote add should run");
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit should run");
+
     let gh_path = temp_dir.join("fake-gh.sh");
     {
         use std::io::Write as _;
@@ -509,14 +643,46 @@ fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_js
 }
 
 #[test]
-fn resolve_current_pull_request_returns_none_when_gh_reports_no_pull_requests_found() {
+fn resolve_current_pull_request_returns_none_when_gh_returns_empty_array() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-no-pr");
+    // Init a git repo with a GitHub remote.
+    std::process::Command::new("git")
+        .args(["init", "-b", "feat/test-no-pr"])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git init should run");
+    std::process::Command::new("git")
+        .args([
+            "remote",
+            "add",
+            "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git remote add should run");
+    std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.email=test@test.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "init",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .expect("git commit should run");
+
     let gh_path = temp_dir.join("fake-gh.sh");
     {
         use std::io::Write as _;
         let mut f = std::fs::File::create(&gh_path).expect("fake gh should be created");
-        f.write_all(b"#!/bin/sh\necho 'no pull requests found for branch' >&2\nexit 1\n")
+        // Return an empty JSON array (no PRs found).
+        f.write_all(b"#!/bin/sh\nprintf '[]'\n")
             .expect("fake gh should be written");
         f.sync_all().expect("fake gh should be synced");
     }
@@ -534,7 +700,7 @@ fn resolve_current_pull_request_returns_none_when_gh_reports_no_pull_requests_fo
         &temp_dir,
         gh_path.to_str().expect("path should be valid utf-8"),
     )
-    .expect("no pull requests found should return Ok(None)");
+    .expect("empty array should return Ok(None)");
 
     assert!(result.is_none());
 

@@ -226,7 +226,7 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
         collect_doctor_report(&HostDoctorEnvironment, &repo_root).to_builtin_evidence();
     let github_report = pull_request
         .as_ref()
-        .map(|pr| collect_github_report(&HostGithubEnvironment, pr));
+        .map(|pr| collect_github_report(&HostGithubEnvironment::default(), pr));
     let github_evidence = github_report
         .as_ref()
         .map(|report| report.to_builtin_evidence())
@@ -379,11 +379,17 @@ pub fn resolve_current_pull_request_with_program(
     repo_root: &Path,
     program: &str,
 ) -> Result<Option<PullRequestRef>, String> {
-    let output = run_command(repo_root, program, &["pr", "view", "--json", "number,url"])?;
+    // Resolve owner/repo and current branch, then query the REST API.
+    let (owner, repo_name) = crate::github::resolve_owner_repo(repo_root)
+        .map_err(|e| format!("could not resolve owner/repo: {e}"))?;
+    let branch = resolve_current_branch(repo_root)
+        .ok_or_else(|| "could not determine current branch".to_string())?;
+
+    let endpoint =
+        format!("repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open");
+    let output = run_command(repo_root, program, &["api", &endpoint])?;
     match output {
-        CommandOutput::Success(output) => parse_pull_request_ref(&output)
-            .map(Some)
-            .ok_or_else(|| "gh returned malformed pull request JSON".to_string()),
+        CommandOutput::Success(output) => parse_pull_request_list_json(&output),
         CommandOutput::Failure(error) => {
             if error.contains("no pull requests found") {
                 Ok(None)
@@ -392,6 +398,25 @@ pub fn resolve_current_pull_request_with_program(
             }
         }
     }
+}
+
+/// Parse a JSON array of pull requests (REST format) and return the first one.
+fn parse_pull_request_list_json(json: &str) -> Result<Option<PullRequestRef>, String> {
+    #[derive(Deserialize)]
+    struct RestPr {
+        number: u64,
+        #[serde(default)]
+        html_url: Option<String>,
+        url: String,
+    }
+
+    let prs: Vec<RestPr> = serde_json::from_str(json)
+        .map_err(|_| "gh returned malformed pull request JSON".to_string())?;
+
+    Ok(prs.into_iter().next().map(|pr| PullRequestRef {
+        number: pr.number,
+        url: pr.html_url.unwrap_or(pr.url),
+    }))
 }
 
 pub fn missing_pull_request_ref() -> PullRequestRef {
@@ -409,6 +434,8 @@ pub fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
     #[derive(Deserialize)]
     struct GhPullRequest {
         number: u64,
+        #[serde(default)]
+        html_url: Option<String>,
         url: String,
     }
 
@@ -416,7 +443,7 @@ pub fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
 
     Some(PullRequestRef {
         number: pull_request.number,
-        url: pull_request.url,
+        url: pull_request.html_url.unwrap_or(pull_request.url),
     })
 }
 

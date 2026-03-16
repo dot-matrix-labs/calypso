@@ -240,19 +240,31 @@ fn init_repo_with_remote() -> (PathBuf, PathBuf) {
         &repo_root,
         &["config", "user.email", "calypso-test@example.com"],
     );
+    // Use a GitHub-style URL for the origin remote so resolve_owner_repo works.
+    // We use the bare_remote as a separate "real" remote for push/fetch.
     run_git(
         &repo_root,
         &[
             "remote",
             "add",
             "origin",
+            "https://github.com/dot-matrix-labs/calypso.git",
+        ],
+    );
+    // Add the bare remote as "local" for actual push operations.
+    run_git(
+        &repo_root,
+        &[
+            "remote",
+            "add",
+            "local",
             bare_remote.to_string_lossy().as_ref(),
         ],
     );
     fs::write(repo_root.join("README.md"), "# feature start\n").expect("fixture file should write");
     run_git(&repo_root, &["add", "README.md"]);
     run_git(&repo_root, &["commit", "-m", "initial commit"]);
-    run_git(&repo_root, &["push", "-u", "origin", "main"]);
+    run_git(&repo_root, &["push", "-u", "local", "main"]);
 
     (repo_root, bare_remote)
 }
@@ -445,7 +457,7 @@ fn start_feature_creates_real_git_worktree_and_seeded_state() {
             (
                 "calypso-feature-start-gh",
                 "gh",
-                "#!/bin/sh\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n  printf 'https://github.com/dot-matrix-labs/calypso/pull/27\\n'\n  exit 0\nfi\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n  printf '{\"number\":27,\"url\":\"https://github.com/dot-matrix-labs/calypso/pull/27\"}'\n  exit 0\nfi\nprintf 'unexpected gh invocation: %s\\n' \"$*\" >&2\nexit 1\n",
+                "#!/bin/sh\nif [ \"$1\" = \"api\" ] && echo \"$*\" | grep -q 'pulls'; then\n  printf '{\"number\":27,\"html_url\":\"https://github.com/dot-matrix-labs/calypso/pull/27\",\"url\":\"https://api.github.com/repos/dot-matrix-labs/calypso/pulls/27\"}'\n  exit 0\nfi\nprintf 'unexpected gh invocation: %s\\n' \"$*\" >&2\nexit 1\n",
             ),
             (
                 "calypso-feature-start-git",
@@ -794,7 +806,7 @@ fn run_feature_start_delegates_to_host_environment() {
             (
                 "calypso-run-feature-start-gh",
                 "gh",
-                "#!/bin/sh\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n  printf 'https://github.com/dot-matrix-labs/calypso/pull/1\\n'\n  exit 0\nfi\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n  printf '{\"number\":1,\"url\":\"https://github.com/dot-matrix-labs/calypso/pull/1\"}'\n  exit 0\nfi\nprintf 'unexpected: %s\\n' \"$*\" >&2\nexit 1\n",
+                "#!/bin/sh\nif [ \"$1\" = \"api\" ] && echo \"$*\" | grep -q 'pulls'; then\n  printf '{\"number\":1,\"html_url\":\"https://github.com/dot-matrix-labs/calypso/pull/1\",\"url\":\"https://api.github.com/repos/dot-matrix-labs/calypso/pulls/1\"}'\n  exit 0\nfi\nprintf 'unexpected: %s\\n' \"$*\" >&2\nexit 1\n",
             ),
             (
                 "calypso-run-feature-start-git",
@@ -836,7 +848,7 @@ fn host_environment_creates_worktree_parent_directory_when_absent() {
             (
                 "calypso-feature-start-mkdir-gh",
                 "gh",
-                "#!/bin/sh\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"create\" ]; then\n  printf 'https://github.com/dot-matrix-labs/calypso/pull/5\\n'\n  exit 0\nfi\nif [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n  printf '{\"number\":5,\"url\":\"https://github.com/dot-matrix-labs/calypso/pull/5\"}'\n  exit 0\nfi\nprintf 'unexpected: %s\\n' \"$*\" >&2\nexit 1\n",
+                "#!/bin/sh\nif [ \"$1\" = \"api\" ] && echo \"$*\" | grep -q 'pulls'; then\n  printf '{\"number\":5,\"html_url\":\"https://github.com/dot-matrix-labs/calypso/pull/5\",\"url\":\"https://api.github.com/repos/dot-matrix-labs/calypso/pulls/5\"}'\n  exit 0\nfi\nprintf 'unexpected: %s\\n' \"$*\" >&2\nexit 1\n",
             ),
             (
                 "calypso-feature-start-mkdir-git",

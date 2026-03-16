@@ -152,19 +152,35 @@ impl FeatureStartEnvironment for HostFeatureStartEnvironment {
         title: &str,
         body: &str,
     ) -> Result<PullRequestRef, FeatureStartError> {
-        run_gh(
+        let (owner, repo_name) = crate::github::resolve_owner_repo(worktree_path)
+            .map_err(|e| FeatureStartError::github("resolve owner/repo", &e.to_string()))?;
+
+        // Create the draft PR via REST API.
+        let endpoint = format!("repos/{owner}/{repo_name}/pulls");
+        let create_json = run_gh(
             worktree_path,
             &[
-                "pr", "create", "--draft", "--base", "main", "--head", branch, "--title", title,
-                "--body", body,
+                "api",
+                "--method",
+                "POST",
+                &endpoint,
+                "-f",
+                &format!("head={branch}"),
+                "-f",
+                "base=main",
+                "-f",
+                &format!("title={title}"),
+                "-f",
+                &format!("body={body}"),
+                "-F",
+                "draft=true",
             ],
         )?;
 
-        parse_pull_request_ref(&run_gh(
-            worktree_path,
-            &["pr", "view", branch, "--json", "number,url"],
-        )?)
-        .ok_or_else(|| FeatureStartError::github("gh pr view", "failed to parse pull request"))
+        // Parse the response directly — it contains number and html_url.
+        parse_pull_request_rest_response(&create_json).ok_or_else(|| {
+            FeatureStartError::github("gh api create PR", "failed to parse pull request response")
+        })
     }
 
     fn bootstrap_state(
@@ -200,9 +216,20 @@ impl FeatureStartEnvironment for HostFeatureStartEnvironment {
         pr_number: u64,
         body: &str,
     ) -> Result<(), FeatureStartError> {
+        let (owner, repo_name) = crate::github::resolve_owner_repo(worktree_path)
+            .map_err(|e| FeatureStartError::github("resolve owner/repo", &e.to_string()))?;
+
+        let endpoint = format!("repos/{owner}/{repo_name}/pulls/{pr_number}");
         run_gh(
             worktree_path,
-            &["pr", "edit", &pr_number.to_string(), "--body", body],
+            &[
+                "api",
+                "--method",
+                "PATCH",
+                &endpoint,
+                "-f",
+                &format!("body={body}"),
+            ],
         )
         .map(|_| ())
     }
@@ -391,6 +418,8 @@ fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
     #[derive(serde::Deserialize)]
     struct GhPullRequest {
         number: u64,
+        #[serde(default)]
+        html_url: Option<String>,
         url: String,
     }
 
@@ -398,8 +427,13 @@ fn parse_pull_request_ref(json: &str) -> Option<PullRequestRef> {
 
     Some(PullRequestRef {
         number: pull_request.number,
-        url: pull_request.url,
+        url: pull_request.html_url.unwrap_or(pull_request.url),
     })
+}
+
+/// Parse a single PR JSON object from REST response (e.g., from POST /pulls).
+fn parse_pull_request_rest_response(json: &str) -> Option<PullRequestRef> {
+    parse_pull_request_ref(json)
 }
 
 fn git_output(current_dir: &Path, args: &[&str]) -> Result<String, FeatureStartError> {
