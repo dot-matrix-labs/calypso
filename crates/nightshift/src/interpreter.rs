@@ -3,8 +3,15 @@
 //! The interpreter loads all embedded blueprint workflows, resolves `kind: workflow`
 //! references via a call stack, and tracks execution position as
 //! `(workflow_name, state_name)` pairs.
+//!
+//! At startup, callers should:
+//! 1. Call [`WorkflowInterpreter::entry_points`] to discover what can be launched.
+//! 2. Present [`EntryPoint::UserAction`] entries as a menu of available actions.
+//! 3. Schedule [`EntryPoint::CronScheduled`] entries using [`next_fire_in`].
+//! 4. Register listeners for [`EntryPoint::EventTriggered`] entries.
+//! 5. Auto-launch [`EntryPoint::AutoStart`] entries immediately.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,8 +19,60 @@ use crate::blueprint_workflows::{
     BlueprintWorkflow, BlueprintWorkflowLibrary, StateConfig, StateKind,
 };
 
-/// The root workflow from which execution begins.
-pub const ROOT_WORKFLOW: &str = "calypso-orchestrator-startup";
+// ── Entry points ─────────────────────────────────────────────────────────────
+
+/// A classified entry point discovered by scanning all workflows in the registry.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EntryPoint {
+    /// Initial state is `kind: human` — user must act to start this workflow.
+    UserAction {
+        workflow: String,
+        description: Option<String>,
+        prompt: Option<String>,
+    },
+    /// Has a `trigger:` block — started by an external event (e.g. `git-tag-push`).
+    EventTriggered {
+        workflow: String,
+        event: String,
+        pattern: Option<String>,
+    },
+    /// Has a `schedule:` block — started automatically on a cron schedule.
+    CronScheduled {
+        workflow: String,
+        cron: String,
+        description: Option<String>,
+    },
+    /// No explicit trigger — starts automatically (initial state is agent- or function-driven).
+    AutoStart {
+        workflow: String,
+        description: Option<String>,
+    },
+}
+
+/// Compute the [`std::time::Duration`] until the next fire time for a cron expression.
+///
+/// The expression uses 6-field second-level granularity:
+/// `"sec min hour day month weekday"`.
+///
+/// Examples:
+/// - `"*/1 * * * * *"` — every second
+/// - `"0 */5 * * * *"` — every 5 minutes
+/// - `"0 0 2 * * *"` — daily at 02:00 UTC
+pub fn next_fire_in(cron_expr: &str) -> Result<std::time::Duration, String> {
+    use chrono::Utc;
+    let schedule: cron::Schedule = cron_expr
+        .parse()
+        .map_err(|e| format!("invalid cron expression '{cron_expr}': {e}"))?;
+    let now = Utc::now();
+    schedule
+        .upcoming(Utc)
+        .next()
+        .map(|t| {
+            let delta = t - now;
+            delta.to_std().unwrap_or(std::time::Duration::ZERO)
+        })
+        .ok_or_else(|| format!("cron expression '{cron_expr}' has no upcoming fires"))
+}
 
 // ── Position & call stack ────────────────────────────────────────────────────
 
@@ -100,6 +159,78 @@ impl WorkflowRegistry {
     pub fn get_state(&self, workflow: &str, state: &str) -> Option<&StateConfig> {
         self.workflows.get(workflow)?.states.get(state)
     }
+
+    /// Returns the set of workflow names referenced as `workflow:` targets in
+    /// `kind: workflow` states across all loaded workflows.
+    ///
+    /// These are pure sub-workflows — they are only ever called by the workflow
+    /// engine, not directly by a user or scheduler.
+    pub fn sub_workflow_names(&self) -> BTreeSet<String> {
+        let mut names = BTreeSet::new();
+        for wf in self.workflows.values() {
+            for state in wf.states.values() {
+                if matches!(state.kind, Some(StateKind::Workflow)) {
+                    if let Some(ref target) = state.workflow {
+                        names.insert(target.clone());
+                    }
+                }
+            }
+        }
+        names
+    }
+
+    /// Scan all workflows and return classified [`EntryPoint`]s.
+    ///
+    /// Workflows that are exclusively used as sub-workflows (referenced via
+    /// `kind: workflow` states) are excluded unless they carry an explicit
+    /// `trigger` or `schedule` block.
+    pub fn entry_points(&self) -> Vec<EntryPoint> {
+        let sub_names = self.sub_workflow_names();
+        let mut entries = Vec::new();
+
+        for (name, wf) in &self.workflows {
+            // Skip pure sub-workflows unless they carry explicit trigger/schedule.
+            let is_sub = sub_names.contains(name);
+            if is_sub && wf.schedule.is_none() && wf.trigger.is_none() {
+                continue;
+            }
+
+            if let Some(schedule) = &wf.schedule {
+                entries.push(EntryPoint::CronScheduled {
+                    workflow: name.clone(),
+                    cron: schedule.cron.clone(),
+                    description: schedule.description.clone(),
+                });
+            } else if let Some(trigger) = &wf.trigger {
+                entries.push(EntryPoint::EventTriggered {
+                    workflow: name.clone(),
+                    event: trigger.event.clone().unwrap_or_default(),
+                    pattern: trigger.pattern.clone(),
+                });
+            } else {
+                let initial_cfg = wf
+                    .initial_state
+                    .as_deref()
+                    .and_then(|s| wf.states.get(s));
+                let initial_kind = initial_cfg.and_then(|c| c.kind.clone());
+
+                if matches!(initial_kind, Some(StateKind::Human)) {
+                    entries.push(EntryPoint::UserAction {
+                        workflow: name.clone(),
+                        description: initial_cfg.and_then(|c| c.description.clone()),
+                        prompt: initial_cfg.and_then(|c| c.prompt.clone()),
+                    });
+                } else {
+                    entries.push(EntryPoint::AutoStart {
+                        workflow: name.clone(),
+                        description: initial_cfg.and_then(|c| c.description.clone()),
+                    });
+                }
+            }
+        }
+
+        entries
+    }
 }
 
 // ── Interpreter ──────────────────────────────────────────────────────────────
@@ -117,19 +248,24 @@ impl WorkflowInterpreter {
         })
     }
 
-    /// Create the initial execution state — entry point of the root workflow.
-    pub fn initial_state(&self) -> Result<WorkflowExecutionState, String> {
-        let root = self
+    /// Return all entry points discovered across all loaded workflows.
+    pub fn entry_points(&self) -> Vec<EntryPoint> {
+        self.registry.entry_points()
+    }
+
+    /// Create an execution state starting at the initial state of the named workflow.
+    pub fn start(&self, workflow_name: &str) -> Result<WorkflowExecutionState, String> {
+        let wf = self
             .registry
-            .get(ROOT_WORKFLOW)
-            .ok_or_else(|| format!("root workflow '{ROOT_WORKFLOW}' not found"))?;
-        let initial = root
+            .get(workflow_name)
+            .ok_or_else(|| format!("workflow '{workflow_name}' not found"))?;
+        let initial = wf
             .initial_state
             .as_deref()
-            .ok_or_else(|| format!("root workflow '{ROOT_WORKFLOW}' has no initial_state"))?;
+            .ok_or_else(|| format!("workflow '{workflow_name}' has no initial_state"))?;
         Ok(WorkflowExecutionState {
             position: WorkflowPosition {
-                workflow: ROOT_WORKFLOW.to_string(),
+                workflow: workflow_name.to_string(),
                 state: initial.to_string(),
             },
             call_stack: Vec::new(),
@@ -330,10 +466,12 @@ impl WorkflowInterpreter {
 mod tests {
     use super::*;
 
+    // ── Registry & startup ───────────────────────────────────────────────────
+
     #[test]
     fn registry_loads_all_embedded_workflows() {
         let registry = WorkflowRegistry::from_embedded().unwrap();
-        assert!(registry.get(ROOT_WORKFLOW).is_some());
+        assert!(registry.get("calypso-orchestrator-startup").is_some());
         assert!(registry.get("calypso-planning").is_some());
         assert!(registry.get("calypso-default-feature-workflow").is_some());
         assert!(registry.get("calypso-implementation-loop").is_some());
@@ -341,18 +479,129 @@ mod tests {
     }
 
     #[test]
-    fn initial_state_is_scan_work_queue() {
+    fn start_orchestrator_at_initial_state() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let exec = interp.initial_state().unwrap();
-        assert_eq!(exec.position.workflow, ROOT_WORKFLOW);
+        let exec = interp.start("calypso-orchestrator-startup").unwrap();
+        assert_eq!(exec.position.workflow, "calypso-orchestrator-startup");
         assert_eq!(exec.position.state, "scan-work-queue");
         assert!(exec.call_stack.is_empty());
     }
 
     #[test]
+    fn start_any_workflow_by_name() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let exec = interp.start("calypso-planning").unwrap();
+        assert_eq!(exec.position.workflow, "calypso-planning");
+        assert!(!exec.position.state.is_empty());
+        assert!(exec.call_stack.is_empty());
+    }
+
+    #[test]
+    fn start_unknown_workflow_returns_error() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        assert!(interp.start("does-not-exist").is_err());
+    }
+
+    // ── Entry point discovery ────────────────────────────────────────────────
+
+    #[test]
+    fn sub_workflow_names_excludes_top_level_workflows() {
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let subs = registry.sub_workflow_names();
+        // These are called by other workflows — they are sub-workflows.
+        assert!(subs.contains("calypso-planning"));
+        assert!(subs.contains("calypso-pr-review-merge"));
+        assert!(subs.contains("calypso-default-feature-workflow"));
+        assert!(subs.contains("calypso-implementation-loop"));
+        assert!(subs.contains("calypso-save-state"));
+        // These are standalone — not referenced as sub-workflows.
+        assert!(!subs.contains("calypso-orchestrator-startup"));
+        assert!(!subs.contains("calypso-release-request"));
+        assert!(!subs.contains("calypso-deployment-request"));
+        assert!(!subs.contains("calypso-feature-request"));
+    }
+
+    #[test]
+    fn entry_points_excludes_pure_sub_workflows() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let entries = interp.entry_points();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|e| match e {
+                EntryPoint::UserAction { workflow, .. } => workflow.as_str(),
+                EntryPoint::EventTriggered { workflow, .. } => workflow.as_str(),
+                EntryPoint::CronScheduled { workflow, .. } => workflow.as_str(),
+                EntryPoint::AutoStart { workflow, .. } => workflow.as_str(),
+            })
+            .collect();
+        // Sub-workflows must not appear as entry points.
+        assert!(!names.contains(&"calypso-planning"));
+        assert!(!names.contains(&"calypso-implementation-loop"));
+        assert!(!names.contains(&"calypso-save-state"));
+    }
+
+    #[test]
+    fn release_request_is_event_triggered() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let entry = interp
+            .entry_points()
+            .into_iter()
+            .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-release-request"));
+        assert!(entry.is_some(), "expected calypso-release-request as EventTriggered");
+        if let Some(EntryPoint::EventTriggered { event, .. }) = entry {
+            assert_eq!(event, "git-tag-push");
+        }
+    }
+
+    #[test]
+    fn deployment_request_is_user_action() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let entry = interp
+            .entry_points()
+            .into_iter()
+            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-deployment-request"));
+        assert!(entry.is_some(), "expected calypso-deployment-request as UserAction");
+    }
+
+    #[test]
+    fn feature_request_is_user_action() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let entry = interp
+            .entry_points()
+            .into_iter()
+            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-feature-request"));
+        assert!(entry.is_some(), "expected calypso-feature-request as UserAction");
+    }
+
+    #[test]
+    fn orchestrator_startup_is_auto_start() {
+        let interp = WorkflowInterpreter::new().unwrap();
+        let entry = interp
+            .entry_points()
+            .into_iter()
+            .find(|e| matches!(e, EntryPoint::AutoStart { workflow, .. } if workflow == "calypso-orchestrator-startup"));
+        assert!(entry.is_some(), "expected calypso-orchestrator-startup as AutoStart");
+    }
+
+    // ── Cron scheduling ──────────────────────────────────────────────────────
+
+    #[test]
+    fn next_fire_in_every_second() {
+        let dur = next_fire_in("*/1 * * * * *").unwrap();
+        assert!(dur.as_secs() <= 1, "expected fire within 1s, got {dur:?}");
+    }
+
+    #[test]
+    fn next_fire_in_invalid_expression_returns_error() {
+        assert!(next_fire_in("not-a-cron").is_err());
+    }
+
+    // ── Advance / state machine execution ────────────────────────────────────
+
+    #[test]
     fn advance_to_non_workflow_state() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → idle (on no-pending-tasks)
         let outcome = interp.advance(&mut exec, "no-pending-tasks");
@@ -363,7 +612,7 @@ mod tests {
     #[test]
     fn advance_enters_sub_workflow() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → dispatch-planning (enters calypso-planning)
         let outcome = interp.advance(&mut exec, "planning-task-identified");
@@ -376,14 +625,14 @@ mod tests {
             other => panic!("expected EnteredSubWorkflow, got {other:?}"),
         }
         assert_eq!(exec.call_stack.len(), 1);
-        assert_eq!(exec.call_stack[0].workflow, ROOT_WORKFLOW);
+        assert_eq!(exec.call_stack[0].workflow, "calypso-orchestrator-startup");
         assert_eq!(exec.call_stack[0].state, "dispatch-planning");
     }
 
     #[test]
     fn advance_enters_development_sub_workflow() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → assign-phase-issues
         let outcome = interp.advance(&mut exec, "development-task-identified");
@@ -404,7 +653,7 @@ mod tests {
     #[test]
     fn terminal_at_root_returns_terminal() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → idle
         interp.advance(&mut exec, "no-pending-tasks");
@@ -417,7 +666,7 @@ mod tests {
     #[test]
     fn invalid_event_returns_error() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
         let outcome = interp.advance(&mut exec, "nonexistent-event");
         assert!(matches!(outcome, StepOutcome::Error(_)));
     }
@@ -425,7 +674,7 @@ mod tests {
     #[test]
     fn sub_workflow_terminal_pops_call_stack() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // Enter planning sub-workflow
         interp.advance(&mut exec, "planning-task-identified");
@@ -447,7 +696,7 @@ mod tests {
                 parent,
             } => {
                 assert_eq!(terminal_state, "done");
-                assert_eq!(parent.workflow, ROOT_WORKFLOW);
+                assert_eq!(parent.workflow, "calypso-orchestrator-startup");
                 assert_eq!(parent.state, "scan-work-queue");
             }
             other => panic!("expected ReturnedToParent, got {other:?}"),
@@ -458,7 +707,7 @@ mod tests {
     #[test]
     fn current_kind_returns_state_kind() {
         let interp = WorkflowInterpreter::new().unwrap();
-        let exec = interp.initial_state().unwrap();
+        let exec = interp.start("calypso-orchestrator-startup").unwrap();
         assert_eq!(interp.current_kind(&exec), Some(StateKind::Agent));
     }
 
@@ -466,7 +715,7 @@ mod tests {
     fn execution_state_serializes_roundtrip() {
         let state = WorkflowExecutionState {
             position: WorkflowPosition {
-                workflow: ROOT_WORKFLOW.to_string(),
+                workflow: "calypso-orchestrator-startup".to_string(),
                 state: "scan-work-queue".to_string(),
             },
             call_stack: vec![CallFrame {
@@ -483,7 +732,7 @@ mod tests {
     fn nested_workflow_depth_two() {
         // orchestrator → feature-workflow → implementation-loop
         let interp = WorkflowInterpreter::new().unwrap();
-        let mut exec = interp.initial_state().unwrap();
+        let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // Enter development path
         interp.advance(&mut exec, "development-task-identified"); // → assign-phase-issues

@@ -1,11 +1,11 @@
 //! State machine audit — validates structural integrity of the unified workflow
-//! graph rooted at `calypso-orchestrator-startup`.
+//! graph.
 //!
-//! The audit walks the workflow tree starting from the orchestrator entry point,
-//! following `kind: workflow` references to sub-workflows transitively, and
-//! verifies:
+//! The audit walks the workflow graph starting from all discovered entry points
+//! (workflows that are not exclusively used as sub-workflows), following
+//! `kind: workflow` references transitively, and verifies:
 //!
-//! - Every embedded workflow YAML file is reachable from the root
+//! - Every embedded workflow YAML file is reachable from at least one entry point
 //! - Every state in every reachable workflow is reachable from that workflow's
 //!   `initial_state`
 //! - No dead branches: every non-terminal state can reach a terminal state
@@ -97,17 +97,14 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 
 // ── Core audit logic ────────────────────────────────────────────────────────
 
-/// The root workflow from which the unified state machine graph is walked.
-const ROOT_WORKFLOW: &str = "calypso-orchestrator-startup";
-
 /// Run a structural audit of the unified workflow graph — no filesystem access
 /// required.
 ///
-/// Starts from [`ROOT_WORKFLOW`] and transitively follows all `kind: workflow`
-/// references to build a complete picture of the state machine. Validates:
+/// Discovers all entry points (workflows that are not exclusively used as
+/// sub-workflows) and walks the graph from each one transitively. Validates:
 ///
 /// - All embedded blueprint workflows parse as valid YAML
-/// - Every workflow file is reachable from the root (no orphan files)
+/// - Every workflow file is reachable from at least one entry point (no orphans)
 /// - Every state within each workflow is reachable from its `initial_state`
 /// - No dead branches: every non-terminal state can reach a terminal state
 /// - Cross-workflow handoffs: `kind: workflow` transition events match the
@@ -138,8 +135,9 @@ pub fn run_structural_audit() -> StateMachineAudit {
         }
     }
 
-    // 2) Walk the workflow graph from the root
-    audit_workflow_graph(ROOT_WORKFLOW, &workflows, &mut findings);
+    // 2) Walk the workflow graph from all entry points
+    let entry_roots = entry_point_roots(&workflows);
+    audit_workflow_graph(&entry_roots, &workflows, &mut findings);
 
     // 3) Validate the default template set loads
     if let Err(e) = template::load_embedded_template_set() {
@@ -154,7 +152,36 @@ pub fn run_structural_audit() -> StateMachineAudit {
     StateMachineAudit { findings }
 }
 
-/// Walk the workflow graph starting from `root_name`, following `kind: workflow`
+/// Returns the names of all top-level entry point workflows — those that are
+/// not exclusively used as sub-workflows by other workflows.
+fn entry_point_roots<'a>(workflows: &'a BTreeMap<String, BlueprintWorkflow>) -> Vec<&'a str> {
+    // Collect all sub-workflow names referenced by kind: workflow states.
+    let mut sub_names: BTreeSet<&str> = BTreeSet::new();
+    for wf in workflows.values() {
+        for state in wf.states.values() {
+            if state.kind.as_ref() == Some(&StateKind::Workflow) {
+                if let Some(ref target) = state.workflow {
+                    sub_names.insert(target.as_str());
+                }
+            }
+        }
+    }
+
+    // Entry points: all workflows that are not exclusively sub-workflows,
+    // or that carry an explicit trigger/schedule.
+    workflows
+        .keys()
+        .filter(|name| {
+            let wf = &workflows[*name];
+            !sub_names.contains(name.as_str())
+                || wf.schedule.is_some()
+                || wf.trigger.is_some()
+        })
+        .map(|s| s.as_str())
+        .collect()
+}
+
+/// Walk the workflow graph starting from all `roots`, following `kind: workflow`
 /// references transitively.
 ///
 /// For each reachable workflow:
@@ -165,25 +192,18 @@ pub fn run_structural_audit() -> StateMachineAudit {
 ///
 /// After walking, flags any workflow files that were never reached as orphans.
 fn audit_workflow_graph(
-    root_name: &str,
+    roots: &[&str],
     workflows: &BTreeMap<String, BlueprintWorkflow>,
     findings: &mut Vec<AuditFinding>,
 ) {
-    if !workflows.contains_key(root_name) {
-        findings.push(AuditFinding {
-            severity: AuditSeverity::Error,
-            source: root_name.to_string(),
-            message: format!("root workflow '{root_name}' not found in embedded workflows"),
-            suggestion: None,
-        });
-        return;
-    }
-
-    // BFS through workflow references
+    // BFS through workflow references, seeded from all entry points
     let mut visited: BTreeSet<&str> = BTreeSet::new();
     let mut queue: VecDeque<&str> = VecDeque::new();
-    visited.insert(root_name);
-    queue.push_back(root_name);
+    for &root in roots {
+        if visited.insert(root) {
+            queue.push_back(root);
+        }
+    }
 
     while let Some(wf_name) = queue.pop_front() {
         let wf = match workflows.get(wf_name) {
@@ -236,14 +256,14 @@ fn audit_workflow_graph(
         }
     }
 
-    // Flag orphan workflows — defined but never reachable from root
+    // Flag orphan workflows — defined but not reachable from any entry point
     for wf_name in workflows.keys() {
         if !visited.contains(wf_name.as_str()) {
             findings.push(AuditFinding {
                 severity: AuditSeverity::Warning,
                 source: wf_name.clone(),
                 message: format!(
-                    "workflow '{wf_name}' is not reachable from root '{root_name}'"
+                    "workflow '{wf_name}' is not reachable from any entry point"
                 ),
                 suggestion: Some(
                     "add a kind: workflow reference from a reachable workflow, or remove it"
@@ -492,7 +512,8 @@ pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
             workflows.insert(stem.to_string(), wf);
         }
     }
-    audit_workflow_graph(ROOT_WORKFLOW, &workflows, &mut findings);
+    let entry_roots = entry_point_roots(&workflows);
+    audit_workflow_graph(&entry_roots, &workflows, &mut findings);
 
     StateMachineAudit { findings }
 }
@@ -1401,11 +1422,11 @@ states:
         workflows.insert("orphan-wf".to_string(), orphan);
 
         let mut findings = Vec::new();
-        audit_workflow_graph("root", &workflows, &mut findings);
+        audit_workflow_graph(&["root"], &workflows, &mut findings);
 
         let orphans: Vec<_> = findings
             .iter()
-            .filter(|f| f.message.contains("not reachable from root"))
+            .filter(|f| f.message.contains("not reachable from any entry point"))
             .collect();
         assert_eq!(orphans.len(), 1);
         assert!(orphans[0].message.contains("orphan-wf"));
@@ -1433,7 +1454,7 @@ states:
         workflows.insert("root".to_string(), root);
 
         let mut findings = Vec::new();
-        audit_workflow_graph("root", &workflows, &mut findings);
+        audit_workflow_graph(&["root"], &workflows, &mut findings);
 
         let missing: Vec<_> = findings
             .iter()
@@ -1483,7 +1504,7 @@ states:
         workflows.insert("child".to_string(), child);
 
         let mut findings = Vec::new();
-        audit_workflow_graph("parent", &workflows, &mut findings);
+        audit_workflow_graph(&["parent"], &workflows, &mut findings);
 
         // "wrong-event" doesn't match any child terminal
         let bad_event: Vec<_> = findings
@@ -1542,7 +1563,7 @@ states:
         workflows.insert("child".to_string(), child);
 
         let mut findings = Vec::new();
-        audit_workflow_graph("parent", &workflows, &mut findings);
+        audit_workflow_graph(&["parent"], &workflows, &mut findings);
 
         assert!(
             findings.is_empty(),
