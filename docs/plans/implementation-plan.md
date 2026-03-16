@@ -26,3 +26,4 @@
 - [x] cargo fmt to fix formatting in tui.rs, headless.rs, tests/tui.rs
 - [x] Collapse 4 nested if-let/if patterns in tui.rs for clippy::collapsible_if
 - [x] Add 34 new tests to raise coverage from 89.49% to 90.04%
+- [x] Use `std::io::Error::other()` to satisfy clippy::io_other_error lint

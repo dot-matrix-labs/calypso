@@ -1980,10 +1980,7 @@ fn run_watch_with_runner_error_propagates() {
     state.save_to_path(&path).unwrap();
 
     let result = calypso_cli::tui::run_watch_with(path.to_str().unwrap(), |_| {
-        Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "test runner error",
-        ))
+        Err(std::io::Error::other("test runner error"))
     });
     assert!(result.is_err());
     assert!(result.unwrap_err().contains("test runner error"));
