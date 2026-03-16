@@ -138,7 +138,64 @@ do not share a subsystem). Issues in different batches MUST be done sequentially
 
 ---
 
-## Phase 5: Update issue bodies with accurate dependents
+## Phase 5: Update issue titles and labels
+
+For every open issue being replanned, replan is the authoritative source of batch
+assignment and scope tagging. Apply both a title prefix and a GitHub label.
+
+### Step 1: Ensure batch labels exist
+
+For each batch number N in the new plan, ensure the label `batch-N` exists:
+
+```bash
+gh label list --repo sduvignau/calypso-tasks --json name -q '.[].name'
+```
+
+Create any missing labels:
+
+```bash
+gh label create batch-{N} --repo sduvignau/calypso-tasks --color "0075ca" --description "Batch {N} in the current plan"
+```
+
+### Step 2: Update issue titles
+
+Each issue title MUST be prefixed with its scope type if it is not already. Use the
+conventional commit prefix that best describes the issue:
+
+- `feat:` — new capability
+- `fix:` — bug or incorrect behaviour
+- `chore:` — non-user-facing maintenance
+- `refactor:` — structural change with no behaviour change
+- `docs:` — documentation only
+
+If the title already starts with one of these prefixes, leave it as-is. If it does
+not, prepend the appropriate prefix based on the issue content.
+
+```bash
+gh issue edit {issue-number} --repo sduvignau/calypso-tasks --title "{new-title}"
+```
+
+Only update the title if it actually changes. Show the user what will change before
+editing.
+
+### Step 3: Apply batch label and remove stale batch labels
+
+For each issue, remove any existing `batch-*` labels and apply the correct one for
+its new batch assignment:
+
+```bash
+# Remove stale batch labels
+gh issue edit {issue-number} --repo sduvignau/calypso-tasks --remove-label "batch-{old}"
+
+# Apply current batch label
+gh issue edit {issue-number} --repo sduvignau/calypso-tasks --add-label "batch-{N}"
+```
+
+If an issue has moved batches since the last replan, note this in the Phase 7 report.
+
+---
+
+## Phase 7: Update issue bodies with accurate dependents
 
 For each issue where the **Dependents** list has changed (issues that depend on this
 one), update the issue body.
@@ -170,13 +227,13 @@ gh issue edit {issue-number} --repo sduvignau/calypso-tasks --body "{updated bod
 
 **IMPORTANT:**
 - Preserve all existing sections — only add or update the Dependents section.
-- Do NOT change the Stage, Acceptance criteria, Test plan, or any other section.
+- Do NOT change the title, Stage, Acceptance criteria, Test plan, or any other section. Title changes happen in Phase 5.
 - Show the user a diff of what will change for each issue before editing.
 - Ask for confirmation before applying any edits.
 
 ---
 
-## Phase 6: Rewrite the Plan tracking issue
+## Phase 8: Rewrite the Plan tracking issue
 
 Rewrite the Plan tracking issue body with the new batch structure. The new format:
 
@@ -213,7 +270,7 @@ gh issue edit {plan-issue-number} --repo sduvignau/calypso-tasks --body "{new bo
 
 ---
 
-## Phase 7: Report
+## Phase 9: Report
 
 Output a structured summary:
 
@@ -227,6 +284,17 @@ Output a structured summary:
 ### Batch breakdown
 
 {Repeat the batch table from Phase 4}
+
+### Title changes
+
+- #{A}: "old title" → "feat: new title"
+- #{B}: no change
+
+### Label / batch changes
+
+- #{A}: batch-1 → batch-2
+- #{B}: (new) → batch-1
+- #{C}: no change
 
 ### Issues updated with dependents
 
@@ -245,6 +313,7 @@ Top 3 highest-risk issues (address early):
 
 ## Rules
 
+- **Replan owns titles and batch labels** — this skill is the only thing that should set `batch-*` labels and scope-prefix issue titles. Other skills must not modify these.
 - **Never invent dependencies** — only parse what is written in the issue body.
 - **Never invent risk** — justify every score from the issue content.
 - **Conservative concurrency** — when in doubt, sequential is correct.
