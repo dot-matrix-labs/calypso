@@ -486,13 +486,14 @@ fn run_calypso_init(
         return;
     }
 
-    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
-        Ok(p) => p,
-        Err(error) => {
-            eprintln!("init error: {error}");
-            std::process::exit(1);
-        }
-    };
+    let mut progress =
+        match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
+            Ok(p) => p,
+            Err(error) => {
+                eprintln!("init error: {error}");
+                std::process::exit(1);
+            }
+        };
 
     // Store org/repo if provided (used for upstream creation).
     if org.is_some() {
@@ -532,21 +533,22 @@ fn run_calypso_init_json(
         return;
     }
 
-    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
-        Ok(p) => p,
-        Err(error) => {
-            let report = serde_json::json!({
-                "status": status,
-                "error": error.to_string(),
-                "completed": false
-            });
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&report).expect("json serialization")
-            );
-            std::process::exit(1);
-        }
-    };
+    let mut progress =
+        match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
+            Ok(p) => p,
+            Err(error) => {
+                let report = serde_json::json!({
+                    "status": status,
+                    "error": error.to_string(),
+                    "completed": false
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&report).expect("json serialization")
+                );
+                std::process::exit(1);
+            }
+        };
 
     if org.is_some() {
         progress.github_org = org;

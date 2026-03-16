@@ -463,7 +463,8 @@ fn real_init_state_machine_audit_passes() {
         hello_world: false,
     };
     init_repository(&request, &HostInitEnvironment).expect("init should succeed");
-    scaffold_github_actions(&dir, &HostInitEnvironment, false).expect("scaffold workflows should succeed");
+    scaffold_github_actions(&dir, &HostInitEnvironment, false)
+        .expect("scaffold workflows should succeed");
 
     // Verify all blueprint-required workflow files were scaffolded
     let workflows_dir = dir.join(".github/workflows");
@@ -737,7 +738,8 @@ fn scaffold_github_actions_writes_three_workflow_files() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/repo");
 
-    let scaffolded = scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
+    let scaffolded =
+        scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
     assert_eq!(workflows.len(), 10, "should scaffold 10 workflow files");
@@ -788,7 +790,8 @@ fn scaffold_github_actions_skips_existing_workflow_files() {
             .join("pr-checklist.yml"),
     );
 
-    let scaffolded = scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
+    let scaffolded =
+        scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
     assert_eq!(
@@ -851,8 +854,8 @@ fn run_init_interactive_with_existing_git_and_github_remote_succeeds() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/repo");
 
-    let progress =
-        run_init_interactive(&repo_path, false, &env, false).expect("interactive init should succeed");
+    let progress = run_init_interactive(&repo_path, false, &env, false)
+        .expect("interactive init should succeed");
 
     assert!(progress.current_step.is_complete(), "should reach Complete");
     assert!(progress.is_step_done(&InitStep::PromptDirectory));

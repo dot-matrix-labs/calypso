@@ -504,9 +504,7 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     }
 
     // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
-    if !is_hello_world
-        && let Ok(template) = template::load_embedded_template_set()
-    {
+    if !is_hello_world && let Ok(template) = template::load_embedded_template_set() {
         audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
     }
 
