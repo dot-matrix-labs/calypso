@@ -3,12 +3,15 @@
 # Exit on any command failure
 set -e
 
-# Generate a unique 4-character hash for the test directory
-HASH=$(openssl rand -hex 2)
-TEST_PATH="$HOME/calypso-tests/${HASH}"
+# Base path for tests, default to ~/code/tmp_calypso_test
+BASE_PATH="${CALYPSO_TEST_BASE_PATH:-$HOME/code/tmp_calypso_test}"
+
+# Generate a unique directory name using Unix timestamp
+TIMESTAMP=$(date +%s)
+TEST_PATH="${BASE_PATH}/${TIMESTAMP}"
 
 # Ensure parent directory exists
-mkdir -p "$HOME/calypso-tests"
+mkdir -p "$BASE_PATH"
 
 # Get the absolute path to the project root
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
