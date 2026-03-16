@@ -178,10 +178,9 @@ impl FeatureStartEnvironment for HostFeatureStartEnvironment {
         )?;
 
         // Parse the response directly — it contains number and html_url.
-        parse_pull_request_rest_response(&create_json)
-            .ok_or_else(|| {
-                FeatureStartError::github("gh api create PR", "failed to parse pull request response")
-            })
+        parse_pull_request_rest_response(&create_json).ok_or_else(|| {
+            FeatureStartError::github("gh api create PR", "failed to parse pull request response")
+        })
     }
 
     fn bootstrap_state(

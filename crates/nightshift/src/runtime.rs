@@ -75,9 +75,8 @@ impl PullRequestResolver for GhCliPullRequestResolver {
             }
         })?;
 
-        let endpoint = format!(
-            "repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open"
-        );
+        let endpoint =
+            format!("repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open");
         let output = Command::new("gh")
             .args(["api", &endpoint])
             .current_dir(repo_root)

@@ -17,3 +17,4 @@
 - [x] Replace `gh pr edit` with `gh api --method PATCH` in `feature_start.rs`
 - [x] Update all test fixtures to match new `gh api` command shapes
 - [x] Fix cargo fmt and clippy warnings
+- [x] Fix MSRV (1.88.0) rustfmt formatting

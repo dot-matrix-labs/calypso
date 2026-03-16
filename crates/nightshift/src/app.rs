@@ -385,14 +385,11 @@ pub fn resolve_current_pull_request_with_program(
     let branch = resolve_current_branch(repo_root)
         .ok_or_else(|| "could not determine current branch".to_string())?;
 
-    let endpoint = format!(
-        "repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open"
-    );
+    let endpoint =
+        format!("repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open");
     let output = run_command(repo_root, program, &["api", &endpoint])?;
     match output {
-        CommandOutput::Success(output) => {
-            parse_pull_request_list_json(&output)
-        }
+        CommandOutput::Success(output) => parse_pull_request_list_json(&output),
         CommandOutput::Failure(error) => {
             if error.contains("no pull requests found") {
                 Ok(None)

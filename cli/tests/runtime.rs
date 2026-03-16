@@ -149,12 +149,7 @@ fn gh_cli_pull_request_resolver_reads_pull_request_from_gh_cli_output() {
     let repo_root = init_repo("feat/runtime-context");
     run_git(
         &repo_root,
-        &[
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/org/repo.git",
-        ],
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
     );
 
     with_fake_gh(
@@ -177,12 +172,7 @@ fn gh_cli_pull_request_resolver_reports_command_failures() {
     let repo_root = init_repo("feat/runtime-context");
     run_git(
         &repo_root,
-        &[
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/org/repo.git",
-        ],
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
     );
 
     with_fake_gh("#!/bin/sh\necho 'boom' >&2\nexit 1\n", || {
@@ -203,12 +193,7 @@ fn gh_cli_pull_request_resolver_reports_missing_pull_requests() {
     let repo_root = init_repo("feat/runtime-context");
     run_git(
         &repo_root,
-        &[
-            "remote",
-            "add",
-            "origin",
-            "https://github.com/org/repo.git",
-        ],
+        &["remote", "add", "origin", "https://github.com/org/repo.git"],
     );
 
     with_fake_gh("#!/bin/sh\nprintf '[]'\n", || {
@@ -262,12 +247,7 @@ fn discover_current_repository_context_uses_gh_cli_resolver() {
             let repo_root = init_repo("feat/runtime-context");
             run_git(
                 &repo_root,
-                &[
-                    "remote",
-                    "add",
-                    "origin",
-                    "https://github.com/org/repo.git",
-                ],
+                &["remote", "add", "origin", "https://github.com/org/repo.git"],
             );
             let context = discover_current_repository_context(&repo_root)
                 .expect("current repository context should resolve");
@@ -375,12 +355,7 @@ fn load_or_initialize_current_runtime_uses_gh_cli_resolver() {
             let repo_root = init_repo("feat/runtime-context");
             run_git(
                 &repo_root,
-                &[
-                    "remote",
-                    "add",
-                    "origin",
-                    "https://github.com/org/repo.git",
-                ],
+                &["remote", "add", "origin", "https://github.com/org/repo.git"],
             );
             let runtime = load_or_initialize_current_runtime(&repo_root)
                 .expect("current runtime should load through gh");

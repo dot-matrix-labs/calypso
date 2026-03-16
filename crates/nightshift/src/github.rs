@@ -27,7 +27,9 @@ pub fn resolve_owner_repo(repo_root: &Path) -> Result<(String, String), GithubSn
             "origin",
         ])
         .output()
-        .map_err(|_| GithubSnapshotError::MissingField("git remote get-url origin failed to spawn"))?;
+        .map_err(|_| {
+            GithubSnapshotError::MissingField("git remote get-url origin failed to spawn")
+        })?;
 
     if !output.status.success() {
         return Err(GithubSnapshotError::MissingField(
@@ -507,11 +509,8 @@ trait AsCheckRollup {
     fn conclusion_field(&self) -> Option<&str>;
 }
 
-
 /// Map REST `mergeable_state` values to our enum.
-fn parse_mergeability_rest(
-    value: Option<&str>,
-) -> Result<GithubMergeability, GithubSnapshotError> {
+fn parse_mergeability_rest(value: Option<&str>) -> Result<GithubMergeability, GithubSnapshotError> {
     match value {
         Some("clean") | Some("has_hooks") | Some("unstable") => Ok(GithubMergeability::Mergeable),
         Some("dirty") => Ok(GithubMergeability::Conflicting),
@@ -568,8 +567,7 @@ fn fetch_pull_request_snapshot(
     // 1. Get PR details
     let pr_endpoint = format!("repos/{owner}/{repo}/pulls/{}", pull_request.number);
     let pr_json = run_gh_api(&[&pr_endpoint])?;
-    let pr: RestPullRequest =
-        serde_json::from_str(&pr_json).map_err(GithubSnapshotError::Json)?;
+    let pr: RestPullRequest = serde_json::from_str(&pr_json).map_err(GithubSnapshotError::Json)?;
 
     // 2. Get reviews
     let reviews_endpoint = format!("repos/{owner}/{repo}/pulls/{}/reviews", pull_request.number);
@@ -777,31 +775,46 @@ exit 1
 
     #[test]
     fn derive_review_decision_with_no_reviews_is_review_required() {
-        assert_eq!(derive_review_decision(&[]), GithubReviewStatus::ReviewRequired);
+        assert_eq!(
+            derive_review_decision(&[]),
+            GithubReviewStatus::ReviewRequired
+        );
     }
 
     #[test]
     fn derive_review_decision_approved() {
         let reviews = vec![RestReview {
-            user: RestUser { login: "alice".to_string() },
+            user: RestUser {
+                login: "alice".to_string(),
+            },
             state: "APPROVED".to_string(),
         }];
-        assert_eq!(derive_review_decision(&reviews), GithubReviewStatus::Approved);
+        assert_eq!(
+            derive_review_decision(&reviews),
+            GithubReviewStatus::Approved
+        );
     }
 
     #[test]
     fn derive_review_decision_changes_requested_overrides_approval() {
         let reviews = vec![
             RestReview {
-                user: RestUser { login: "alice".to_string() },
+                user: RestUser {
+                    login: "alice".to_string(),
+                },
                 state: "APPROVED".to_string(),
             },
             RestReview {
-                user: RestUser { login: "bob".to_string() },
+                user: RestUser {
+                    login: "bob".to_string(),
+                },
                 state: "CHANGES_REQUESTED".to_string(),
             },
         ];
-        assert_eq!(derive_review_decision(&reviews), GithubReviewStatus::ChangesRequested);
+        assert_eq!(
+            derive_review_decision(&reviews),
+            GithubReviewStatus::ChangesRequested
+        );
     }
 
     #[test]
@@ -829,9 +842,21 @@ exit 1
 
     #[test]
     fn parse_mergeability_rest_maps_correctly() {
-        assert_eq!(parse_mergeability_rest(Some("clean")).unwrap(), GithubMergeability::Mergeable);
-        assert_eq!(parse_mergeability_rest(Some("dirty")).unwrap(), GithubMergeability::Conflicting);
-        assert_eq!(parse_mergeability_rest(Some("blocked")).unwrap(), GithubMergeability::Blocked);
-        assert_eq!(parse_mergeability_rest(None).unwrap(), GithubMergeability::Unknown);
+        assert_eq!(
+            parse_mergeability_rest(Some("clean")).unwrap(),
+            GithubMergeability::Mergeable
+        );
+        assert_eq!(
+            parse_mergeability_rest(Some("dirty")).unwrap(),
+            GithubMergeability::Conflicting
+        );
+        assert_eq!(
+            parse_mergeability_rest(Some("blocked")).unwrap(),
+            GithubMergeability::Blocked
+        );
+        assert_eq!(
+            parse_mergeability_rest(None).unwrap(),
+            GithubMergeability::Unknown
+        );
     }
 }
