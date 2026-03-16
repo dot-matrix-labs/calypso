@@ -1,0 +1,9 @@
+{
+  "name": "calypso",
+  "private": true,
+  "scripts": {
+    "eslint": "echo 'no JS/TS files — skipping eslint'",
+    "prettier": "echo 'no JS/TS files — skipping prettier'",
+    "tsc": "echo 'no TypeScript — skipping tsc'"
+  }
+}

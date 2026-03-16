@@ -1,1 +1,1 @@
-PR #147 is complete. No further work needed on this branch.
+Apply cargo fmt — push to feat/init-audit-integration to fix format CI failure on PR #153.
