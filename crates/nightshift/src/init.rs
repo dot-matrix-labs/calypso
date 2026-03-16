@@ -514,21 +514,32 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn create_github_repo(&self, org: &str, repo: &str) -> Result<String, InitError> {
+        let endpoint = format!("orgs/{org}/repos");
         let output = Command::new("gh")
             .args([
-                "repo",
-                "create",
-                &format!("{org}/{repo}"),
-                "--private",
-                "--clone=false",
+                "api",
+                "--method",
+                "POST",
+                &endpoint,
+                "-f",
+                &format!("name={repo}"),
+                "-F",
+                "private=true",
             ])
             .output()
             .map_err(InitError::Io)?;
         if !output.status.success() {
             return Err(InitError::git(
-                "gh repo create",
+                "gh api orgs/{org}/repos",
                 String::from_utf8_lossy(&output.stderr).trim(),
             ));
+        }
+        // Try to extract clone_url from the response JSON; fall back to constructed URL.
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(clone_url) = value.get("clone_url").and_then(|v| v.as_str()) {
+                return Ok(clone_url.to_string());
+            }
         }
         Ok(format!("https://github.com/{org}/{repo}.git"))
     }

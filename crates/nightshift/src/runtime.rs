@@ -68,17 +68,18 @@ impl PullRequestResolver for GhCliPullRequestResolver {
         repo_root: &Path,
         branch: &str,
     ) -> Result<PullRequestRef, RuntimeError> {
+        let (owner, repo_name) = crate::github::resolve_owner_repo(repo_root).map_err(|e| {
+            RuntimeError::CommandFailed {
+                program: "git".to_string(),
+                details: e.to_string(),
+            }
+        })?;
+
+        let endpoint = format!(
+            "repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open"
+        );
         let output = Command::new("gh")
-            .args([
-                "pr",
-                "list",
-                "--head",
-                branch,
-                "--json",
-                "number,url",
-                "--limit",
-                "1",
-            ])
+            .args(["api", &endpoint])
             .current_dir(repo_root)
             .output()
             .map_err(RuntimeError::Io)?;
@@ -99,7 +100,7 @@ impl PullRequestResolver for GhCliPullRequestResolver {
 
         Ok(PullRequestRef {
             number: pull_request.number,
-            url: pull_request.url,
+            url: pull_request.browser_url().to_string(),
         })
     }
 }
@@ -232,7 +233,17 @@ fn git_output(current_dir: &Path, args: &[&str]) -> Result<String, RuntimeError>
 #[derive(Debug, Deserialize)]
 struct GhPullRequestSummary {
     number: u64,
+    /// REST API returns both `url` (API URL) and `html_url` (browser URL).
+    /// We prefer `html_url` when present, falling back to `url`.
+    #[serde(default)]
+    html_url: Option<String>,
     url: String,
+}
+
+impl GhPullRequestSummary {
+    fn browser_url(&self) -> &str {
+        self.html_url.as_deref().unwrap_or(&self.url)
+    }
 }
 
 #[derive(Debug)]

@@ -1,1 +1,1 @@
-Apply cargo fmt — push to feat/init-audit-integration to fix format CI failure on PR #153.
+Done. All tasks for #154 are complete. Verify with `GH_DEBUG=api` that zero `/graphql` requests are made.

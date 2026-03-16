@@ -206,17 +206,14 @@ impl DoctorEnvironment for HostDoctorEnvironment {
 
     fn gh_authenticated(&self) -> bool {
         Command::new("gh")
-            .args(["auth", "status"])
+            .args(["api", "/"])
             .output()
             .is_ok_and(|output| output.status.success())
     }
 
     fn has_github_remote(&self, repo_root: &Path) -> bool {
-        Command::new("gh")
-            .args(["repo", "view", "--json", "nameWithOwner"])
-            .current_dir(repo_root)
-            .output()
-            .is_ok_and(|output| output.status.success())
+        // Parse the git remote URL directly — no `gh` call needed.
+        crate::github::resolve_owner_repo(repo_root).is_ok()
     }
 
     fn missing_workflow_files(&self, repo_root: &Path) -> Vec<String> {
