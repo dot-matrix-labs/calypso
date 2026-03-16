@@ -433,10 +433,11 @@ fn extract_headless_flags(args: &[String]) -> (HeadlessFlags, Vec<String>) {
 /// Build a [`HeadlessConfig`] from the raw parsed flags.
 fn build_headless_config(flags: &HeadlessFlags) -> HeadlessConfig {
     // Resolve verbosity level from flag count.
+    // Default is Debug so that state transitions and step outcomes are visible.
     let verbosity = match flags.verbosity_count {
-        0 => LogLevel::Warn,
+        0 => LogLevel::Debug,
         1 => LogLevel::Info,
-        _ => LogLevel::Debug, // 2+
+        _ => LogLevel::Trace, // 2+
     };
 
     // Resolve log format — default to text, opt into json with --json.
@@ -957,10 +958,10 @@ mod tests {
     // -- build_headless_config tests --
 
     #[test]
-    fn config_default_verbosity_is_warn() {
+    fn config_default_verbosity_is_debug() {
         let (flags, _) = extract_headless_flags(&s(&["--headless"]));
         let config = build_headless_config(&flags);
-        assert_eq!(config.verbosity, LogLevel::Warn);
+        assert_eq!(config.verbosity, LogLevel::Debug);
     }
 
     #[test]
@@ -971,10 +972,10 @@ mod tests {
     }
 
     #[test]
-    fn config_double_vv_is_debug() {
+    fn config_double_vv_is_trace() {
         let (flags, _) = extract_headless_flags(&s(&["--headless", "-vv"]));
         let config = build_headless_config(&flags);
-        assert_eq!(config.verbosity, LogLevel::Debug);
+        assert_eq!(config.verbosity, LogLevel::Trace);
     }
 
     #[test]
