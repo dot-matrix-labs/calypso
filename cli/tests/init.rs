@@ -7,8 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use calypso_cli::init::{
     InitEnvironment, InitError, InitProgress, InitRequest, InitStep, RepoInitStatus, WORKFLOW_CI,
-    WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_DEPENDS_ON, detect_repo_status, init_repository,
-    refresh_workflows, run_init_interactive, scaffold_github_actions,
+    WORKFLOW_MERGE_QUEUE, WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_DEPENDS_ON, detect_repo_status,
+    init_repository, refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
 use calypso_cli::state::RepositoryState;
 
@@ -472,6 +472,7 @@ fn real_init_state_machine_audit_passes() {
         "rust-e2e.yml",
         "rust-coverage.yml",
         "release-cli.yml",
+        "merge-queue.yml",
     ] {
         assert!(
             workflows_dir.join(wf).exists(),
@@ -730,7 +731,7 @@ fn scaffold_github_actions_writes_three_workflow_files() {
     let scaffolded = scaffold_github_actions(&repo_path, &env).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 9, "should scaffold 9 workflow files");
+    assert_eq!(workflows.len(), 10, "should scaffold 10 workflow files");
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -760,7 +761,11 @@ fn scaffold_github_actions_writes_three_workflow_files() {
         names.contains(&"release-cli.yml"),
         "missing release-cli.yml"
     );
-    assert_eq!(scaffolded.len(), 9);
+    assert!(
+        names.contains(&"merge-queue.yml"),
+        "missing merge-queue.yml"
+    );
+    assert_eq!(scaffolded.len(), 10);
 }
 
 #[test]
@@ -779,10 +784,10 @@ fn scaffold_github_actions_skips_existing_workflow_files() {
     let workflows = env.workflows_written.borrow();
     assert_eq!(
         workflows.len(),
-        8,
+        9,
         "should skip existing workflow file; got: {workflows:?}"
     );
-    assert_eq!(scaffolded.len(), 8);
+    assert_eq!(scaffolded.len(), 9);
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -809,6 +814,16 @@ fn workflow_pr_depends_on_content_is_valid_yaml() {
         .expect("pr-depends-on.yml should be valid YAML");
     let map = val.as_mapping().expect("top-level should be a mapping");
     assert!(map.contains_key(serde_yaml::Value::String("name".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
+}
+
+#[test]
+fn workflow_merge_queue_content_is_valid_yaml() {
+    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_MERGE_QUEUE)
+        .expect("merge-queue.yml should be valid YAML");
+    let map = val.as_mapping().expect("top-level should be a mapping");
+    assert!(map.contains_key(serde_yaml::Value::String("name".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("on".into())));
     assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
 }
 
@@ -933,7 +948,7 @@ fn refresh_workflows_overwrites_all_three_files() {
 
     let refreshed = refresh_workflows(&repo_path, &env).expect("refresh should succeed");
 
-    assert_eq!(refreshed.len(), 9, "should refresh all 9 workflow files");
+    assert_eq!(refreshed.len(), 10, "should refresh all 10 workflow files");
     assert!(refreshed.contains(&"pr-checklist.yml".to_string()));
     assert!(refreshed.contains(&"pr-depends-on.yml".to_string()));
     assert!(refreshed.contains(&"ci.yml".to_string()));
@@ -943,9 +958,10 @@ fn refresh_workflows_overwrites_all_three_files() {
     assert!(refreshed.contains(&"rust-e2e.yml".to_string()));
     assert!(refreshed.contains(&"rust-coverage.yml".to_string()));
     assert!(refreshed.contains(&"release-cli.yml".to_string()));
+    assert!(refreshed.contains(&"merge-queue.yml".to_string()));
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 9);
+    assert_eq!(workflows.len(), 10);
 }
 
 // ── init progress persistence tests (real filesystem) ──────────────────────────
