@@ -577,15 +577,15 @@ mod tests {
     }
 
     #[test]
-    fn orchestrator_startup_is_auto_start() {
+    fn orchestrator_startup_is_cron_scheduled() {
         let interp = WorkflowInterpreter::new().unwrap();
         let entry = interp
             .entry_points()
             .into_iter()
-            .find(|e| matches!(e, EntryPoint::AutoStart { workflow, .. } if workflow == "calypso-orchestrator-startup"));
+            .find(|e| matches!(e, EntryPoint::CronScheduled { workflow, .. } if workflow == "calypso-orchestrator-startup"));
         assert!(
             entry.is_some(),
-            "expected calypso-orchestrator-startup as AutoStart"
+            "expected calypso-orchestrator-startup as CronScheduled"
         );
     }
 

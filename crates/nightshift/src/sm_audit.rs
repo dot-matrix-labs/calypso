@@ -582,6 +582,7 @@ fn audit_blueprint_workflow(
                     &format!("check '{check_name}'"),
                     wf_path,
                     check_cfg.workflow_name.as_deref(),
+                    AuditSeverity::Error,
                     repo_root,
                     available_gha_files,
                     findings,
@@ -614,15 +615,13 @@ fn audit_blueprint_workflow(
         }
     }
 
-    // Also validate workflow references in `github_actions` section
+    // Also validate workflow references in `github_actions` section.
+    // current_required entries are errors if missing; proposed_required and other
+    // non-current keys (proposed, etc.) produce warnings only — those files may not
+    // exist yet.
     if let Some(gha) = &wf.github_actions {
-        let entries = gha
-            .current_required
-            .iter()
-            .flatten()
-            .chain(gha.proposed_required.iter().flatten());
-
-        for entry in entries {
+        // current_required → Error for missing files
+        for entry in gha.current_required.iter().flatten() {
             if let Some(wf_path) = &entry.workflow
                 && wf_path.starts_with(".github/workflows/")
             {
@@ -631,6 +630,36 @@ fn audit_blueprint_workflow(
                     &format!("github_actions entry '{wf_path}'"),
                     wf_path,
                     entry.workflow_name.as_deref(),
+                    AuditSeverity::Error,
+                    repo_root,
+                    available_gha_files,
+                    findings,
+                );
+
+                if let Some(check_names) = &entry.check_names {
+                    validate_job_keys(
+                        stem,
+                        &format!("github_actions entry '{wf_path}'"),
+                        wf_path,
+                        check_names,
+                        available_gha_files,
+                        findings,
+                    );
+                }
+            }
+        }
+
+        // proposed_required → Warning for missing files (not yet created)
+        for entry in gha.proposed_required.iter().flatten() {
+            if let Some(wf_path) = &entry.workflow
+                && wf_path.starts_with(".github/workflows/")
+            {
+                validate_workflow_reference(
+                    stem,
+                    &format!("github_actions entry '{wf_path}'"),
+                    wf_path,
+                    entry.workflow_name.as_deref(),
+                    AuditSeverity::Warning,
                     repo_root,
                     available_gha_files,
                     findings,
@@ -663,6 +692,7 @@ fn audit_blueprint_workflow(
                     &format!("hard_gates ci_workflow '{wf_path}'"),
                     wf_path,
                     None,
+                    AuditSeverity::Error,
                     repo_root,
                     available_gha_files,
                     findings,
@@ -694,6 +724,7 @@ fn audit_blueprint_workflow(
                         &format!("state '{state_name}' workflow ref"),
                         wf_path,
                         None,
+                        AuditSeverity::Error,
                         repo_root,
                         available_gha_files,
                         findings,
@@ -719,11 +750,17 @@ fn audit_blueprint_workflow(
 }
 
 /// Validate a single workflow file reference (existence + name match).
+///
+/// `missing_severity` controls whether a missing file is reported as an error
+/// or a warning — use `Warning` for entries under `proposed_required` or other
+/// not-yet-created workflows.
+#[allow(clippy::too_many_arguments)]
 fn validate_workflow_reference(
     source: &str,
     context: &str,
     wf_path: &str,
     declared_name: Option<&str>,
+    missing_severity: AuditSeverity,
     repo_root: &Path,
     available_gha_files: &BTreeMap<String, GhaWorkflow>,
     findings: &mut Vec<AuditFinding>,
@@ -734,7 +771,7 @@ fn validate_workflow_reference(
     if !full_path.is_file() {
         let suggestion = suggest_filename(wf_path, available_gha_files);
         findings.push(AuditFinding {
-            severity: AuditSeverity::Error,
+            severity: missing_severity,
             source: source.to_string(),
             message: format!("{context}: workflow file not found: {wf_path}"),
             suggestion: suggestion.map(|s| format!("did you mean .github/workflows/{s}?")),
@@ -1011,6 +1048,7 @@ mod tests {
             "check 'ci-gate'",
             ".github/workflows/quality-gate.yml",
             None,
+            AuditSeverity::Error,
             &repo_root,
             &available,
             &mut findings,
@@ -1036,6 +1074,7 @@ mod tests {
             "check 'ci-gate'",
             ".github/workflows/quality-gate.yml",
             Some("Quality Gate"),
+            AuditSeverity::Error,
             &repo_root,
             &available,
             &mut findings,
@@ -1052,6 +1091,7 @@ mod tests {
             "check 'ci-gate'",
             ".github/workflows/quality-gate.yml",
             Some("Wrong Name"),
+            AuditSeverity::Error,
             &repo_root,
             &available,
             &mut findings,
