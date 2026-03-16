@@ -45,8 +45,8 @@ jobs:
           # Verify the specific files created in hello-world mode
           test -f "$TEST_PATH/.calypso/state-machine.yml"
           test -f "$TEST_PATH/.github/workflows/hello-world.yml"
-          test -f "$TEST_PATH/.git/hooks/pre-commit"
+          test -f "$TEST_PATH/.githooks/pre-commit"
           # Ensure hook is executable
-          test -x "$TEST_PATH/.git/hooks/pre-commit"
+          test -x "$TEST_PATH/.githooks/pre-commit"
           
           echo "✅ Hello-world files verified."

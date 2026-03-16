@@ -70,9 +70,7 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredWorkflowFilesPresent => {
                 "builtin.doctor.required_workflows_present"
             }
-            DoctorCheckId::GitHooksPathConfigured => {
-                "builtin.doctor.git_hooks_path_configured"
-            }
+            DoctorCheckId::GitHooksPathConfigured => "builtin.doctor.git_hooks_path_configured",
             DoctorCheckId::RequiredGitHooksInstalled => {
                 "builtin.doctor.required_git_hooks_installed"
             }

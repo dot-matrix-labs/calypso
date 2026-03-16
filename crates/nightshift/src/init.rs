@@ -645,7 +645,13 @@ impl InitEnvironment for HostInitEnvironment {
 
     fn configure_githooks(&self, path: &Path) -> Result<(), InitError> {
         let output = Command::new("git")
-            .args(["-C", &path.to_string_lossy(), "config", "core.hooksPath", ".githooks"])
+            .args([
+                "-C",
+                &path.to_string_lossy(),
+                "config",
+                "core.hooksPath",
+                ".githooks",
+            ])
             .output()
             .map_err(InitError::Io)?;
         if !output.status.success() {
@@ -837,6 +843,8 @@ pub fn run_init_interactive(
                 progress.advance();
             }
             InitStep::ConfigureLocal => {
+                // Always configure git hooks path, even without a remote.
+                env.configure_githooks(repo_path)?;
                 let remote_url = env.remote_url(repo_path).unwrap_or_default();
                 if is_github_url(&remote_url) || hello_world {
                     let request = InitRequest {
@@ -969,6 +977,8 @@ pub fn run_init_step(
             progress.advance();
         }
         InitStep::ConfigureLocal => {
+            // Always configure git hooks path, even without a remote.
+            env.configure_githooks(repo_path)?;
             let remote_url = env.remote_url(repo_path).unwrap_or_default();
             if is_github_url(&remote_url) || progress.hello_world {
                 let request = InitRequest {

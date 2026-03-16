@@ -233,7 +233,14 @@ pub fn run_supervised_session(
                 Ok(o) => o,
             };
 
-            apply_outcome(state_path, &mut state, &session.session_id, role, outcome, config.allowed_next_states.as_deref())
+            apply_outcome(
+                state_path,
+                &mut state,
+                &session.session_id,
+                role,
+                outcome,
+                config.allowed_next_states.as_deref(),
+            )
         }
     }
 }

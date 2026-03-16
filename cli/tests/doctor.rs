@@ -182,7 +182,6 @@ fn doctor_report_collects_expected_check_results() {
     );
 }
 
-
 #[test]
 fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
     let report = collect_doctor_report(&FakeEnvironment::default(), Path::new("/tmp/calypso"));
