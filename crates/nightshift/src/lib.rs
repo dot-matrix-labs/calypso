@@ -11,6 +11,7 @@ pub mod feature_start;
 pub mod github;
 pub mod headless;
 pub mod init;
+pub mod pinned_prompt;
 pub mod policy;
 pub mod pr_checklist;
 pub mod report;
