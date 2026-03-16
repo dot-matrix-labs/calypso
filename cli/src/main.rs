@@ -353,11 +353,11 @@ fn extract_path_flag(args: &[String]) -> (Option<std::path::PathBuf>, Vec<String
 struct HeadlessFlags {
     enabled: bool,
     verbosity_count: u8,
-    log_format_raw: Option<String>,
+    json: bool,
 }
 
-/// Extract `--headless`, `-v` (verbosity), `-vv`, and `--log-format <val>`
-/// from `args`, returning the parsed flags and the remaining arg list.
+/// Extract `--headless`, `-v` (verbosity), `-vv`, and `--json` from `args`,
+/// returning the parsed flags and the remaining arg list.
 ///
 /// `--headless` is only recognised as the top-level headless mode when it
 /// appears *before* any subcommand (i.e. as the first positional token, or
@@ -417,9 +417,9 @@ fn extract_headless_flags(args: &[String]) -> (HeadlessFlags, Vec<String>) {
             continue;
         }
 
-        if arg == "--log-format" && i + 1 < args.len() {
-            flags.log_format_raw = Some(args[i + 1].clone());
-            i += 2;
+        if arg == "--json" {
+            flags.json = true;
+            i += 1;
             continue;
         }
 
@@ -439,14 +439,11 @@ fn build_headless_config(flags: &HeadlessFlags) -> HeadlessConfig {
         _ => LogLevel::Debug, // 2+
     };
 
-    // Resolve log format — default to json when headless.
-    let log_format = match flags.log_format_raw.as_deref() {
-        Some("text") => LogFormat::Text,
-        Some("json") | None => LogFormat::Json,
-        Some(other) => {
-            eprintln!("unknown --log-format value: {other} (expected text or json)");
-            std::process::exit(1);
-        }
+    // Resolve log format — default to text, opt into json with --json.
+    let log_format = if flags.json {
+        LogFormat::Json
+    } else {
+        LogFormat::Text
     };
 
     // Detect conflict: both -v/-vv and CALYPSO_LOG set.
@@ -931,15 +928,15 @@ mod tests {
     }
 
     #[test]
-    fn headless_with_log_format_text() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "--log-format", "text"]));
-        assert_eq!(flags.log_format_raw.as_deref(), Some("text"));
+    fn headless_with_json_flag() {
+        let (flags, _) = extract_headless_flags(&s(&["--headless", "--json"]));
+        assert!(flags.json);
     }
 
     #[test]
-    fn headless_with_log_format_json() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "--log-format", "json"]));
-        assert_eq!(flags.log_format_raw.as_deref(), Some("json"));
+    fn headless_without_json_flag() {
+        let (flags, _) = extract_headless_flags(&s(&["--headless"]));
+        assert!(!flags.json);
     }
 
     #[test]
@@ -981,17 +978,17 @@ mod tests {
     }
 
     #[test]
-    fn config_default_log_format_is_json() {
+    fn config_default_log_format_is_text() {
         let (flags, _) = extract_headless_flags(&s(&["--headless"]));
         let config = build_headless_config(&flags);
-        assert_eq!(config.log_format, LogFormat::Json);
+        assert_eq!(config.log_format, LogFormat::Text);
     }
 
     #[test]
-    fn config_log_format_text() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "--log-format", "text"]));
+    fn config_json_flag_sets_json_format() {
+        let (flags, _) = extract_headless_flags(&s(&["--headless", "--json"]));
         let config = build_headless_config(&flags);
-        assert_eq!(config.log_format, LogFormat::Text);
+        assert_eq!(config.log_format, LogFormat::Json);
     }
 
     #[test]

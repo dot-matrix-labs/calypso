@@ -53,7 +53,7 @@ Options:
   -v, --version       Show build version information
   --headless          Run the orchestrator without the TUI (CI / daemon mode)
   -v, -vv             Verbosity in headless mode: -v = info, -vv = debug
-  --log-format <fmt>  Log format in headless mode: json (default) or text
+  --json              Emit JSON-lines instead of human-readable text (headless)
 
 Positional:
   [path]              Project directory (alternative to --path); starts TUI
@@ -141,6 +141,6 @@ mod tests {
         let output = render_help(sample_info());
 
         assert!(output.contains("--headless"), "missing --headless flag");
-        assert!(output.contains("--log-format"), "missing --log-format flag");
+        assert!(output.contains("--json"), "missing --json flag");
     }
 }
