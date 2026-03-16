@@ -318,6 +318,39 @@ impl NextSpec {
         None
     }
 
+    /// Returns all event key names from this transition spec.
+    ///
+    /// For `{ on: { event: target } }` → returns the event names.
+    /// For `{ on_success: s, on_failure: s }` → returns `["on_success", "on_failure"]`.
+    /// This is useful for cross-workflow handoff validation where the event keys
+    /// should match terminal state names in the sub-workflow.
+    pub fn all_event_keys(&self) -> Vec<&str> {
+        let mut keys = Vec::new();
+        let Some(map) = self.0.as_mapping() else {
+            return keys;
+        };
+
+        for (key, value) in map {
+            if let Some(key_str) = key.as_str() {
+                if key_str == "on" {
+                    // Nested event dispatch: { on: { event: target, ... } }
+                    if let Some(on_map) = value.as_mapping() {
+                        for (k, _) in on_map {
+                            if let Some(s) = k.as_str() {
+                                keys.push(s);
+                            }
+                        }
+                    }
+                } else {
+                    // Top-level key: on_success, on_failure, etc.
+                    keys.push(key_str);
+                }
+            }
+        }
+
+        keys
+    }
+
     /// Returns all target state names reachable from this transition spec.
     ///
     /// Handles all YAML shapes:

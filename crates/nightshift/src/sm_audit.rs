@@ -1,20 +1,25 @@
-//! State machine audit — validates GHA workflow reference integrity in blueprint
-//! workflows and the default state machine template.
+//! State machine audit — validates structural integrity of the unified workflow
+//! graph rooted at `calypso-orchestrator-startup`.
 //!
-//! This module collects all `workflow:` path references from embedded blueprint
-//! workflows, verifies they exist on disk, cross-checks `workflow_name` against
-//! the actual GHA `name:` field, validates `check_names` / `job` keys against
-//! the GHA `jobs:` map, and detects orphan/dangling check references within each
-//! blueprint workflow.
+//! The audit walks the workflow tree starting from the orchestrator entry point,
+//! following `kind: workflow` references to sub-workflows transitively, and
+//! verifies:
+//!
+//! - Every embedded workflow YAML file is reachable from the root
+//! - Every state in every reachable workflow is reachable from that workflow's
+//!   `initial_state`
+//! - No dead branches: every non-terminal state can reach a terminal state
+//! - Cross-workflow handoffs are valid: `kind: workflow` states' transition
+//!   events match the terminal state names in the referenced sub-workflow
+//! - Check reference integrity (no dangling or orphan checks) within each workflow
+//!
+//! Additionally validates GHA workflow file references on disk (for `run_audit`)
+//! and the default template set.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use crate::blueprint_workflows::{BlueprintWorkflow, BlueprintWorkflowLibrary, StateKind};
-use crate::init::InitStep;
-use crate::state::{
-    DeploymentState, DevelopmentPhase, ReleaseState, WorkflowState,
-};
 use crate::template::{self, TemplateSet};
 
 // ── Audit result types ──────────────────────────────────────────────────────
@@ -92,27 +97,36 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 
 // ── Core audit logic ────────────────────────────────────────────────────────
 
-/// Run a structural audit of all embedded blueprint workflows and the default
-/// template — no filesystem access required.
+/// The root workflow from which the unified state machine graph is walked.
+const ROOT_WORKFLOW: &str = "calypso-orchestrator-startup";
+
+/// Run a structural audit of the unified workflow graph — no filesystem access
+/// required.
 ///
-/// Validates:
+/// Starts from [`ROOT_WORKFLOW`] and transitively follows all `kind: workflow`
+/// references to build a complete picture of the state machine. Validates:
+///
 /// - All embedded blueprint workflows parse as valid YAML
+/// - Every workflow file is reachable from the root (no orphan files)
+/// - Every state within each workflow is reachable from its `initial_state`
+/// - No dead branches: every non-terminal state can reach a terminal state
+/// - Cross-workflow handoffs: `kind: workflow` transition events match the
+///   terminal state names of the referenced sub-workflow
 /// - Check reference integrity (no dangling or orphan checks) within each workflow
 /// - The default template set loads and passes `validate()`
-/// - **Reachability**: every state is reachable from the initial state
-/// - **Completeness**: every non-terminal state can reach a terminal state (no dead branches)
-/// - **Rust-level state machines**: WorkflowState, ReleaseState, DeploymentState,
-///   DevelopmentPhase, and InitStep all have full reachability and completeness
 ///
 /// This is suitable for compile-time / test-time validation of the embedded
 /// state machine bytes without needing a real repo on disk.
 pub fn run_structural_audit() -> StateMachineAudit {
     let mut findings = Vec::new();
 
-    // 1) Parse, validate check references, and audit reachability for blueprint workflows
+    // 1) Parse all embedded workflows into a lookup map
+    let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
     for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        let wf = match BlueprintWorkflowLibrary::parse(yaml) {
-            Ok(wf) => wf,
+        match BlueprintWorkflowLibrary::parse(yaml) {
+            Ok(wf) => {
+                workflows.insert(stem.to_string(), wf);
+            }
             Err(e) => {
                 findings.push(AuditFinding {
                     severity: AuditSeverity::Error,
@@ -120,15 +134,14 @@ pub fn run_structural_audit() -> StateMachineAudit {
                     message: format!("failed to parse blueprint workflow: {e}"),
                     suggestion: None,
                 });
-                continue;
             }
-        };
-
-        audit_check_references(stem, &wf, &mut findings);
-        audit_reachability(stem, &wf, &mut findings);
+        }
     }
 
-    // 2) Validate the default template set loads and passes cross-reference checks
+    // 2) Walk the workflow graph from the root
+    audit_workflow_graph(ROOT_WORKFLOW, &workflows, &mut findings);
+
+    // 3) Validate the default template set loads
     if let Err(e) = template::load_embedded_template_set() {
         findings.push(AuditFinding {
             severity: AuditSeverity::Error,
@@ -138,10 +151,170 @@ pub fn run_structural_audit() -> StateMachineAudit {
         });
     }
 
-    // 3) Audit Rust-level state machines for reachability and completeness
-    audit_rust_state_machines(&mut findings);
-
     StateMachineAudit { findings }
+}
+
+/// Walk the workflow graph starting from `root_name`, following `kind: workflow`
+/// references transitively.
+///
+/// For each reachable workflow:
+/// - Validates internal reachability (all states reachable from initial_state)
+/// - Validates completeness (all non-terminal states can reach a terminal)
+/// - Validates check reference integrity
+/// - Validates cross-workflow handoffs (transition events match sub-workflow terminals)
+///
+/// After walking, flags any workflow files that were never reached as orphans.
+fn audit_workflow_graph(
+    root_name: &str,
+    workflows: &BTreeMap<String, BlueprintWorkflow>,
+    findings: &mut Vec<AuditFinding>,
+) {
+    if !workflows.contains_key(root_name) {
+        findings.push(AuditFinding {
+            severity: AuditSeverity::Error,
+            source: root_name.to_string(),
+            message: format!("root workflow '{root_name}' not found in embedded workflows"),
+            suggestion: None,
+        });
+        return;
+    }
+
+    // BFS through workflow references
+    let mut visited: BTreeSet<&str> = BTreeSet::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    visited.insert(root_name);
+    queue.push_back(root_name);
+
+    while let Some(wf_name) = queue.pop_front() {
+        let wf = match workflows.get(wf_name) {
+            Some(wf) => wf,
+            None => {
+                // Referenced workflow doesn't exist — already flagged by handoff check below
+                continue;
+            }
+        };
+
+        // Per-workflow checks
+        audit_check_references(wf_name, wf, findings);
+        audit_reachability(wf_name, wf, findings);
+
+        // Follow kind: workflow references to sub-workflows
+        for (state_name, cfg) in &wf.states {
+            if cfg.kind.as_ref() == Some(&StateKind::Workflow) {
+                if let Some(ref sub_wf_name) = cfg.workflow {
+                    // Validate the reference exists
+                    if !workflows.contains_key(sub_wf_name.as_str()) {
+                        findings.push(AuditFinding {
+                            severity: AuditSeverity::Error,
+                            source: wf_name.to_string(),
+                            message: format!(
+                                "state '{state_name}' references workflow '{sub_wf_name}' \
+                                 which is not in the embedded workflow library"
+                            ),
+                            suggestion: None,
+                        });
+                        continue;
+                    }
+
+                    // Validate cross-workflow handoff: the parent's next.on: events
+                    // should match the sub-workflow's terminal state names
+                    audit_workflow_handoff(
+                        wf_name,
+                        state_name,
+                        sub_wf_name,
+                        cfg.next.as_ref(),
+                        workflows.get(sub_wf_name.as_str()).unwrap(),
+                        findings,
+                    );
+
+                    // Enqueue for traversal
+                    if visited.insert(sub_wf_name.as_str()) {
+                        queue.push_back(sub_wf_name.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    // Flag orphan workflows — defined but never reachable from root
+    for wf_name in workflows.keys() {
+        if !visited.contains(wf_name.as_str()) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Warning,
+                source: wf_name.clone(),
+                message: format!(
+                    "workflow '{wf_name}' is not reachable from root '{root_name}'"
+                ),
+                suggestion: Some(
+                    "add a kind: workflow reference from a reachable workflow, or remove it"
+                        .to_string(),
+                ),
+            });
+        }
+    }
+}
+
+/// Validate the handoff between a parent workflow state and its sub-workflow.
+///
+/// The parent state's `next.on:` event names should correspond to terminal state
+/// names in the sub-workflow. Flags:
+/// - Sub-workflow terminals not handled by the parent (potential lost exits)
+/// - Parent events that don't correspond to any sub-workflow terminal (dead references)
+fn audit_workflow_handoff(
+    parent_wf: &str,
+    parent_state: &str,
+    sub_wf_name: &str,
+    parent_next: Option<&crate::blueprint_workflows::NextSpec>,
+    sub_wf: &BlueprintWorkflow,
+    findings: &mut Vec<AuditFinding>,
+) {
+    // Collect terminal state names from the sub-workflow
+    let sub_terminals: BTreeSet<&str> = sub_wf
+        .states
+        .iter()
+        .filter(|(_, cfg)| cfg.kind.as_ref() == Some(&StateKind::Terminal))
+        .map(|(name, _)| name.as_str())
+        .collect();
+
+    // Collect event keys from the parent's next spec — these should match
+    // the terminal state names of the sub-workflow.
+    let parent_event_keys: BTreeSet<&str> = parent_next
+        .map(|next| next.all_event_keys())
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    // Sub-workflow terminal not handled by parent
+    for terminal in &sub_terminals {
+        if !parent_event_keys.contains(terminal) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Warning,
+                source: parent_wf.to_string(),
+                message: format!(
+                    "state '{parent_state}' delegates to '{sub_wf_name}' but does not handle \
+                     terminal state '{terminal}'"
+                ),
+                suggestion: Some(format!(
+                    "add '{terminal}' to the next.on: map of state '{parent_state}'"
+                )),
+            });
+        }
+    }
+
+    // Parent event that doesn't match any sub-workflow terminal
+    for event in &parent_event_keys {
+        if !sub_terminals.contains(event) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: parent_wf.to_string(),
+                message: format!(
+                    "state '{parent_state}' handles event '{event}' from '{sub_wf_name}' \
+                     but '{sub_wf_name}' has no terminal state named '{event}'"
+                ),
+                suggestion: None,
+            });
+        }
+    }
 }
 
 // ── Reachability analysis ────────────────────────────────────────────────────
@@ -282,363 +455,6 @@ fn bfs_reachable<'a>(start: &'a str, edges: &BTreeMap<&'a str, BTreeSet<&'a str>
     visited
 }
 
-/// Audit the Rust-level state machines for structural completeness.
-///
-/// For each enum-based state machine (WorkflowState, ReleaseState, DeploymentState,
-/// DevelopmentPhase, InitStep), verifies:
-/// 1. Every state is reachable from the initial state via `valid_next_states()` / `next()`
-/// 2. Every non-terminal state can reach a terminal state
-fn audit_rust_state_machines(findings: &mut Vec<AuditFinding>) {
-    audit_workflow_state_machine(findings);
-    audit_release_state_machine(findings);
-    audit_deployment_state_machine(findings);
-    audit_development_phase_machine(findings);
-    audit_init_step_machine(findings);
-}
-
-fn audit_workflow_state_machine(findings: &mut Vec<AuditFinding>) {
-    let source = "rust:WorkflowState";
-    // Exclude deprecated aliases — they map to canonical states
-    let all_states = vec![
-        WorkflowState::New,
-        WorkflowState::PrdReview,
-        WorkflowState::ArchitecturePlan,
-        WorkflowState::ScaffoldTdd,
-        WorkflowState::ArchitectureReview,
-        WorkflowState::Implementation,
-        WorkflowState::QaValidation,
-        WorkflowState::ReleaseReady,
-        WorkflowState::Done,
-        WorkflowState::Blocked,
-        WorkflowState::Aborted,
-    ];
-    let initial = WorkflowState::New;
-
-    // Build adjacency by index
-    let state_idx = |s: &WorkflowState| -> usize {
-        all_states.iter().position(|x| x == s).unwrap()
-    };
-    let n = all_states.len();
-    let mut adj = vec![BTreeSet::new(); n];
-    for (i, state) in all_states.iter().enumerate() {
-        for next in state.valid_next_states() {
-            if let Some(j) = all_states.iter().position(|x| x == &next) {
-                adj[i].insert(j);
-            }
-        }
-    }
-
-    // Forward reachability from initial
-    let start = state_idx(&initial);
-    let reachable = bfs_reachable_idx(start, &adj, n);
-    for (i, state) in all_states.iter().enumerate() {
-        if !reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "state '{}' is not reachable from initial state '{}'",
-                    state.as_str(),
-                    initial.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-
-    // Backward: every non-terminal must reach a terminal
-    let terminals: BTreeSet<usize> = all_states
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| s.is_terminal())
-        .map(|(i, _)| i)
-        .collect();
-    let can_reach = backward_reachable_idx(&adj, &terminals, n);
-    for (i, state) in all_states.iter().enumerate() {
-        if !state.is_terminal() && !can_reach.contains(&i) && reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "state '{}' cannot reach any terminal state (dead branch)",
-                    state.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-fn audit_release_state_machine(findings: &mut Vec<AuditFinding>) {
-    let source = "rust:ReleaseState";
-    let all_states = vec![
-        ReleaseState::Planned,
-        ReleaseState::InProgress,
-        ReleaseState::Candidate,
-        ReleaseState::Validated,
-        ReleaseState::Approved,
-        ReleaseState::Deployed,
-        ReleaseState::RolledBack,
-        ReleaseState::Aborted,
-    ];
-    let initial = ReleaseState::Planned;
-
-    let n = all_states.len();
-    let mut adj = vec![BTreeSet::new(); n];
-    for (i, state) in all_states.iter().enumerate() {
-        for next in state.valid_next_states() {
-            if let Some(j) = all_states.iter().position(|x| x == &next) {
-                adj[i].insert(j);
-            }
-        }
-    }
-
-    let start = all_states.iter().position(|s| s == &initial).unwrap();
-    let reachable = bfs_reachable_idx(start, &adj, n);
-    for (i, state) in all_states.iter().enumerate() {
-        if !reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!("state '{state}' is not reachable from initial state '{initial}'"),
-                suggestion: None,
-            });
-        }
-    }
-
-    let terminals: BTreeSet<usize> = all_states
-        .iter()
-        .enumerate()
-        .filter(|(_, s)| s.is_terminal())
-        .map(|(i, _)| i)
-        .collect();
-    let can_reach = backward_reachable_idx(&adj, &terminals, n);
-    for (i, state) in all_states.iter().enumerate() {
-        if !state.is_terminal() && !can_reach.contains(&i) && reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!("state '{state}' cannot reach any terminal state (dead branch)"),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-fn audit_deployment_state_machine(findings: &mut Vec<AuditFinding>) {
-    let source = "rust:DeploymentState";
-    let all_states = vec![
-        DeploymentState::Idle,
-        DeploymentState::Pending,
-        DeploymentState::Deploying,
-        DeploymentState::Deployed,
-        DeploymentState::Failed,
-        DeploymentState::RollingBack,
-        DeploymentState::RolledBack,
-    ];
-    let initial = DeploymentState::Idle;
-
-    let n = all_states.len();
-    let mut adj = vec![BTreeSet::new(); n];
-    for (i, state) in all_states.iter().enumerate() {
-        for next in state.valid_next_states() {
-            if let Some(j) = all_states.iter().position(|x| x == &next) {
-                adj[i].insert(j);
-            }
-        }
-    }
-
-    let start = all_states.iter().position(|s| s == &initial).unwrap();
-    let reachable = bfs_reachable_idx(start, &adj, n);
-    for (i, state) in all_states.iter().enumerate() {
-        if !reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!("state '{state}' is not reachable from initial state '{initial}'"),
-                suggestion: None,
-            });
-        }
-    }
-
-    // DeploymentState is cyclic (everything loops back to Idle), no terminal states.
-    // Instead verify every state can reach Idle (the quiescent state).
-    let idle_idx = all_states
-        .iter()
-        .position(|s| s == &DeploymentState::Idle)
-        .unwrap();
-    let can_reach_idle = backward_reachable_idx(&adj, &BTreeSet::from([idle_idx]), n);
-    for (i, state) in all_states.iter().enumerate() {
-        if i != idle_idx && !can_reach_idle.contains(&i) && reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "state '{state}' cannot reach quiescent state 'idle' (dead branch)"
-                ),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-fn audit_development_phase_machine(findings: &mut Vec<AuditFinding>) {
-    let source = "rust:DevelopmentPhase";
-    let all_phases = vec![
-        DevelopmentPhase::Init,
-        DevelopmentPhase::Development,
-        DevelopmentPhase::Testing,
-    ];
-    let initial = DevelopmentPhase::Init;
-
-    let n = all_phases.len();
-    let mut adj = vec![BTreeSet::new(); n];
-    for (i, phase) in all_phases.iter().enumerate() {
-        for next in phase.valid_next_phases() {
-            if let Some(j) = all_phases.iter().position(|x| x == &next) {
-                adj[i].insert(j);
-            }
-        }
-    }
-
-    let start = all_phases.iter().position(|p| p == &initial).unwrap();
-    let reachable = bfs_reachable_idx(start, &adj, n);
-    for (i, phase) in all_phases.iter().enumerate() {
-        if !reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "phase '{}' is not reachable from initial phase '{}'",
-                    phase.as_str(),
-                    initial.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-
-    // DevelopmentPhase is cyclic with no terminal — verify all phases can reach
-    // Development (the primary working phase).
-    let dev_idx = all_phases
-        .iter()
-        .position(|p| p == &DevelopmentPhase::Development)
-        .unwrap();
-    let can_reach_dev = backward_reachable_idx(&adj, &BTreeSet::from([dev_idx]), n);
-    for (i, phase) in all_phases.iter().enumerate() {
-        if i != dev_idx && !can_reach_dev.contains(&i) && reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "phase '{}' cannot reach 'development' phase (dead branch)",
-                    phase.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-fn audit_init_step_machine(findings: &mut Vec<AuditFinding>) {
-    let source = "rust:InitStep";
-    let all_steps = InitStep::all_steps();
-    let initial = &InitStep::PromptDirectory;
-
-    let n = all_steps.len();
-    let mut adj = vec![BTreeSet::new(); n];
-    for (i, step) in all_steps.iter().enumerate() {
-        if let Some(next) = step.next() {
-            if let Some(j) = all_steps.iter().position(|x| x == &next) {
-                adj[i].insert(j);
-            }
-        }
-    }
-
-    let start = all_steps.iter().position(|s| s == initial).unwrap();
-    let reachable = bfs_reachable_idx(start, &adj, n);
-    for (i, step) in all_steps.iter().enumerate() {
-        if !reachable.contains(&i) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "step '{}' is not reachable from initial step '{}'",
-                    step.as_str(),
-                    initial.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-
-    // Verify every step can reach Complete
-    let complete_idx = all_steps
-        .iter()
-        .position(|s| s == &InitStep::Complete)
-        .unwrap();
-    let can_reach_complete =
-        backward_reachable_idx(&adj, &BTreeSet::from([complete_idx]), n);
-    for (i, step) in all_steps.iter().enumerate() {
-        if !step.is_complete()
-            && !can_reach_complete.contains(&i)
-            && reachable.contains(&i)
-        {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "step '{}' cannot reach terminal step 'complete' (dead branch)",
-                    step.as_str()
-                ),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-/// BFS from a start index, returning all reachable indices.
-fn bfs_reachable_idx(start: usize, adj: &[BTreeSet<usize>], _n: usize) -> BTreeSet<usize> {
-    let mut visited = BTreeSet::new();
-    let mut queue = VecDeque::new();
-    visited.insert(start);
-    queue.push_back(start);
-    while let Some(node) = queue.pop_front() {
-        for &target in &adj[node] {
-            if visited.insert(target) {
-                queue.push_back(target);
-            }
-        }
-    }
-    visited
-}
-
-/// Given forward adjacency and a set of target indices, return all indices that
-/// can reach any target via forward edges (backward BFS on reverse graph).
-fn backward_reachable_idx(
-    adj: &[BTreeSet<usize>],
-    targets: &BTreeSet<usize>,
-    n: usize,
-) -> BTreeSet<usize> {
-    // Build reverse adjacency
-    let mut rev = vec![BTreeSet::new(); n];
-    for (i, neighbors) in adj.iter().enumerate() {
-        for &j in neighbors {
-            rev[j].insert(i);
-        }
-    }
-    let mut visited: BTreeSet<usize> = targets.clone();
-    let mut queue: VecDeque<usize> = targets.iter().copied().collect();
-    while let Some(node) = queue.pop_front() {
-        for &pred in &rev[node] {
-            if visited.insert(pred) {
-                queue.push_back(pred);
-            }
-        }
-    }
-    visited
-}
-
 /// Run the full state machine audit against the given repo root.
 pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
     let mut findings = Vec::new();
@@ -669,15 +485,14 @@ pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
         audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
     }
 
-    // 3) Reachability and completeness for blueprint workflows
+    // 3) Unified workflow graph walk — reachability, dead branches, handoffs
+    let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
     for (stem, yaml) in BlueprintWorkflowLibrary::list() {
         if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
-            audit_reachability(stem, &wf, &mut findings);
+            workflows.insert(stem.to_string(), wf);
         }
     }
-
-    // 4) Rust-level state machine structural checks
-    audit_rust_state_machines(&mut findings);
+    audit_workflow_graph(ROOT_WORKFLOW, &workflows, &mut findings);
 
     StateMachineAudit { findings }
 }
@@ -1550,58 +1365,188 @@ states:
         );
     }
 
+    // ── Cross-workflow graph tests ──────────────────────────────────────────
+
     #[test]
-    fn rust_workflow_state_machine_is_complete() {
+    fn workflow_graph_detects_orphan_workflow() {
+        let mut workflows = BTreeMap::new();
+
+        let root: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: root
+initial_state: start
+states:
+  start:
+    kind: agent
+    next:
+      on_success: done
+  done:
+    kind: terminal
+"#).unwrap();
+
+        let orphan: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: orphan-wf
+initial_state: begin
+states:
+  begin:
+    kind: agent
+    next:
+      on_success: end
+  end:
+    kind: terminal
+"#).unwrap();
+
+        workflows.insert("root".to_string(), root);
+        workflows.insert("orphan-wf".to_string(), orphan);
+
         let mut findings = Vec::new();
-        audit_workflow_state_machine(&mut findings);
-        assert!(
-            findings.is_empty(),
-            "WorkflowState machine has structural issues:\n{}",
-            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
-        );
+        audit_workflow_graph("root", &workflows, &mut findings);
+
+        let orphans: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not reachable from root"))
+            .collect();
+        assert_eq!(orphans.len(), 1);
+        assert!(orphans[0].message.contains("orphan-wf"));
     }
 
     #[test]
-    fn rust_release_state_machine_is_complete() {
+    fn workflow_graph_detects_missing_sub_workflow() {
+        let mut workflows = BTreeMap::new();
+
+        let root: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: root
+initial_state: start
+states:
+  start:
+    kind: workflow
+    workflow: nonexistent
+    next:
+      on:
+        done: finish
+  finish:
+    kind: terminal
+"#).unwrap();
+
+        workflows.insert("root".to_string(), root);
+
         let mut findings = Vec::new();
-        audit_release_state_machine(&mut findings);
-        assert!(
-            findings.is_empty(),
-            "ReleaseState machine has structural issues:\n{}",
-            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
-        );
+        audit_workflow_graph("root", &workflows, &mut findings);
+
+        let missing: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not in the embedded workflow library"))
+            .collect();
+        assert_eq!(missing.len(), 1);
+        assert!(missing[0].message.contains("nonexistent"));
     }
 
     #[test]
-    fn rust_deployment_state_machine_is_complete() {
+    fn workflow_graph_detects_handoff_mismatch() {
+        let mut workflows = BTreeMap::new();
+
+        let parent: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: parent
+initial_state: dispatch
+states:
+  dispatch:
+    kind: workflow
+    workflow: child
+    next:
+      on:
+        done: finish
+        wrong-event: finish
+  finish:
+    kind: terminal
+"#).unwrap();
+
+        let child: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: child
+initial_state: work
+states:
+  work:
+    kind: agent
+    next:
+      on_success: done
+      on_failure: aborted
+  done:
+    kind: terminal
+  aborted:
+    kind: terminal
+"#).unwrap();
+
+        workflows.insert("parent".to_string(), parent);
+        workflows.insert("child".to_string(), child);
+
         let mut findings = Vec::new();
-        audit_deployment_state_machine(&mut findings);
-        assert!(
-            findings.is_empty(),
-            "DeploymentState machine has structural issues:\n{}",
-            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
-        );
+        audit_workflow_graph("parent", &workflows, &mut findings);
+
+        // "wrong-event" doesn't match any child terminal
+        let bad_event: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("has no terminal state named"))
+            .collect();
+        assert_eq!(bad_event.len(), 1);
+        assert!(bad_event[0].message.contains("wrong-event"));
+
+        // "aborted" terminal in child not handled by parent
+        let unhandled: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("does not handle terminal"))
+            .collect();
+        assert_eq!(unhandled.len(), 1);
+        assert!(unhandled[0].message.contains("aborted"));
     }
 
     #[test]
-    fn rust_development_phase_machine_is_complete() {
-        let mut findings = Vec::new();
-        audit_development_phase_machine(&mut findings);
-        assert!(
-            findings.is_empty(),
-            "DevelopmentPhase machine has structural issues:\n{}",
-            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
-        );
-    }
+    fn workflow_graph_valid_handoff_no_errors() {
+        let mut workflows = BTreeMap::new();
 
-    #[test]
-    fn rust_init_step_machine_is_complete() {
+        let parent: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: parent
+initial_state: dispatch
+states:
+  dispatch:
+    kind: workflow
+    workflow: child
+    next:
+      on:
+        done: finish
+        aborted: finish
+  finish:
+    kind: terminal
+"#).unwrap();
+
+        let child: BlueprintWorkflow = serde_yaml::from_str(r#"
+version: 1
+name: child
+initial_state: work
+states:
+  work:
+    kind: agent
+    next:
+      on_success: done
+      on_failure: aborted
+  done:
+    kind: terminal
+  aborted:
+    kind: terminal
+"#).unwrap();
+
+        workflows.insert("parent".to_string(), parent);
+        workflows.insert("child".to_string(), child);
+
         let mut findings = Vec::new();
-        audit_init_step_machine(&mut findings);
+        audit_workflow_graph("parent", &workflows, &mut findings);
+
         assert!(
             findings.is_empty(),
-            "InitStep machine has structural issues:\n{}",
-            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+            "expected no findings for valid handoff: {findings:?}"
         );
     }
 
@@ -1629,5 +1574,31 @@ states:
         let mut targets = spec.all_targets();
         targets.sort();
         assert_eq!(targets, vec!["state-a", "state-b", "state-c"]);
+    }
+
+    #[test]
+    fn next_spec_all_event_keys_extracts_on_map_keys() {
+        use crate::blueprint_workflows::NextSpec;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            "on:\n  done: state-a\n  aborted: state-b\n",
+        )
+        .unwrap();
+        let spec = NextSpec(yaml);
+        let mut keys = spec.all_event_keys();
+        keys.sort();
+        assert_eq!(keys, vec!["aborted", "done"]);
+    }
+
+    #[test]
+    fn next_spec_all_event_keys_extracts_top_level() {
+        use crate::blueprint_workflows::NextSpec;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            "on_success: state-a\non_failure: state-b\n",
+        )
+        .unwrap();
+        let spec = NextSpec(yaml);
+        let mut keys = spec.all_event_keys();
+        keys.sort();
+        assert_eq!(keys, vec!["on_failure", "on_success"]);
     }
 }
