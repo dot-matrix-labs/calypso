@@ -7,10 +7,14 @@
 //! the GHA `jobs:` map, and detects orphan/dangling check references within each
 //! blueprint workflow.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use crate::blueprint_workflows::{BlueprintWorkflow, BlueprintWorkflowLibrary};
+use crate::blueprint_workflows::{BlueprintWorkflow, BlueprintWorkflowLibrary, StateKind};
+use crate::init::InitStep;
+use crate::state::{
+    DeploymentState, DevelopmentPhase, ReleaseState, WorkflowState,
+};
 use crate::template::{self, TemplateSet};
 
 // ── Audit result types ──────────────────────────────────────────────────────
@@ -95,13 +99,17 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 /// - All embedded blueprint workflows parse as valid YAML
 /// - Check reference integrity (no dangling or orphan checks) within each workflow
 /// - The default template set loads and passes `validate()`
+/// - **Reachability**: every state is reachable from the initial state
+/// - **Completeness**: every non-terminal state can reach a terminal state (no dead branches)
+/// - **Rust-level state machines**: WorkflowState, ReleaseState, DeploymentState,
+///   DevelopmentPhase, and InitStep all have full reachability and completeness
 ///
 /// This is suitable for compile-time / test-time validation of the embedded
 /// state machine bytes without needing a real repo on disk.
 pub fn run_structural_audit() -> StateMachineAudit {
     let mut findings = Vec::new();
 
-    // 1) Parse and validate check references in all embedded blueprint workflows
+    // 1) Parse, validate check references, and audit reachability for blueprint workflows
     for (stem, yaml) in BlueprintWorkflowLibrary::list() {
         let wf = match BlueprintWorkflowLibrary::parse(yaml) {
             Ok(wf) => wf,
@@ -117,6 +125,7 @@ pub fn run_structural_audit() -> StateMachineAudit {
         };
 
         audit_check_references(stem, &wf, &mut findings);
+        audit_reachability(stem, &wf, &mut findings);
     }
 
     // 2) Validate the default template set loads and passes cross-reference checks
@@ -129,7 +138,505 @@ pub fn run_structural_audit() -> StateMachineAudit {
         });
     }
 
+    // 3) Audit Rust-level state machines for reachability and completeness
+    audit_rust_state_machines(&mut findings);
+
     StateMachineAudit { findings }
+}
+
+// ── Reachability analysis ────────────────────────────────────────────────────
+
+/// Build a directed graph from a blueprint workflow and verify:
+/// 1. Every declared state is reachable from `initial_state` (forward reachability)
+/// 2. Every non-terminal state can reach at least one terminal state (no dead branches)
+///
+/// A state is terminal if its `kind` is `Terminal` or it has no `next` spec.
+fn audit_reachability(
+    stem: &str,
+    wf: &BlueprintWorkflow,
+    findings: &mut Vec<AuditFinding>,
+) {
+    let initial_state = match &wf.initial_state {
+        Some(s) => s.as_str(),
+        None => return, // No initial_state means no state machine graph to audit
+    };
+
+    if wf.states.is_empty() {
+        return;
+    }
+
+    // Build adjacency list: state_name → set of target state names
+    let mut edges: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    let mut terminal_states: BTreeSet<&str> = BTreeSet::new();
+
+    for (name, cfg) in &wf.states {
+        let name_str = name.as_str();
+        edges.entry(name_str).or_default();
+
+        // A state is terminal only if explicitly marked kind: terminal
+        let is_terminal = cfg.kind.as_ref() == Some(&StateKind::Terminal);
+        if is_terminal {
+            terminal_states.insert(name_str);
+        }
+
+        if let Some(next) = &cfg.next {
+            for target in next.all_targets() {
+                edges.entry(name_str).or_default().insert(target);
+            }
+        }
+    }
+
+    let all_states: BTreeSet<&str> = wf.states.keys().map(|s| s.as_str()).collect();
+
+    // 1) Forward reachability: BFS from initial_state
+    let reachable = bfs_reachable(initial_state, &edges);
+    for state in &all_states {
+        if !reachable.contains(state) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: stem.to_string(),
+                message: format!(
+                    "state '{state}' is not reachable from initial_state '{initial_state}'"
+                ),
+                suggestion: Some(
+                    "add a transition targeting this state or remove it".to_string(),
+                ),
+            });
+        }
+    }
+
+    // Check that all transition targets reference declared states
+    for (from, targets) in &edges {
+        for target in targets {
+            if !all_states.contains(target) {
+                findings.push(AuditFinding {
+                    severity: AuditSeverity::Error,
+                    source: stem.to_string(),
+                    message: format!(
+                        "state '{from}' transitions to '{target}' which is not declared in the states map"
+                    ),
+                    suggestion: Some(format!("add '{target}' to the states section")),
+                });
+            }
+        }
+    }
+
+    // 2) Backward reachability: can every non-terminal state reach a terminal?
+    //    Build reverse edges, BFS backward from all terminals.
+    let mut reverse_edges: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (&from, targets) in &edges {
+        for &target in targets {
+            reverse_edges.entry(target).or_default().insert(from);
+        }
+    }
+
+    let mut can_reach_terminal: BTreeSet<&str> = BTreeSet::new();
+    let mut queue: VecDeque<&str> = terminal_states.iter().copied().collect();
+    // Terminals themselves can trivially "reach" a terminal
+    can_reach_terminal.extend(terminal_states.iter());
+
+    while let Some(node) = queue.pop_front() {
+        if let Some(predecessors) = reverse_edges.get(node) {
+            for &pred in predecessors {
+                if can_reach_terminal.insert(pred) {
+                    queue.push_back(pred);
+                }
+            }
+        }
+    }
+
+    for state in &all_states {
+        if !terminal_states.contains(state)
+            && !can_reach_terminal.contains(state)
+            && reachable.contains(state)
+        {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: stem.to_string(),
+                message: format!(
+                    "state '{state}' cannot reach any terminal state (dead branch)"
+                ),
+                suggestion: Some(
+                    "add a transition path from this state to a terminal state".to_string(),
+                ),
+            });
+        }
+    }
+}
+
+/// BFS from a start node, returning all reachable node names.
+fn bfs_reachable<'a>(start: &'a str, edges: &BTreeMap<&'a str, BTreeSet<&'a str>>) -> BTreeSet<&'a str> {
+    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(start);
+    queue.push_back(start);
+    while let Some(node) = queue.pop_front() {
+        if let Some(targets) = edges.get(node) {
+            for &target in targets {
+                if visited.insert(target) {
+                    queue.push_back(target);
+                }
+            }
+        }
+    }
+    visited
+}
+
+/// Audit the Rust-level state machines for structural completeness.
+///
+/// For each enum-based state machine (WorkflowState, ReleaseState, DeploymentState,
+/// DevelopmentPhase, InitStep), verifies:
+/// 1. Every state is reachable from the initial state via `valid_next_states()` / `next()`
+/// 2. Every non-terminal state can reach a terminal state
+fn audit_rust_state_machines(findings: &mut Vec<AuditFinding>) {
+    audit_workflow_state_machine(findings);
+    audit_release_state_machine(findings);
+    audit_deployment_state_machine(findings);
+    audit_development_phase_machine(findings);
+    audit_init_step_machine(findings);
+}
+
+fn audit_workflow_state_machine(findings: &mut Vec<AuditFinding>) {
+    let source = "rust:WorkflowState";
+    // Exclude deprecated aliases — they map to canonical states
+    let all_states = vec![
+        WorkflowState::New,
+        WorkflowState::PrdReview,
+        WorkflowState::ArchitecturePlan,
+        WorkflowState::ScaffoldTdd,
+        WorkflowState::ArchitectureReview,
+        WorkflowState::Implementation,
+        WorkflowState::QaValidation,
+        WorkflowState::ReleaseReady,
+        WorkflowState::Done,
+        WorkflowState::Blocked,
+        WorkflowState::Aborted,
+    ];
+    let initial = WorkflowState::New;
+
+    // Build adjacency by index
+    let state_idx = |s: &WorkflowState| -> usize {
+        all_states.iter().position(|x| x == s).unwrap()
+    };
+    let n = all_states.len();
+    let mut adj = vec![BTreeSet::new(); n];
+    for (i, state) in all_states.iter().enumerate() {
+        for next in state.valid_next_states() {
+            if let Some(j) = all_states.iter().position(|x| x == &next) {
+                adj[i].insert(j);
+            }
+        }
+    }
+
+    // Forward reachability from initial
+    let start = state_idx(&initial);
+    let reachable = bfs_reachable_idx(start, &adj, n);
+    for (i, state) in all_states.iter().enumerate() {
+        if !reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "state '{}' is not reachable from initial state '{}'",
+                    state.as_str(),
+                    initial.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+
+    // Backward: every non-terminal must reach a terminal
+    let terminals: BTreeSet<usize> = all_states
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.is_terminal())
+        .map(|(i, _)| i)
+        .collect();
+    let can_reach = backward_reachable_idx(&adj, &terminals, n);
+    for (i, state) in all_states.iter().enumerate() {
+        if !state.is_terminal() && !can_reach.contains(&i) && reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "state '{}' cannot reach any terminal state (dead branch)",
+                    state.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+fn audit_release_state_machine(findings: &mut Vec<AuditFinding>) {
+    let source = "rust:ReleaseState";
+    let all_states = vec![
+        ReleaseState::Planned,
+        ReleaseState::InProgress,
+        ReleaseState::Candidate,
+        ReleaseState::Validated,
+        ReleaseState::Approved,
+        ReleaseState::Deployed,
+        ReleaseState::RolledBack,
+        ReleaseState::Aborted,
+    ];
+    let initial = ReleaseState::Planned;
+
+    let n = all_states.len();
+    let mut adj = vec![BTreeSet::new(); n];
+    for (i, state) in all_states.iter().enumerate() {
+        for next in state.valid_next_states() {
+            if let Some(j) = all_states.iter().position(|x| x == &next) {
+                adj[i].insert(j);
+            }
+        }
+    }
+
+    let start = all_states.iter().position(|s| s == &initial).unwrap();
+    let reachable = bfs_reachable_idx(start, &adj, n);
+    for (i, state) in all_states.iter().enumerate() {
+        if !reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!("state '{state}' is not reachable from initial state '{initial}'"),
+                suggestion: None,
+            });
+        }
+    }
+
+    let terminals: BTreeSet<usize> = all_states
+        .iter()
+        .enumerate()
+        .filter(|(_, s)| s.is_terminal())
+        .map(|(i, _)| i)
+        .collect();
+    let can_reach = backward_reachable_idx(&adj, &terminals, n);
+    for (i, state) in all_states.iter().enumerate() {
+        if !state.is_terminal() && !can_reach.contains(&i) && reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!("state '{state}' cannot reach any terminal state (dead branch)"),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+fn audit_deployment_state_machine(findings: &mut Vec<AuditFinding>) {
+    let source = "rust:DeploymentState";
+    let all_states = vec![
+        DeploymentState::Idle,
+        DeploymentState::Pending,
+        DeploymentState::Deploying,
+        DeploymentState::Deployed,
+        DeploymentState::Failed,
+        DeploymentState::RollingBack,
+        DeploymentState::RolledBack,
+    ];
+    let initial = DeploymentState::Idle;
+
+    let n = all_states.len();
+    let mut adj = vec![BTreeSet::new(); n];
+    for (i, state) in all_states.iter().enumerate() {
+        for next in state.valid_next_states() {
+            if let Some(j) = all_states.iter().position(|x| x == &next) {
+                adj[i].insert(j);
+            }
+        }
+    }
+
+    let start = all_states.iter().position(|s| s == &initial).unwrap();
+    let reachable = bfs_reachable_idx(start, &adj, n);
+    for (i, state) in all_states.iter().enumerate() {
+        if !reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!("state '{state}' is not reachable from initial state '{initial}'"),
+                suggestion: None,
+            });
+        }
+    }
+
+    // DeploymentState is cyclic (everything loops back to Idle), no terminal states.
+    // Instead verify every state can reach Idle (the quiescent state).
+    let idle_idx = all_states
+        .iter()
+        .position(|s| s == &DeploymentState::Idle)
+        .unwrap();
+    let can_reach_idle = backward_reachable_idx(&adj, &BTreeSet::from([idle_idx]), n);
+    for (i, state) in all_states.iter().enumerate() {
+        if i != idle_idx && !can_reach_idle.contains(&i) && reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "state '{state}' cannot reach quiescent state 'idle' (dead branch)"
+                ),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+fn audit_development_phase_machine(findings: &mut Vec<AuditFinding>) {
+    let source = "rust:DevelopmentPhase";
+    let all_phases = vec![
+        DevelopmentPhase::Init,
+        DevelopmentPhase::Development,
+        DevelopmentPhase::Testing,
+    ];
+    let initial = DevelopmentPhase::Init;
+
+    let n = all_phases.len();
+    let mut adj = vec![BTreeSet::new(); n];
+    for (i, phase) in all_phases.iter().enumerate() {
+        for next in phase.valid_next_phases() {
+            if let Some(j) = all_phases.iter().position(|x| x == &next) {
+                adj[i].insert(j);
+            }
+        }
+    }
+
+    let start = all_phases.iter().position(|p| p == &initial).unwrap();
+    let reachable = bfs_reachable_idx(start, &adj, n);
+    for (i, phase) in all_phases.iter().enumerate() {
+        if !reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "phase '{}' is not reachable from initial phase '{}'",
+                    phase.as_str(),
+                    initial.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+
+    // DevelopmentPhase is cyclic with no terminal — verify all phases can reach
+    // Development (the primary working phase).
+    let dev_idx = all_phases
+        .iter()
+        .position(|p| p == &DevelopmentPhase::Development)
+        .unwrap();
+    let can_reach_dev = backward_reachable_idx(&adj, &BTreeSet::from([dev_idx]), n);
+    for (i, phase) in all_phases.iter().enumerate() {
+        if i != dev_idx && !can_reach_dev.contains(&i) && reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "phase '{}' cannot reach 'development' phase (dead branch)",
+                    phase.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+fn audit_init_step_machine(findings: &mut Vec<AuditFinding>) {
+    let source = "rust:InitStep";
+    let all_steps = InitStep::all_steps();
+    let initial = &InitStep::PromptDirectory;
+
+    let n = all_steps.len();
+    let mut adj = vec![BTreeSet::new(); n];
+    for (i, step) in all_steps.iter().enumerate() {
+        if let Some(next) = step.next() {
+            if let Some(j) = all_steps.iter().position(|x| x == &next) {
+                adj[i].insert(j);
+            }
+        }
+    }
+
+    let start = all_steps.iter().position(|s| s == initial).unwrap();
+    let reachable = bfs_reachable_idx(start, &adj, n);
+    for (i, step) in all_steps.iter().enumerate() {
+        if !reachable.contains(&i) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "step '{}' is not reachable from initial step '{}'",
+                    step.as_str(),
+                    initial.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+
+    // Verify every step can reach Complete
+    let complete_idx = all_steps
+        .iter()
+        .position(|s| s == &InitStep::Complete)
+        .unwrap();
+    let can_reach_complete =
+        backward_reachable_idx(&adj, &BTreeSet::from([complete_idx]), n);
+    for (i, step) in all_steps.iter().enumerate() {
+        if !step.is_complete()
+            && !can_reach_complete.contains(&i)
+            && reachable.contains(&i)
+        {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: source.to_string(),
+                message: format!(
+                    "step '{}' cannot reach terminal step 'complete' (dead branch)",
+                    step.as_str()
+                ),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+/// BFS from a start index, returning all reachable indices.
+fn bfs_reachable_idx(start: usize, adj: &[BTreeSet<usize>], _n: usize) -> BTreeSet<usize> {
+    let mut visited = BTreeSet::new();
+    let mut queue = VecDeque::new();
+    visited.insert(start);
+    queue.push_back(start);
+    while let Some(node) = queue.pop_front() {
+        for &target in &adj[node] {
+            if visited.insert(target) {
+                queue.push_back(target);
+            }
+        }
+    }
+    visited
+}
+
+/// Given forward adjacency and a set of target indices, return all indices that
+/// can reach any target via forward edges (backward BFS on reverse graph).
+fn backward_reachable_idx(
+    adj: &[BTreeSet<usize>],
+    targets: &BTreeSet<usize>,
+    n: usize,
+) -> BTreeSet<usize> {
+    // Build reverse adjacency
+    let mut rev = vec![BTreeSet::new(); n];
+    for (i, neighbors) in adj.iter().enumerate() {
+        for &j in neighbors {
+            rev[j].insert(i);
+        }
+    }
+    let mut visited: BTreeSet<usize> = targets.clone();
+    let mut queue: VecDeque<usize> = targets.iter().copied().collect();
+    while let Some(node) = queue.pop_front() {
+        for &pred in &rev[node] {
+            if visited.insert(pred) {
+                queue.push_back(pred);
+            }
+        }
+    }
+    visited
 }
 
 /// Run the full state machine audit against the given repo root.
@@ -161,6 +668,16 @@ pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
     if let Ok(template) = template::load_embedded_template_set() {
         audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
     }
+
+    // 3) Reachability and completeness for blueprint workflows
+    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+        if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
+            audit_reachability(stem, &wf, &mut findings);
+        }
+    }
+
+    // 4) Rust-level state machine structural checks
+    audit_rust_state_machines(&mut findings);
 
     StateMachineAudit { findings }
 }
@@ -902,5 +1419,215 @@ checks:
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+    }
+
+    // ── Reachability tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn reachability_detects_unreachable_state() {
+        let wf_yaml = r#"
+version: 1
+name: test-unreachable
+initial_state: start
+states:
+  start:
+    kind: agent
+    next:
+      on_success: done
+  orphan:
+    kind: agent
+    next:
+      on_success: done
+  done:
+    kind: terminal
+"#;
+        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_reachability("test-wf", &wf, &mut findings);
+
+        let unreachable: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not reachable"))
+            .collect();
+        assert_eq!(unreachable.len(), 1);
+        assert!(unreachable[0].message.contains("orphan"));
+        assert_eq!(unreachable[0].severity, AuditSeverity::Error);
+    }
+
+    #[test]
+    fn reachability_detects_dead_branch() {
+        let wf_yaml = r#"
+version: 1
+name: test-dead-branch
+initial_state: start
+states:
+  start:
+    kind: agent
+    next:
+      on:
+        ok: middle
+        done: done
+  middle:
+    kind: agent
+    description: no next — dead end, not terminal
+  done:
+    kind: terminal
+"#;
+        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_reachability("test-wf", &wf, &mut findings);
+
+        let dead: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("dead branch"))
+            .collect();
+        assert_eq!(dead.len(), 1);
+        assert!(dead[0].message.contains("middle"));
+    }
+
+    #[test]
+    fn reachability_detects_undefined_transition_target() {
+        let wf_yaml = r#"
+version: 1
+name: test-undefined-target
+initial_state: start
+states:
+  start:
+    kind: agent
+    next:
+      on_success: nonexistent
+  done:
+    kind: terminal
+"#;
+        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_reachability("test-wf", &wf, &mut findings);
+
+        let undefined: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not declared"))
+            .collect();
+        assert_eq!(undefined.len(), 1);
+        assert!(undefined[0].message.contains("nonexistent"));
+    }
+
+    #[test]
+    fn reachability_passes_for_well_formed_workflow() {
+        let wf_yaml = r#"
+version: 1
+name: test-valid
+initial_state: start
+states:
+  start:
+    kind: agent
+    next:
+      on:
+        ok: middle
+        fail: blocked
+  middle:
+    kind: agent
+    next:
+      on_success: done
+      on_failure: blocked
+  blocked:
+    kind: human
+    next:
+      on:
+        resolved: start
+        abort: aborted
+  done:
+    kind: terminal
+  aborted:
+    kind: terminal
+"#;
+        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_reachability("test-wf", &wf, &mut findings);
+
+        assert!(
+            findings.is_empty(),
+            "expected no findings for well-formed workflow: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn rust_workflow_state_machine_is_complete() {
+        let mut findings = Vec::new();
+        audit_workflow_state_machine(&mut findings);
+        assert!(
+            findings.is_empty(),
+            "WorkflowState machine has structural issues:\n{}",
+            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn rust_release_state_machine_is_complete() {
+        let mut findings = Vec::new();
+        audit_release_state_machine(&mut findings);
+        assert!(
+            findings.is_empty(),
+            "ReleaseState machine has structural issues:\n{}",
+            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn rust_deployment_state_machine_is_complete() {
+        let mut findings = Vec::new();
+        audit_deployment_state_machine(&mut findings);
+        assert!(
+            findings.is_empty(),
+            "DeploymentState machine has structural issues:\n{}",
+            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn rust_development_phase_machine_is_complete() {
+        let mut findings = Vec::new();
+        audit_development_phase_machine(&mut findings);
+        assert!(
+            findings.is_empty(),
+            "DevelopmentPhase machine has structural issues:\n{}",
+            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn rust_init_step_machine_is_complete() {
+        let mut findings = Vec::new();
+        audit_init_step_machine(&mut findings);
+        assert!(
+            findings.is_empty(),
+            "InitStep machine has structural issues:\n{}",
+            findings.iter().map(|f| format!("  {}", f.message)).collect::<Vec<_>>().join("\n")
+        );
+    }
+
+    #[test]
+    fn next_spec_all_targets_extracts_on_map() {
+        use crate::blueprint_workflows::NextSpec;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            "on:\n  ok: state-a\n  fail: state-b\n",
+        )
+        .unwrap();
+        let spec = NextSpec(yaml);
+        let mut targets = spec.all_targets();
+        targets.sort();
+        assert_eq!(targets, vec!["state-a", "state-b"]);
+    }
+
+    #[test]
+    fn next_spec_all_targets_extracts_top_level_keys() {
+        use crate::blueprint_workflows::NextSpec;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(
+            "on_success: state-a\non_failure: state-b\non_rejection: state-c\n",
+        )
+        .unwrap();
+        let spec = NextSpec(yaml);
+        let mut targets = spec.all_targets();
+        targets.sort();
+        assert_eq!(targets, vec!["state-a", "state-b", "state-c"]);
     }
 }

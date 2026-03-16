@@ -317,6 +317,40 @@ impl NextSpec {
 
         None
     }
+
+    /// Returns all target state names reachable from this transition spec.
+    ///
+    /// Handles all YAML shapes:
+    /// - `{ on_success: s, on_failure: s, on_rejection: s, ... }` — top-level string values
+    /// - `{ on: { event: target, ... } }` — nested event dispatch map
+    /// - `{ pass: s, fail: s }` — github routing
+    /// - `{ on_complete: s }` — terminal transition
+    pub fn all_targets(&self) -> Vec<&str> {
+        let mut targets = Vec::new();
+        let Some(map) = self.0.as_mapping() else {
+            return targets;
+        };
+
+        for (key, value) in map {
+            if let Some(key_str) = key.as_str() {
+                if key_str == "on" {
+                    // Nested event dispatch: { on: { event: target, ... } }
+                    if let Some(on_map) = value.as_mapping() {
+                        for (_, v) in on_map {
+                            if let Some(s) = v.as_str() {
+                                targets.push(s);
+                            }
+                        }
+                    }
+                } else if let Some(s) = value.as_str() {
+                    // Top-level key: on_success, on_failure, pass, fail, on_complete, on_rejection, etc.
+                    targets.push(s);
+                }
+            }
+        }
+
+        targets
+    }
 }
 
 // ── checks ───────────────────────────────────────────────────────────────────
