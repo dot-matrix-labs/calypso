@@ -463,6 +463,14 @@ pub struct StateMachineTemplate {
     pub feature_unit: Option<FeatureUnitConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_policies: Option<ArtifactPolicies>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<OnConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OnConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

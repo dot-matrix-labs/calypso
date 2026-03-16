@@ -128,6 +128,8 @@ pub struct InitProgress {
     pub github_org: Option<String>,
     pub github_repo: Option<String>,
     pub completed_steps: Vec<InitStep>,
+    #[serde(default)]
+    pub hello_world: bool,
 }
 
 impl InitProgress {
@@ -138,6 +140,7 @@ impl InitProgress {
             github_org: None,
             github_repo: None,
             completed_steps: Vec::new(),
+            hello_world: false,
         }
     }
 
@@ -218,6 +221,60 @@ pub const WORKFLOW_RELEASE_CLI: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/release-cli.yml");
 pub const WORKFLOW_MERGE_QUEUE: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/merge-queue.yml");
+
+// ---------------------------------------------------------------------------
+// Hello World templates
+// ---------------------------------------------------------------------------
+
+pub const HELLO_WORLD_STATE_MACHINE_YAML: &str = "initial_state: new
+states:
+  - name: new
+    type: agent
+  - name: implementation
+    type: agent
+  - name: done
+    type: agent
+gate_groups:
+  - id: hello-world-gates
+    label: Hello World Gates
+    gates:
+      - id: hello-gate
+        label: Hello Gate
+        task: hello-task
+transitions:
+  - from: new
+    to: implementation
+  - from: new
+    to: aborted
+  - from: implementation
+    to: done
+on:
+  cron: \"*/10 * * * * *\"
+";
+
+pub const HELLO_WORLD_AGENTS_YAML: &str = "tasks:
+  - name: hello-task
+    kind: agent
+    role: hello-role
+";
+
+pub const HELLO_WORLD_PROMPTS_YAML: &str = "prompts:
+  hello-task: |
+    Produce a 'hello world' file in the root of the repository.
+";
+
+pub const HELLO_WORLD_GITHUB_WORKFLOW: &str = "name: Hello World
+on: [push]
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo \"Hello World\"
+";
+
+pub const HELLO_WORLD_COMMIT_HOOK: &str = "#!/bin/sh
+echo \"Hello world from Calypso commit hook!\"
+";
 
 // ---------------------------------------------------------------------------
 // GitHub Actions workflow templates
@@ -332,6 +389,8 @@ pub struct InitRequest {
     pub github_org: Option<String>,
     /// Repository name for creating an upstream remote.
     pub github_repo_name: Option<String>,
+    /// Use minimalist hello-world example instead of calypso-blueprint defaults.
+    pub hello_world: bool,
 }
 
 #[derive(Debug)]
@@ -693,11 +752,19 @@ pub fn run_init_interactive(
     repo_path: &Path,
     allow_reinit: bool,
     env: &impl InitEnvironment,
+    hello_world: bool,
 ) -> Result<InitProgress, InitError> {
-    // Attempt to resume from a previous interrupted init.
     let mut progress = match env.load_init_state(repo_path) {
-        Ok(Some(prev)) if !prev.current_step.is_complete() && !allow_reinit => prev,
-        _ => InitProgress::new(repo_path.to_path_buf()),
+        Ok(Some(prev)) if !prev.current_step.is_complete() && !allow_reinit => {
+            let mut p = prev;
+            p.hello_world = hello_world; // update with current flag if resuming
+            p
+        }
+        _ => {
+            let mut p = InitProgress::new(repo_path.to_path_buf());
+            p.hello_world = hello_world;
+            p
+        }
     };
 
     // Load or create development state
@@ -744,19 +811,20 @@ pub fn run_init_interactive(
                 progress.advance();
             }
             InitStep::ScaffoldGithubActions => {
-                scaffold_github_actions(repo_path, env)?;
+                scaffold_github_actions(repo_path, env, hello_world)?;
                 progress.advance();
             }
             InitStep::ConfigureLocal => {
                 let remote_url = env.remote_url(repo_path).unwrap_or_default();
-                if is_github_url(&remote_url) {
+                if is_github_url(&remote_url) || hello_world {
                     let request = InitRequest {
                         repo_path: repo_path.to_path_buf(),
                         provider: None,
-                        allow_reinit,
+                        allow_reinit: true, // Internal calls during init are always allowed to write to .calypso
                         create_git_repo: false,
                         github_org: None,
                         github_repo_name: None,
+                        hello_world,
                     };
                     init_repository(&request, env)?;
                 }
@@ -875,19 +943,20 @@ pub fn run_init_step(
             progress.advance();
         }
         InitStep::ScaffoldGithubActions => {
-            scaffold_github_actions(repo_path, env)?;
+            scaffold_github_actions(repo_path, env, progress.hello_world)?;
             progress.advance();
         }
         InitStep::ConfigureLocal => {
             let remote_url = env.remote_url(repo_path).unwrap_or_default();
-            if is_github_url(&remote_url) {
+            if is_github_url(&remote_url) || progress.hello_world {
                 let request = InitRequest {
                     repo_path: repo_path.to_path_buf(),
                     provider: None,
-                    allow_reinit: true,
+                    allow_reinit: true, // Internal calls during init are always allowed to write to .calypso
                     create_git_repo: false,
                     github_org: None,
                     github_repo_name: None,
+                    hello_world: progress.hello_world,
                 };
                 init_repository(&request, env)?;
             }
@@ -1010,7 +1079,17 @@ fn current_timestamp() -> String {
 pub fn scaffold_github_actions(
     repo_path: &Path,
     env: &impl InitEnvironment,
+    hello_world: bool,
 ) -> Result<Vec<String>, InitError> {
+    if hello_world {
+        let name = "hello-world.yml";
+        let workflow_path = repo_path.join(".github").join("workflows").join(name);
+        if !env.path_exists(&workflow_path) {
+            env.write_workflow_file(repo_path, name, HELLO_WORLD_GITHUB_WORKFLOW)?;
+            return Ok(vec![name.to_string()]);
+        }
+        return Ok(vec![]);
+    }
     let workflows = [
         ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
         ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
@@ -1047,10 +1126,16 @@ pub fn init_repository(
     }
 
     // Step 2: detect GitHub remote
-    let remote_url = env.remote_url(&request.repo_path)?;
-    if !is_github_url(&remote_url) {
-        return Err(InitError::NotAGithubRemote { url: remote_url });
-    }
+    let remote_url = match env.remote_url(&request.repo_path) {
+        Ok(url) => {
+            if !is_github_url(&url) && !request.hello_world {
+                return Err(InitError::NotAGithubRemote { url });
+            }
+            url
+        }
+        Err(_) if request.hello_world => "https://github.com/example/hello-world".to_string(),
+        Err(e) => return Err(e),
+    };
 
     // Step 3: detect default branch
     let default_branch = env.default_branch(&request.repo_path)?;
@@ -1129,21 +1214,42 @@ fn do_init_steps(
     // Step 6: copy default template files
     let mut templates_written = Vec::new();
 
+    let (sm_yaml, agents_yaml, prompts_yaml) = if request.hello_world {
+        (
+            HELLO_WORLD_STATE_MACHINE_YAML,
+            HELLO_WORLD_AGENTS_YAML,
+            HELLO_WORLD_PROMPTS_YAML,
+        )
+    } else {
+        (
+            DEFAULT_STATE_MACHINE_YAML,
+            DEFAULT_AGENTS_YAML,
+            DEFAULT_PROMPTS_YAML,
+        )
+    };
+
     let sm_path = calypso_dir.join("state-machine.yml");
-    env.write_file(&sm_path, DEFAULT_STATE_MACHINE_YAML)?;
+    env.write_file(&sm_path, sm_yaml)?;
     templates_written.push("state-machine.yml".to_string());
 
     let agents_path = calypso_dir.join("agents.yml");
-    env.write_file(&agents_path, DEFAULT_AGENTS_YAML)?;
+    env.write_file(&agents_path, agents_yaml)?;
     templates_written.push("agents.yml".to_string());
 
     let prompts_path = calypso_dir.join("prompts.yml");
-    env.write_file(&prompts_path, DEFAULT_PROMPTS_YAML)?;
+    env.write_file(&prompts_path, prompts_yaml)?;
     templates_written.push("prompts.yml".to_string());
 
     // Step 7: install git hook
     let hooks_dir = env.git_hooks_path(&request.repo_path)?;
     env.create_dir(&hooks_dir)?;
+
+    if request.hello_world {
+        let hook_path = hooks_dir.join("pre-commit");
+        env.write_file(&hook_path, HELLO_WORLD_COMMIT_HOOK)?;
+        env.set_executable(&hook_path)?;
+    }
+
     let hook_path = hooks_dir.join("pre-push");
     env.write_file(&hook_path, PRE_PUSH_HOOK)?;
     env.set_executable(&hook_path)?;

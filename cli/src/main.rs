@@ -110,13 +110,16 @@ fn main() {
             }
         }
         [command] if command == "init" => {
-            run_calypso_init(&cwd, false, None, None);
+            run_calypso_init(&cwd, false, None, None, false);
         }
         [command, flag] if command == "init" && flag == "--reinit" => {
-            run_calypso_init(&cwd, true, None, None);
+            run_calypso_init(&cwd, true, None, None, false);
+        }
+        [command, flag] if command == "init" && flag == "--hello-world" => {
+            run_calypso_init(&cwd, false, None, None, true);
         }
         [command, flag] if command == "init" && flag == "--json" => {
-            run_calypso_init_json(&cwd, false, None, None);
+            run_calypso_init_json(&cwd, false, None, None, false);
         }
         [command, flag] if command == "init" && flag == "--status" => {
             run_init_status(&cwd);
@@ -136,6 +139,7 @@ fn main() {
             let mut org: Option<String> = None;
             let mut repo_name: Option<String> = None;
             let mut json = false;
+            let mut hello_world = false;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -149,14 +153,15 @@ fn main() {
                         repo_name = Some(args[i + 1].clone());
                         i += 1;
                     }
+                    "--hello-world" => hello_world = true,
                     _ => {}
                 }
                 i += 1;
             }
             if json {
-                run_calypso_init_json(&cwd, allow_reinit, org, repo_name);
+                run_calypso_init_json(&cwd, allow_reinit, org, repo_name, hello_world);
             } else {
-                run_calypso_init(&cwd, allow_reinit, org, repo_name);
+                run_calypso_init(&cwd, allow_reinit, org, repo_name, hello_world);
             }
         }
         // calypso state (no subcommand) — alias for `calypso state status`
@@ -466,6 +471,7 @@ fn run_calypso_init(
     allow_reinit: bool,
     org: Option<String>,
     repo_name: Option<String>,
+    hello_world: bool,
 ) {
     // Print detected status.
     let status = detect_repo_status(cwd, &HostInitEnvironment);
@@ -480,7 +486,7 @@ fn run_calypso_init(
         return;
     }
 
-    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment) {
+    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
         Ok(p) => p,
         Err(error) => {
             eprintln!("init error: {error}");
@@ -508,6 +514,7 @@ fn run_calypso_init_json(
     allow_reinit: bool,
     org: Option<String>,
     repo_name: Option<String>,
+    hello_world: bool,
 ) {
     let status = detect_repo_status(cwd, &HostInitEnvironment);
 
@@ -525,7 +532,7 @@ fn run_calypso_init_json(
         return;
     }
 
-    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment) {
+    let mut progress = match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
         Ok(p) => p,
         Err(error) => {
             let report = serde_json::json!({

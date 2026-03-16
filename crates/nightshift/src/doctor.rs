@@ -318,14 +318,29 @@ pub fn collect_doctor_report(
     repo_root: &Path,
 ) -> DoctorReport {
     let is_git = environment.is_git_repo(repo_root);
-    let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
-    missing_workflow_files.sort();
-    let mut missing_git_hooks = environment.missing_git_hooks(repo_root);
-    missing_git_hooks.sort();
+    let is_hello_world = crate::init::InitProgress::load(repo_root)
+        .ok()
+        .flatten()
+        .map(|p| p.hello_world)
+        .unwrap_or(false);
+    let missing_workflow_files = if !is_hello_world {
+        let mut missing = environment.missing_workflow_files(repo_root);
+        missing.sort();
+        missing
+    } else {
+        Vec::new()
+    };
+    let missing_git_hooks = if !is_hello_world {
+        let mut missing = environment.missing_git_hooks(repo_root);
+        missing.sort();
+        missing
+    } else {
+        Vec::new()
+    };
     let hooks_path = environment
         .git_hooks_path(repo_root)
         .map(|p| p.to_string_lossy().into_owned());
-    let sm_audit = sm_audit::run_audit(repo_root);
+    let sm_audit = sm_audit::run_audit(repo_root, is_hello_world);
     // Only fetch the github user when it may be needed for fix construction.
     let github_user = if !environment.has_github_remote(repo_root) {
         environment.github_user()
