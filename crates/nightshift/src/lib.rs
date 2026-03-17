@@ -23,6 +23,7 @@ pub mod state;
 pub mod telemetry;
 pub mod template;
 pub mod tui;
+pub mod webview;
 pub mod workflows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,6 +91,8 @@ Commands:
                       Print the raw YAML for the named blueprint workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
+  webview             Start a local HTTP server (port 7373) with live state UI
+  webview --port <N>  Start the webview server on a custom port
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

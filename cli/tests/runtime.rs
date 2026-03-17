@@ -45,8 +45,14 @@ fn path_mutex() -> &'static Mutex<()> {
     PATH_MUTEX.get_or_init(|| Mutex::new(()))
 }
 
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
+}
+
 fn run_git(repo_root: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = git_cmd()
         .args(args)
         .current_dir(repo_root)
         .output()

@@ -1,7 +1,7 @@
 use calypso_cli::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
     run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
-    run_state_status_json, run_state_status_plain, run_status, run_workflows_list,
+    run_state_status_json, run_state_status_plain, run_status, run_webview, run_workflows_list,
     run_workflows_show, run_workflows_validate,
 };
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
@@ -272,6 +272,15 @@ fn main() {
         // calypso watch --state <path>
         [command, flag, path] if command == "watch" && flag == "--state" => {
             run_watch(path);
+        }
+        // calypso webview
+        [command] if command == "webview" => {
+            run_webview(&cwd, 7373);
+        }
+        // calypso webview --port <N>
+        [command, flag, port_str] if command == "webview" && flag == "--port" => {
+            let port: u16 = port_str.parse().unwrap_or(7373);
+            run_webview(&cwd, port);
         }
         [command, subcommand] if command == "template" && subcommand == "validate" => {
             run_template_validate(&cwd);

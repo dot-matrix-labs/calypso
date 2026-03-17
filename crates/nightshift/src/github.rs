@@ -26,6 +26,8 @@ pub fn resolve_owner_repo(repo_root: &Path) -> Result<(String, String), GithubSn
             "get-url",
             "origin",
         ])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|_| {
             GithubSnapshotError::MissingField("git remote get-url origin failed to spawn")
@@ -838,6 +840,72 @@ exit 1
             conclusion: Some("failure".to_string()),
         }];
         assert_eq!(parse_rest_check_runs(&runs), EvidenceStatus::Failing);
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_falls_through_when_https_missing_repo() {
+        // URL has owner but no repo — should fall through to the error.
+        let result = parse_owner_repo_from_url("https://github.com/owner-only");
+        assert!(result.is_err(), "expected error for missing repo component");
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_falls_through_when_ssh_missing_repo() {
+        // SSH URL with only owner — falls through the SSH if block.
+        let result = parse_owner_repo_from_url("git@github.com:owner-only");
+        assert!(
+            result.is_err(),
+            "expected error for missing repo in SSH URL"
+        );
+    }
+
+    #[test]
+    fn parse_rest_pull_request_errors_on_unknown_state() {
+        let pr = RestPullRequest {
+            state: "MERGED".to_string(),
+            draft: None,
+            mergeable_state: None,
+            head: RestPullRequestHead {
+                sha: "abc123".to_string(),
+            },
+        };
+        let result = parse_rest_pull_request(&pr, &[], &[]);
+        assert!(
+            result.is_err(),
+            "expected error for unknown PR state 'MERGED'"
+        );
+    }
+
+    #[test]
+    fn derive_review_decision_dismissed_without_approved_is_review_required() {
+        let reviews = vec![RestReview {
+            user: RestUser {
+                login: "alice".to_string(),
+            },
+            state: "DISMISSED".to_string(),
+        }];
+        assert_eq!(
+            derive_review_decision(&reviews),
+            GithubReviewStatus::ReviewRequired
+        );
+    }
+
+    #[test]
+    fn parse_rest_check_runs_pending_is_pending() {
+        let runs = vec![RestCheckRun {
+            status: "queued".to_string(),
+            conclusion: None,
+        }];
+        assert_eq!(parse_rest_check_runs(&runs), EvidenceStatus::Pending);
+    }
+
+    #[test]
+    fn parse_rest_check_runs_unknown_status_is_pending() {
+        let runs = vec![RestCheckRun {
+            status: "waiting".to_string(),
+            conclusion: None,
+        }];
+        assert_eq!(parse_rest_check_runs(&runs), EvidenceStatus::Pending);
     }
 
     #[test]

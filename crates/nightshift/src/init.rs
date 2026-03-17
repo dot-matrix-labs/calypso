@@ -502,12 +502,21 @@ pub trait InitEnvironment {
 // HostInitEnvironment
 // ---------------------------------------------------------------------------
 
+/// Returns a `Command` for `git` with `GIT_DIR` and `GIT_WORK_TREE` unset so
+/// that git discovers the repository from the `-C` path or `current_dir`,
+/// rather than from an inherited hook context.
+fn git_cmd() -> std::process::Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostInitEnvironment;
 
 impl InitEnvironment for HostInitEnvironment {
     fn is_git_repo(&self, path: &Path) -> Result<bool, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["-C", &path.to_string_lossy(), "rev-parse", "--git-dir"])
             .output()
             .map_err(InitError::Io)?;
@@ -515,7 +524,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn remote_url(&self, path: &Path) -> Result<String, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["-C", &path.to_string_lossy(), "remote", "get-url", "origin"])
             .output()
             .map_err(InitError::Io)?;
@@ -529,7 +538,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn default_branch(&self, path: &Path) -> Result<String, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -574,7 +583,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn git_init(&self, path: &Path) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["init"])
             .current_dir(path)
             .output()
@@ -622,7 +631,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn set_remote(&self, path: &Path, url: &str) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -650,7 +659,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn configure_githooks(&self, path: &Path) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -670,7 +679,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -1780,5 +1789,68 @@ mod tests {
     fn repo_init_status_serializes_to_kebab_case() {
         let json = serde_json::to_string(&RepoInitStatus::FullyConfigured).unwrap();
         assert_eq!(json, "\"fully-configured\"");
+    }
+
+    // ── InitError Display ─────────────────────────────────────────────────────
+
+    #[test]
+    fn init_error_display_git_command_failed() {
+        let err = InitError::git("git fetch", "connection refused");
+        assert!(err.to_string().contains("git fetch"));
+        assert!(err.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn init_error_display_io() {
+        let err = InitError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "no file"));
+        assert!(err.to_string().contains("init I/O error"));
+    }
+
+    #[test]
+    fn init_error_display_not_a_git_repo() {
+        let err = InitError::NotAGitRepo {
+            path: PathBuf::from("/some/path"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/some/path"), "got: {msg}");
+        assert!(msg.contains("not a git repository"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_not_a_github_remote() {
+        let err = InitError::NotAGithubRemote {
+            url: "https://gitlab.com/foo/bar.git".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("gitlab.com"), "got: {msg}");
+        assert!(msg.contains("not a GitHub URL"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_already_initialized() {
+        let err = InitError::AlreadyInitialized {
+            calypso_dir: PathBuf::from("/repo/.calypso"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains(".calypso"), "got: {msg}");
+        assert!(msg.contains("already exists"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_state_serialize() {
+        // Produce a serde_json::Error by trying to serialize an invalid value.
+        let e: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("{{invalid}}").unwrap_err();
+        let err = InitError::StateSerialize(e);
+        assert!(
+            err.to_string().contains("failed to serialise"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn init_error_is_std_error() {
+        let err = InitError::git("op", "details");
+        let _: &dyn std::error::Error = &err;
     }
 }
