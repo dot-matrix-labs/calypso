@@ -348,7 +348,7 @@ fn state_status_json_fixture_file_round_trip() {
 
     let state = fixture_repository_state();
     state
-        .save_to_path(&tmp.join(".calypso/state.json"))
+        .save_to_path(&tmp.join(".calypso/repository-state.json"))
         .expect("save fixture");
 
     let result = calypso_cli::app::run_state_status_json(&tmp);
@@ -376,7 +376,7 @@ fn state_status_plain_fixture_file_contains_expected_lines() {
 
     let state = fixture_repository_state();
     state
-        .save_to_path(&tmp.join(".calypso/state.json"))
+        .save_to_path(&tmp.join(".calypso/repository-state.json"))
         .expect("save fixture");
 
     let result = calypso_cli::app::run_state_status_plain(&tmp);
