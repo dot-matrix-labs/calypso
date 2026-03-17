@@ -27,11 +27,9 @@ pub fn run_webview(cwd: &Path, port: u16) {
     let listener = TcpListener::bind(&addr).expect("bind failed — port may already be in use");
     println!("Calypso webview running at http://{addr}");
     println!("Press Ctrl+C to stop.");
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
-            let cwd = cwd.to_path_buf();
-            std::thread::spawn(move || handle_connection(stream, &cwd));
-        }
+    for stream in listener.incoming().flatten() {
+        let cwd = cwd.to_path_buf();
+        std::thread::spawn(move || handle_connection(stream, &cwd));
     }
 }
 
@@ -216,14 +214,14 @@ fn collect_cron_workflows() -> Vec<Value> {
 
     let mut result = Vec::new();
     for (name, yaml) in BlueprintWorkflowLibrary::list() {
-        if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
-            if let Some(schedule) = &wf.schedule {
-                result.push(serde_json::json!({
-                    "name": name,
-                    "cron": schedule.cron,
-                    "description": schedule.description,
-                }));
-            }
+        if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml)
+            && let Some(schedule) = &wf.schedule
+        {
+            result.push(serde_json::json!({
+                "name": name,
+                "cron": schedule.cron,
+                "description": schedule.description,
+            }));
         }
     }
     result
