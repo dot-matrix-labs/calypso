@@ -26,6 +26,8 @@ pub fn resolve_owner_repo(repo_root: &Path) -> Result<(String, String), GithubSn
             "get-url",
             "origin",
         ])
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|_| {
             GithubSnapshotError::MissingField("git remote get-url origin failed to spawn")
