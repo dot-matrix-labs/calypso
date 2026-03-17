@@ -15,6 +15,7 @@ struct FakeEnvironment {
     missing_workflow_files: BTreeMap<PathBuf, Vec<String>>,
     missing_git_hooks: BTreeMap<PathBuf, Vec<String>>,
     git_hooks_path: Option<PathBuf>,
+    git_hooks_path_configured: bool,
     github_user: Option<String>,
 }
 
@@ -57,6 +58,11 @@ impl FakeEnvironment {
 
     fn with_git_hooks_path(mut self, path: &Path) -> Self {
         self.git_hooks_path = Some(path.to_path_buf());
+        self
+    }
+
+    fn with_git_hooks_path_configured(mut self, configured: bool) -> Self {
+        self.git_hooks_path_configured = configured;
         self
     }
 
@@ -108,6 +114,10 @@ impl DoctorEnvironment for FakeEnvironment {
     fn git_hooks_path(&self, _repo_root: &Path) -> Option<PathBuf> {
         self.git_hooks_path.clone()
     }
+
+    fn git_hooks_path_configured(&self, _repo_root: &Path) -> bool {
+        self.git_hooks_path_configured
+    }
 }
 
 fn status_map(report: &calypso_cli::doctor::DoctorReport) -> BTreeMap<DoctorCheckId, DoctorStatus> {
@@ -138,6 +148,7 @@ fn doctor_report_collects_expected_check_results() {
             .with_command("gh")
             .with_command("codex")
             .with_gh_authenticated(true)
+            .with_git_hooks_path_configured(true)
             .with_github_remote_root(repo_root),
         repo_root,
     );
@@ -163,6 +174,10 @@ fn doctor_report_collects_expected_check_results() {
     );
     assert_eq!(
         statuses[&DoctorCheckId::RequiredWorkflowFilesPresent],
+        DoctorStatus::Passing
+    );
+    assert_eq!(
+        statuses[&DoctorCheckId::GitHooksPathConfigured],
         DoctorStatus::Passing
     );
 }

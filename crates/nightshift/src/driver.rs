@@ -123,10 +123,44 @@ impl StateMachineDriver {
             })
             .unwrap_or_else(|| state_name.to_string());
 
+        // Look up the task for this role and inject its prompt as context.
+        let task_context = self
+            .template
+            .agents
+            .tasks
+            .iter()
+            .find(|t| t.role.as_deref() == Some(role.as_str()))
+            .and_then(|t| self.template.prompts.prompts.get(&t.name))
+            .cloned();
+
+        // Resolve template-defined next states for the current state.
+        let allowed_next_states: Option<Vec<WorkflowState>> = {
+            let nexts: Vec<WorkflowState> = self
+                .template
+                .state_machine
+                .transitions
+                .iter()
+                .filter(|t| t.from == state_name)
+                .filter_map(|t| WorkflowState::from_template_state_name(&t.to).ok())
+                .collect();
+            if nexts.is_empty() { None } else { Some(nexts) }
+        };
+
+        let config = {
+            let mut c = self.config.clone();
+            if task_context.is_some() {
+                c.task_context = task_context;
+            }
+            if allowed_next_states.is_some() {
+                c.allowed_next_states = allowed_next_states;
+            }
+            c
+        };
+
         let result = if let Some(exec) = &self.executor {
-            exec.run(&self.state_path, &role, &self.config)
+            exec.run(&self.state_path, &role, &config)
         } else {
-            run_supervised_session(&self.state_path, &role, &self.config)
+            run_supervised_session(&self.state_path, &role, &config)
         };
 
         match result {

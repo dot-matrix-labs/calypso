@@ -477,44 +477,49 @@ fn bfs_reachable<'a>(
 }
 
 /// Run the full state machine audit against the given repo root.
-pub fn run_audit(repo_root: &Path) -> StateMachineAudit {
+pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     let mut findings = Vec::new();
 
     // Scan .github/workflows/ for available GHA files
     let available_gha_files = scan_gha_directory(repo_root);
 
-    // 1) Audit blueprint workflows
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        let wf = match BlueprintWorkflowLibrary::parse(yaml) {
-            Ok(wf) => wf,
-            Err(e) => {
-                findings.push(AuditFinding {
-                    severity: AuditSeverity::Error,
-                    source: (*stem).to_string(),
-                    message: format!("failed to parse blueprint workflow: {e}"),
-                    suggestion: None,
-                });
-                continue;
-            }
-        };
+    // 1) Audit blueprint workflows — skipped in hello_world mode
+    if !is_hello_world {
+        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+            let wf = match BlueprintWorkflowLibrary::parse(yaml) {
+                Ok(wf) => wf,
+                Err(e) => {
+                    findings.push(AuditFinding {
+                        severity: AuditSeverity::Error,
+                        source: (*stem).to_string(),
+                        message: format!("failed to parse blueprint workflow: {e}"),
+                        suggestion: None,
+                    });
+                    continue;
+                }
+            };
 
-        audit_blueprint_workflow(stem, &wf, repo_root, &available_gha_files, &mut findings);
+            audit_blueprint_workflow(stem, &wf, repo_root, &available_gha_files, &mut findings);
+        }
     }
 
-    // 2) Audit policy gate paths from the default state machine template
-    if let Ok(template) = template::load_embedded_template_set() {
+    // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
+    if !is_hello_world && let Ok(template) = template::load_embedded_template_set() {
         audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
     }
 
     // 3) Unified workflow graph walk — reachability, dead branches, handoffs
-    let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
-            workflows.insert(stem.to_string(), wf);
+    // Skipped in hello_world mode to avoid auditing unused blueprints.
+    if !is_hello_world {
+        let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
+        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+            if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
+                workflows.insert(stem.to_string(), wf);
+            }
         }
+        let entry_roots = entry_point_roots(&workflows);
+        audit_workflow_graph(&entry_roots, &workflows, &mut findings);
     }
-    let entry_roots = entry_point_roots(&workflows);
-    audit_workflow_graph(&entry_roots, &workflows, &mut findings);
 
     StateMachineAudit { findings }
 }
@@ -1028,7 +1033,7 @@ mod tests {
         write_gha_file(&repo_root, "rust-coverage.yml", "Rust Coverage", &["test"]);
         write_gha_file(&repo_root, "release-cli.yml", "Release CLI", &["release"]);
 
-        let audit = run_audit(&repo_root);
+        let audit = run_audit(&repo_root, false);
 
         // Filter to only errors — there will be warnings for non-existent GHA files
         // referenced by other blueprint workflows (deployment, release, etc.)

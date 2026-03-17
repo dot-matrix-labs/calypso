@@ -19,6 +19,7 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 fn unique_tmpdir(prefix: &str) -> PathBuf {
     let id = COUNTER.fetch_add(1, Ordering::SeqCst);
     let path = std::env::temp_dir().join(format!("calypso-init-test-{prefix}-{id}"));
+    std::fs::remove_dir_all(&path).ok();
     std::fs::create_dir_all(&path).expect("tmpdir creation");
     path
 }
@@ -84,6 +85,7 @@ fn default_init_request(repo_path: PathBuf) -> InitRequest {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     }
 }
 
@@ -172,6 +174,10 @@ impl InitEnvironment for FakeEnv {
         self.remotes_set
             .borrow_mut()
             .push((path.to_path_buf(), url.to_string()));
+        Ok(())
+    }
+
+    fn configure_githooks(&self, _path: &Path) -> Result<(), InitError> {
         Ok(())
     }
 
@@ -316,6 +322,7 @@ fn reinit_with_flag_succeeds() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
 
     let result = init_repository(&request, &env).expect("reinit with flag should succeed");
@@ -333,6 +340,7 @@ fn provider_flag_sets_provider_in_written_state() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
 
     init_repository(&request, &env).expect("init should succeed");
@@ -409,6 +417,7 @@ fn real_init_creates_files_and_executable_hook() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     let result = init_repository(&request, &HostInitEnvironment).expect("real init should succeed");
 
@@ -431,7 +440,7 @@ fn real_init_creates_files_and_executable_hook() {
     assert!(dir.join(".calypso/prompts.yml").exists());
 
     // hook exists and is executable
-    let hook_path = dir.join(".git/hooks/pre-push");
+    let hook_path = dir.join(".githooks/pre-push");
     assert!(hook_path.exists(), "pre-push hook should exist");
     let metadata = std::fs::metadata(&hook_path).expect("hook metadata");
     let mode = metadata.permissions().mode();
@@ -456,9 +465,11 @@ fn real_init_state_machine_audit_passes() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     init_repository(&request, &HostInitEnvironment).expect("init should succeed");
-    scaffold_github_actions(&dir, &HostInitEnvironment).expect("scaffold workflows should succeed");
+    scaffold_github_actions(&dir, &HostInitEnvironment, false)
+        .expect("scaffold workflows should succeed");
 
     // Verify all blueprint-required workflow files were scaffolded
     let workflows_dir = dir.join(".github/workflows");
@@ -482,12 +493,12 @@ fn real_init_state_machine_audit_passes() {
 
     // Verify git hooks were installed
     assert!(
-        dir.join(".git/hooks/pre-push").exists(),
+        dir.join(".githooks/pre-push").exists(),
         "pre-push hook should exist"
     );
 
     // Run state machine audit — must report zero errors
-    let result = calypso_cli::sm_audit::run_audit(&dir);
+    let result = calypso_cli::sm_audit::run_audit(&dir, false);
     assert_eq!(
         result.error_count(),
         0,
@@ -509,6 +520,7 @@ fn real_init_non_git_dir_returns_error() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     let err =
         init_repository(&request, &HostInitEnvironment).expect_err("should fail on non-git dir");
@@ -528,6 +540,7 @@ fn real_init_non_github_remote_returns_error() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     let err = init_repository(&request, &HostInitEnvironment)
         .expect_err("should fail for non-github remote");
@@ -548,6 +561,7 @@ fn real_reinit_without_flag_fails_with_allow_reinit_succeeds() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     init_repository(&request, &HostInitEnvironment).expect("first init");
 
@@ -564,6 +578,7 @@ fn real_reinit_without_flag_fails_with_allow_reinit_succeeds() {
         create_git_repo: false,
         github_org: None,
         github_repo_name: None,
+        hello_world: false,
     };
     init_repository(&request2, &HostInitEnvironment).expect("reinit with flag should succeed");
 
@@ -728,7 +743,8 @@ fn scaffold_github_actions_writes_three_workflow_files() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/repo");
 
-    let scaffolded = scaffold_github_actions(&repo_path, &env).expect("scaffold should succeed");
+    let scaffolded =
+        scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
     assert_eq!(workflows.len(), 10, "should scaffold 10 workflow files");
@@ -779,7 +795,8 @@ fn scaffold_github_actions_skips_existing_workflow_files() {
             .join("pr-checklist.yml"),
     );
 
-    let scaffolded = scaffold_github_actions(&repo_path, &env).expect("scaffold should succeed");
+    let scaffolded =
+        scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
     assert_eq!(
@@ -842,8 +859,8 @@ fn run_init_interactive_with_existing_git_and_github_remote_succeeds() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/repo");
 
-    let progress =
-        run_init_interactive(&repo_path, false, &env).expect("interactive init should succeed");
+    let progress = run_init_interactive(&repo_path, false, &env, false)
+        .expect("interactive init should succeed");
 
     assert!(progress.current_step.is_complete(), "should reach Complete");
     assert!(progress.is_step_done(&InitStep::PromptDirectory));
@@ -863,7 +880,7 @@ fn run_init_interactive_calls_git_init_when_not_a_git_repo() {
     let repo_path = PathBuf::from("/fake/fresh");
 
     // Will fail at configure-local (no GitHub remote), but git_init is called
-    let _result = run_init_interactive(&repo_path, false, &env);
+    let _result = run_init_interactive(&repo_path, false, &env, false);
 
     let git_inits = env.git_inits.borrow();
     assert!(
@@ -877,7 +894,7 @@ fn run_init_interactive_does_not_call_git_init_when_already_a_git_repo() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/existing-git");
 
-    run_init_interactive(&repo_path, false, &env).expect("interactive init should succeed");
+    run_init_interactive(&repo_path, false, &env, false).expect("interactive init should succeed");
 
     let git_inits = env.git_inits.borrow();
     assert!(
@@ -891,7 +908,7 @@ fn run_init_interactive_scaffolds_workflow_files() {
     let env = FakeEnv::default().with_github_remote();
     let repo_path = PathBuf::from("/fake/scaffold-test");
 
-    run_init_interactive(&repo_path, false, &env).expect("interactive init should succeed");
+    run_init_interactive(&repo_path, false, &env, false).expect("interactive init should succeed");
 
     let workflows = env.workflows_written.borrow();
     assert!(!workflows.is_empty(), "workflow files should be scaffolded");

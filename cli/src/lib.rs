@@ -59,6 +59,7 @@ Commands:
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
   init --json         Initialise and output results as JSON
+  init --hello-world  Initialise with a minimalist hello-world example
   init --status       Show current init state machine progress
   init --step <step>  Manually trigger a specific init step
   init --refresh      Refresh/overwrite GitHub Actions workflow files

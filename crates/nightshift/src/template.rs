@@ -354,6 +354,26 @@ fn merge_yaml_strings(base_yaml: &str, override_yaml: &str) -> Result<String, Te
     serde_yaml::to_string(&base).map_err(TemplateError::Yaml)
 }
 
+/// Load a project's `.calypso/` templates directly, without merging with embedded defaults.
+///
+/// Falls back to the embedded defaults if none of the project files exist.
+pub fn load_project_template_set(repo_root: &Path) -> Result<TemplateSet, TemplateError> {
+    let sm_path = repo_root.join(DOT_CALYPSO_STATE_MACHINE_FILE);
+    let agents_path = repo_root.join(DOT_CALYPSO_AGENTS_FILE);
+    let prompts_path = repo_root.join(DOT_CALYPSO_PROMPTS_FILE);
+
+    let all_exist = sm_path.exists() && agents_path.exists() && prompts_path.exists();
+    if !all_exist {
+        return load_embedded_template_set();
+    }
+
+    let state_machine_yaml = fs::read_to_string(&sm_path).map_err(TemplateError::Io)?;
+    let agents_yaml = fs::read_to_string(&agents_path).map_err(TemplateError::Io)?;
+    let prompts_yaml = fs::read_to_string(&prompts_path).map_err(TemplateError::Io)?;
+
+    TemplateSet::from_yaml_strings(&state_machine_yaml, &agents_yaml, &prompts_yaml)
+}
+
 pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
     TemplateSet::from_yaml_strings(
         DEFAULT_STATE_MACHINE_YAML,
@@ -463,6 +483,14 @@ pub struct StateMachineTemplate {
     pub feature_unit: Option<FeatureUnitConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub artifact_policies: Option<ArtifactPolicies>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub on: Option<OnConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OnConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cron: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

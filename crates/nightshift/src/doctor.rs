@@ -33,6 +33,7 @@ pub enum DoctorCheckId {
     GhAuthenticated,
     GithubRemoteConfigured,
     RequiredWorkflowFilesPresent,
+    GitHooksPathConfigured,
     RequiredGitHooksInstalled,
     StateMachineIntegrity,
 }
@@ -69,6 +70,7 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredWorkflowFilesPresent => {
                 "builtin.doctor.required_workflows_present"
             }
+            DoctorCheckId::GitHooksPathConfigured => "builtin.doctor.git_hooks_path_configured",
             DoctorCheckId::RequiredGitHooksInstalled => {
                 "builtin.doctor.required_git_hooks_installed"
             }
@@ -85,6 +87,7 @@ impl DoctorCheckId {
             DoctorCheckId::GhAuthenticated => "gh-authenticated",
             DoctorCheckId::GithubRemoteConfigured => "github-remote-configured",
             DoctorCheckId::RequiredWorkflowFilesPresent => "required-workflows-present",
+            DoctorCheckId::GitHooksPathConfigured => "git-hooks-path-configured",
             DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
             DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
         }
@@ -178,6 +181,8 @@ pub trait DoctorEnvironment {
     /// Returns the names of git hooks from `REQUIRED_GIT_HOOKS` that are missing,
     /// not executable, or have content that differs from `scripts/hooks/<name>`.
     fn missing_git_hooks(&self, repo_root: &Path) -> Vec<String>;
+    /// Checks if core.hooksPath is configured to .githooks
+    fn git_hooks_path_configured(&self, repo_root: &Path) -> bool;
     /// Resolves the git hooks directory for the given repo root.
     fn git_hooks_path(&self, repo_root: &Path) -> Option<PathBuf>;
 }
@@ -290,6 +295,22 @@ impl DoctorEnvironment for HostDoctorEnvironment {
         missing
     }
 
+    fn git_hooks_path_configured(&self, repo_root: &Path) -> bool {
+        Command::new("git")
+            .args([
+                "-C",
+                &repo_root.to_string_lossy(),
+                "config",
+                "--get",
+                "core.hooksPath",
+            ])
+            .output()
+            .is_ok_and(|output| {
+                output.status.success()
+                    && String::from_utf8_lossy(&output.stdout).trim() == ".githooks"
+            })
+    }
+
     fn git_hooks_path(&self, repo_root: &Path) -> Option<PathBuf> {
         let output = Command::new("git")
             .args([
@@ -318,14 +339,29 @@ pub fn collect_doctor_report(
     repo_root: &Path,
 ) -> DoctorReport {
     let is_git = environment.is_git_repo(repo_root);
-    let mut missing_workflow_files = environment.missing_workflow_files(repo_root);
-    missing_workflow_files.sort();
-    let mut missing_git_hooks = environment.missing_git_hooks(repo_root);
-    missing_git_hooks.sort();
+    let is_hello_world = crate::init::InitProgress::load(repo_root)
+        .ok()
+        .flatten()
+        .map(|p| p.hello_world)
+        .unwrap_or(false);
+    let missing_workflow_files = if !is_hello_world {
+        let mut missing = environment.missing_workflow_files(repo_root);
+        missing.sort();
+        missing
+    } else {
+        Vec::new()
+    };
+    let missing_git_hooks = if !is_hello_world {
+        let mut missing = environment.missing_git_hooks(repo_root);
+        missing.sort();
+        missing
+    } else {
+        Vec::new()
+    };
     let hooks_path = environment
         .git_hooks_path(repo_root)
         .map(|p| p.to_string_lossy().into_owned());
-    let sm_audit = sm_audit::run_audit(repo_root);
+    let sm_audit = sm_audit::run_audit(repo_root, is_hello_world);
     // Only fetch the github user when it may be needed for fix construction.
     let github_user = if !environment.has_github_remote(repo_root) {
         environment.github_user()
@@ -393,6 +429,14 @@ pub fn collect_doctor_report(
                 DoctorCheckScope::LocalConfiguration,
                 missing_workflow_files.is_empty(),
                 (!missing_workflow_files.is_empty()).then_some(missing_workflow_files.join(", ")),
+                repo_root,
+                None,
+            ),
+            make_check(
+                DoctorCheckId::GitHooksPathConfigured,
+                DoctorCheckScope::LocalConfiguration,
+                environment.git_hooks_path_configured(repo_root),
+                None,
                 repo_root,
                 None,
             ),
@@ -616,6 +660,18 @@ fn failing_doctor_fix(
             ],
         }),
 
+        // Configure core.hooksPath
+        DoctorCheckId::GitHooksPathConfigured => Some(DoctorFix::RunCommand {
+            command: "git".to_string(),
+            args: vec![
+                "-C".to_string(),
+                repo_root.to_string_lossy().into_owned(),
+                "config".to_string(),
+                "core.hooksPath".to_string(),
+                ".githooks".to_string(),
+            ],
+        }),
+
         // Authentication can be triggered automatically.
         DoctorCheckId::GhAuthenticated => Some(DoctorFix::RunCommand {
             command: "gh".to_string(),
@@ -775,6 +831,9 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
             "Missing or outdated git hooks will be installed from scripts/hooks/: {}",
             detail.unwrap_or("unknown")
         )),
+        DoctorCheckId::GitHooksPathConfigured => Some(
+            "Will run `git config core.hooksPath .githooks` to configure the correct hooks directory.".to_string(),
+        ),
         DoctorCheckId::RequiredWorkflowFilesPresent => Some(format!(
             "Missing workflow files will be written and pushed: {}",
             detail.unwrap_or("unknown")

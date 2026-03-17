@@ -16,7 +16,7 @@ use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
 use crate::state::RepositoryState;
 use crate::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
-use crate::template::load_embedded_template_set;
+use crate::template::load_project_template_set;
 
 /// Configuration resolved from CLI flags when `--headless` is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +114,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     }
 
     // 6. Load or initialise state
-    let state_path = repo_root.join(".calypso").join("state.json");
+    let state_path = repo_root.join(".calypso").join("repository-state.json");
 
     let state = match RepositoryState::load_from_path(&state_path) {
         Ok(state) => {
@@ -171,7 +171,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     }
 
     // 8. Enter orchestrator loop (state machine driver)
-    let exit_code = run_driver_loop(logger, &state_path, &shutdown);
+    let exit_code = run_driver_loop(logger, &repo_root, &state_path, &shutdown);
 
     // 9. Log completion
     logger.log_event(
@@ -193,14 +193,15 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
 /// - 3: agent failure (provider error, agent aborted, unrecoverable execution failure)
 fn run_driver_loop(
     logger: &Logger,
+    repo_root: &Path,
     state_path: &Path,
     shutdown: &crate::signal::ShutdownSignal,
 ) -> i32 {
-    let template = match load_embedded_template_set() {
+    let template = match load_project_template_set(repo_root) {
         Ok(t) => t,
         Err(e) => {
             logger
-                .entry(LogLevel::Error, "failed to load embedded templates")
+                .entry(LogLevel::Error, "failed to load templates")
                 .component(Component::StateMachine)
                 .field("error", e.to_string())
                 .emit();
@@ -208,11 +209,19 @@ fn run_driver_loop(
         }
     };
 
+    let execution_config = ExecutionConfig {
+        claude: crate::claude::ClaudeConfig {
+            default_flags: vec!["--dangerously-skip-permissions".to_string()],
+            ..crate::claude::ClaudeConfig::default()
+        },
+        ..ExecutionConfig::default()
+    };
+
     let driver = StateMachineDriver {
         mode: DriverMode::Auto,
         state_path: state_path.to_path_buf(),
         template,
-        config: ExecutionConfig::default(),
+        config: execution_config,
         executor: None,
     };
 
@@ -390,11 +399,11 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
 /// Evaluate gates for the current feature state and log each result.
 /// Returns 0 on success, 2 on state machine error.
 fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &RepositoryState) -> i32 {
-    let template = match load_embedded_template_set() {
+    let template = match load_project_template_set(repo_root) {
         Ok(t) => t,
         Err(e) => {
             logger
-                .entry(LogLevel::Error, "failed to load embedded templates")
+                .entry(LogLevel::Error, "failed to load templates")
                 .component(Component::StateMachine)
                 .field("error", e.to_string())
                 .emit();
@@ -915,7 +924,7 @@ mod tests {
         let (shutdown, _tx) = quiet_shutdown();
 
         let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        let exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
         assert_eq!(exit, 2, "expected exit code 2 for invalid state path");
 
         let output = writer.contents();
@@ -935,7 +944,7 @@ mod tests {
         tx.send(crate::signal::SignalKind::Terminate).unwrap();
 
         let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        let exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
         assert_eq!(exit, 143, "expected SIGTERM exit code 143");
 
         let output = writer.contents();

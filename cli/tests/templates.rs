@@ -797,6 +797,7 @@ fn validate_coherence_returns_error_for_gate_referencing_nonexistent_task() {
             transitions: vec![],
             feature_unit: None,
             artifact_policies: None,
+            on: None,
         },
         agents: AgentCatalog {
             tasks: vec![AgentTask {
@@ -1100,6 +1101,7 @@ fn make_coherence_template() -> TemplateSet {
             transitions: vec![],
             feature_unit: None,
             artifact_policies: None,
+            on: None,
         },
         agents: AgentCatalog {
             tasks: vec![AgentTask {

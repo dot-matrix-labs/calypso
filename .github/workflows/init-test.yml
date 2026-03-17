@@ -1,0 +1,52 @@
+name: Init Integration Test
+
+on:
+  push:
+    branches: [ main, feat/hello-world-init ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test-init:
+    name: Test CLI Initialization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Build Calypso CLI
+        run: cargo build -p calypso-cli
+
+      - name: Test Default Initialization
+        run: |
+          mkdir -p $HOME/calypso-tests
+          TEST_PATH=$HOME/calypso-tests/test-default
+          # Initialize without hello-world (default)
+          ./target/debug/calypso-cli init --path "$TEST_PATH"
+          echo "🩺 Running Doctor on default init..."
+          ./target/debug/calypso-cli doctor --path "$TEST_PATH"
+
+      - name: Test Hello World Initialization
+        run: |
+          TEST_PATH=$HOME/calypso-tests/test-hello-world
+          # Initialize with hello-world
+          ./target/debug/calypso-cli init --path "$TEST_PATH" --hello-world
+          echo "🩺 Running Doctor on hello-world init..."
+          ./target/debug/calypso-cli doctor --path "$TEST_PATH"
+          
+          echo "🌍 Verifying hello-world files existence..."
+          # Verify the specific files created in hello-world mode
+          test -f "$TEST_PATH/.calypso/state-machine.yml"
+          test -f "$TEST_PATH/.github/workflows/hello-world.yml"
+          test -f "$TEST_PATH/.githooks/pre-commit"
+          # Ensure hook is executable
+          test -x "$TEST_PATH/.githooks/pre-commit"
+          
+          echo "✅ Hello-world files verified."
