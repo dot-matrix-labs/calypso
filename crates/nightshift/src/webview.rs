@@ -162,11 +162,12 @@ fn read_state_json(cwd: &Path) -> String {
         .map(|s| s.to_string());
 
     // Determine transitions and kind for the active state.
+    // Priority: local .calypso/workflows/ files first, then the embedded library.
     let (active_transitions, active_state_kind) = if let (Some(wf_name), Some(state_name)) = (
         active_workflow_name.as_deref(),
         active_state_name.as_deref(),
     ) {
-        resolve_active_state_info(wf_name, state_name)
+        resolve_active_state_info_with_local(&calypso_dir.join("workflows"), wf_name, state_name)
     } else {
         (vec![], None)
     };
@@ -241,6 +242,75 @@ fn collect_cron_workflows() -> Vec<Value> {
         }
     }
     result
+}
+
+/// Like `resolve_active_state_info` but checks local YAML files in `workflows_dir` first.
+///
+/// Tries every `.yml` / `.yaml` file whose stem matches `workflow_name` (or whose
+/// `name:` field matches). Falls back to the embedded blueprint library.
+fn resolve_active_state_info_with_local(
+    workflows_dir: &Path,
+    workflow_name: &str,
+    state_name: &str,
+) -> (Vec<String>, Option<String>) {
+    use crate::blueprint_workflows::BlueprintWorkflowLibrary;
+
+    // Try local files first.
+    if let Ok(entries) = std::fs::read_dir(workflows_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_yaml = path
+                .extension()
+                .map(|e| e == "yml" || e == "yaml")
+                .unwrap_or(false);
+            if !is_yaml {
+                continue;
+            }
+            let yaml = match std::fs::read_to_string(&path) {
+                Ok(y) => y,
+                Err(_) => continue,
+            };
+            let wf = match BlueprintWorkflowLibrary::parse(&yaml) {
+                Ok(w) => w,
+                Err(_) => continue,
+            };
+            // Match by name field or by file stem.
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            let matches = wf.name.as_deref() == Some(workflow_name) || stem == workflow_name;
+            if !matches {
+                continue;
+            }
+            if let Some(state) = wf.states.get(state_name) {
+                let kind = state.kind.as_ref().map(|k| {
+                    use crate::blueprint_workflows::StateKind;
+                    match k {
+                        StateKind::Deterministic => "deterministic",
+                        StateKind::Agent => "agent",
+                        StateKind::Human => "human",
+                        StateKind::Github => "github",
+                        StateKind::Function => "function",
+                        StateKind::Workflow => "workflow",
+                        StateKind::Terminal => "terminal",
+                        StateKind::GitHook => "git-hook",
+                        StateKind::Ci => "ci",
+                    }
+                    .to_string()
+                });
+                let transitions = state
+                    .next
+                    .as_ref()
+                    .map(|n| n.all_event_keys().iter().map(|s| s.to_string()).collect())
+                    .unwrap_or_default();
+                return (transitions, kind);
+            }
+        }
+    }
+
+    // Fall back to the embedded library.
+    resolve_active_state_info(workflow_name, state_name)
 }
 
 /// Given a workflow name and state name, return (transitions, kind) for that state.
