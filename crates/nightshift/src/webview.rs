@@ -544,4 +544,154 @@ mod tests {
             resolve_active_state_info("calypso-default-feature-workflow", "write-failing-tests");
         assert!(kind.is_some(), "expected a kind for write-failing-tests");
     }
+
+    // ── resolve_active_state_info_with_local tests ───────────────────────────
+
+    #[test]
+    fn resolve_active_state_info_with_local_falls_back_to_embedded_when_no_local_dir() {
+        let tmp = std::env::temp_dir().join("calypso-webview-local-no-dir");
+        let workflows_dir = tmp.join("no-such-dir");
+        // No local dir — should fall back to embedded library.
+        let (_transitions, kind) = resolve_active_state_info_with_local(
+            &workflows_dir,
+            "calypso-default-feature-workflow",
+            "write-failing-tests",
+        );
+        assert!(kind.is_some());
+    }
+
+    #[test]
+    fn resolve_active_state_info_with_local_matches_local_yml_file() {
+        let tmp = std::env::temp_dir().join("calypso-webview-local-yml");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        // Write a minimal workflow YAML with a known state.
+        let yaml = r#"
+name: my-local-workflow
+states:
+  review:
+    kind: human
+    next:
+      on:
+        approve: deploy
+        reject: review
+  deploy:
+    kind: deterministic
+"#;
+        std::fs::write(workflows_dir.join("my-local-workflow.yml"), yaml).unwrap();
+
+        let (transitions, kind) =
+            resolve_active_state_info_with_local(&workflows_dir, "my-local-workflow", "review");
+        assert_eq!(kind.as_deref(), Some("human"));
+        assert!(
+            transitions.contains(&"approve".to_string()),
+            "expected approve transition"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn resolve_active_state_info_with_local_skips_non_yaml_files() {
+        let tmp = std::env::temp_dir().join("calypso-webview-local-skip");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        // Write a non-YAML file that should be ignored.
+        std::fs::write(workflows_dir.join("readme.txt"), "not yaml").unwrap();
+        // Write a YAML that does NOT match the requested workflow.
+        let yaml = "name: other-workflow\nstates:\n  start:\n    kind: agent\n";
+        std::fs::write(workflows_dir.join("other-workflow.yml"), yaml).unwrap();
+
+        // Should fall back to embedded library since no match.
+        let (transitions, kind) = resolve_active_state_info_with_local(
+            &workflows_dir,
+            "calypso-default-feature-workflow",
+            "write-failing-tests",
+        );
+        assert!(kind.is_some(), "expected embedded library fallback");
+        assert!(!transitions.is_empty() || kind.is_some());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── public_ip test ────────────────────────────────────────────────────────
+
+    #[test]
+    fn public_ip_does_not_panic_and_returns_valid_address() {
+        // The function either returns a valid IPv4 address or None (e.g. in
+        // offline environments). It must never panic.
+        let ip = public_ip();
+        if let Some(addr) = ip {
+            // Must not be an unspecified address.
+            assert!(!addr.is_unspecified(), "public_ip returned 0.0.0.0");
+        }
+    }
+
+    // ── StateKind variants and parse-error path ───────────────────────────────
+
+    #[test]
+    fn resolve_active_state_info_with_local_covers_state_kind_variants() {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = std::env::temp_dir().join(format!("calypso-webview-kinds-{nanos}"));
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        // An invalid YAML file — forces line 275 (parse-error continue path).
+        std::fs::write(workflows_dir.join("aaa-broken.yml"), "{unclosed").unwrap();
+
+        // Workflow with deterministic, agent, and github states.
+        let yaml = "name: kind-test\nstates:\n  s1:\n    kind: deterministic\n  s2:\n    kind: agent\n  s3:\n    kind: github\n";
+        std::fs::write(workflows_dir.join("kind-test.yml"), yaml).unwrap();
+
+        let (_, k1) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s1");
+        assert_eq!(k1.as_deref(), Some("deterministic"));
+        let (_, k2) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s2");
+        assert_eq!(k2.as_deref(), Some("agent"));
+        let (_, k3) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s3");
+        assert_eq!(k3.as_deref(), Some("github"));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── handle_connection test ────────────────────────────────────────────────
+
+    #[test]
+    fn handle_connection_returns_html_for_get_root() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let tmp = std::env::temp_dir().join("calypso-webview-handle-conn");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+
+        // Bind a listener on a random port, connect a client, hand the server
+        // side off to handle_connection(), then read the response.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cwd = tmp.clone();
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(stream, &cwd);
+        });
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client
+            .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        handle.join().unwrap();
+
+        assert!(response.contains("200 OK"), "expected 200 OK in response");
+        assert!(
+            response.contains("text/html"),
+            "expected text/html content type"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

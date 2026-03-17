@@ -2411,7 +2411,7 @@ impl WorkflowGraphView {
                                     .collect::<Vec<_>>()
                                     .join("  ·  ");
                                 rows.push(GvRow {
-                                    text: format!("  │     {}", trans_str),
+                                    text: format!("  │     {trans_str}"),
                                     indicator_col: None,
                                     is_active: false,
                                     is_selectable: false,
@@ -2455,7 +2455,7 @@ impl WorkflowGraphView {
                         .collect::<Vec<_>>()
                         .join("  ·  ");
                     rows.push(GvRow {
-                        text: format!("     {}", trans_str),
+                        text: format!("     {trans_str}"),
                         indicator_col: None,
                         is_active: false,
                         is_selectable: false,

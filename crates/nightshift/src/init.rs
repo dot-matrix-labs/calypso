@@ -1790,4 +1790,67 @@ mod tests {
         let json = serde_json::to_string(&RepoInitStatus::FullyConfigured).unwrap();
         assert_eq!(json, "\"fully-configured\"");
     }
+
+    // ── InitError Display ─────────────────────────────────────────────────────
+
+    #[test]
+    fn init_error_display_git_command_failed() {
+        let err = InitError::git("git fetch", "connection refused");
+        assert!(err.to_string().contains("git fetch"));
+        assert!(err.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn init_error_display_io() {
+        let err = InitError::Io(std::io::Error::new(std::io::ErrorKind::NotFound, "no file"));
+        assert!(err.to_string().contains("init I/O error"));
+    }
+
+    #[test]
+    fn init_error_display_not_a_git_repo() {
+        let err = InitError::NotAGitRepo {
+            path: PathBuf::from("/some/path"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("/some/path"), "got: {msg}");
+        assert!(msg.contains("not a git repository"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_not_a_github_remote() {
+        let err = InitError::NotAGithubRemote {
+            url: "https://gitlab.com/foo/bar.git".to_string(),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains("gitlab.com"), "got: {msg}");
+        assert!(msg.contains("not a GitHub URL"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_already_initialized() {
+        let err = InitError::AlreadyInitialized {
+            calypso_dir: PathBuf::from("/repo/.calypso"),
+        };
+        let msg = err.to_string();
+        assert!(msg.contains(".calypso"), "got: {msg}");
+        assert!(msg.contains("already exists"), "got: {msg}");
+    }
+
+    #[test]
+    fn init_error_display_state_serialize() {
+        // Produce a serde_json::Error by trying to serialize an invalid value.
+        let e: serde_json::Error =
+            serde_json::from_str::<serde_json::Value>("{{invalid}}").unwrap_err();
+        let err = InitError::StateSerialize(e);
+        assert!(
+            err.to_string().contains("failed to serialise"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn init_error_is_std_error() {
+        let err = InitError::git("op", "details");
+        let _: &dyn std::error::Error = &err;
+    }
 }
