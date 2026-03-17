@@ -20,12 +20,22 @@ subsystem" or "exclude phase 3"). If empty, replan everything.
 
 ---
 
+## Setup
+
+Before running any `gh` issue commands, detect the tasks repository:
+
+```bash
+TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name) + "-tasks"')
+```
+
+---
+
 ## Phase 1: Gather all open issues
 
 ### Step 1: Find the Plan tracking issue
 
 ```bash
-gh issue list --repo sduvignau/calypso-tasks --search "Plan" --state open --json number,title
+gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
 ```
 
 Identify the issue with the exact title "Plan".
@@ -33,7 +43,7 @@ Identify the issue with the exact title "Plan".
 ### Step 2: Read the Plan
 
 ```bash
-gh issue view {plan-issue-number} --repo sduvignau/calypso-tasks --json body -q .body
+gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body
 ```
 
 Extract every issue reference (`#{number}`) from the plan body. These are the
@@ -44,13 +54,13 @@ issues under active planning.
 For each issue number found in the plan, and also:
 
 ```bash
-gh issue list --repo sduvignau/calypso-tasks --state open --json number,title,body --limit 100
+gh issue list --repo {tasks-repo} --state open --json number,title,body --limit 100
 ```
 
 Read the full body of every open issue:
 
 ```bash
-gh issue view {issue-number} --repo sduvignau/calypso-tasks --json number,title,body,state -q '{number,title,body,state}'
+gh issue view {issue-number} --repo {tasks-repo} --json number,title,body,state -q '{number,title,body,state}'
 ```
 
 Build an in-memory map: `issue_number → { title, body, dependencies: [], dependents: [] }`.
@@ -148,13 +158,13 @@ assignment and scope tagging. Apply both a title prefix and a GitHub label.
 For each batch number N in the new plan, ensure the label `batch-N` exists:
 
 ```bash
-gh label list --repo sduvignau/calypso-tasks --json name -q '.[].name'
+gh label list --repo {tasks-repo} --json name -q '.[].name'
 ```
 
 Create any missing labels:
 
 ```bash
-gh label create batch-{N} --repo sduvignau/calypso-tasks --color "0075ca" --description "Batch {N} in the current plan"
+gh label create batch-{N} --repo {tasks-repo} --color "0075ca" --description "Batch {N} in the current plan"
 ```
 
 ### Step 2: Update issue titles
@@ -172,7 +182,7 @@ If the title already starts with one of these prefixes, leave it as-is. If it do
 not, prepend the appropriate prefix based on the issue content.
 
 ```bash
-gh issue edit {issue-number} --repo sduvignau/calypso-tasks --title "{new-title}"
+gh issue edit {issue-number} --repo {tasks-repo} --title "{new-title}"
 ```
 
 Only update the title if it actually changes. Show the user what will change before
@@ -185,10 +195,10 @@ its new batch assignment:
 
 ```bash
 # Remove stale batch labels
-gh issue edit {issue-number} --repo sduvignau/calypso-tasks --remove-label "batch-{old}"
+gh issue edit {issue-number} --repo {tasks-repo} --remove-label "batch-{old}"
 
 # Apply current batch label
-gh issue edit {issue-number} --repo sduvignau/calypso-tasks --add-label "batch-{N}"
+gh issue edit {issue-number} --repo {tasks-repo} --add-label "batch-{N}"
 ```
 
 If an issue has moved batches since the last replan, note this in the Phase 7 report.
@@ -222,7 +232,7 @@ None.
 Update each issue:
 
 ```bash
-gh issue edit {issue-number} --repo sduvignau/calypso-tasks --body "{updated body}"
+gh issue edit {issue-number} --repo {tasks-repo} --body "{updated body}"
 ```
 
 **IMPORTANT:**
@@ -265,7 +275,7 @@ Rules for the rewritten plan:
 Show the user the full proposed new body before editing. Ask for confirmation.
 
 ```bash
-gh issue edit {plan-issue-number} --repo sduvignau/calypso-tasks --body "{new body}"
+gh issue edit {plan-issue-number} --repo {tasks-repo} --body "{new body}"
 ```
 
 ---
