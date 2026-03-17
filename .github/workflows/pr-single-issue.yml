@@ -1,0 +1,69 @@
+name: PR single issue
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  merge_group:
+
+jobs:
+  single-issue:
+    name: single-issue
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require exactly one closing issue reference
+        uses: actions/github-script@v7
+        with:
+          script: |
+            if (!context.payload.pull_request) {
+              core.info('merge_group context — skipping single-issue check.');
+              return;
+            }
+
+            const body = context.payload.pull_request.body || '';
+
+            // Match closing keywords that GitHub recognises for auto-close on merge.
+            // Must appear at the start of a line (GitHub requirement for auto-close).
+            const closingPattern = /^(?:closes|fixes|resolves)\s+#(\d+)/gim;
+            const closingMatches = [...body.matchAll(closingPattern)];
+            const closingIssues = closingMatches.map(m => parseInt(m[1], 10));
+
+            // Also detect any bare issue references (#N) that are NOT closing keywords,
+            // so we can give a precise error when someone writes "related to #N" etc.
+            const anyRefPattern = /#(\d+)/g;
+            const allRefs = [...body.matchAll(anyRefPattern)].map(m => parseInt(m[1], 10));
+            const nonClosingRefs = allRefs.filter(n => !closingIssues.includes(n));
+
+            if (closingIssues.length === 0) {
+              core.setFailed(
+                `PR description must close exactly one issue.\n\n` +
+                `No closing reference found. Add a line such as:\n` +
+                `  Closes #<issue-number>\n\n` +
+                `Use "Closes", "Fixes", or "Resolves" at the start of a line so GitHub ` +
+                `automatically closes the issue when this PR is merged.`
+              );
+              return;
+            }
+
+            if (closingIssues.length > 1) {
+              core.setFailed(
+                `PR description must close exactly one issue, but found ${closingIssues.length}: ` +
+                closingIssues.map(n => `#${n}`).join(', ') + `.\n\n` +
+                `Each PR must deliver exactly one issue (1:1:1 — one issue, one branch, one PR). ` +
+                `Split this PR into separate branches if it addresses multiple issues.`
+              );
+              return;
+            }
+
+            if (nonClosingRefs.length > 0) {
+              core.setFailed(
+                `PR description references ${nonClosingRefs.map(n => '#' + n).join(', ')} without a closing keyword.\n\n` +
+                `A PR may only reference issues it closes. Remove non-closing references, or ` +
+                `confirm this PR closes #${closingIssues[0]} and nothing else.\n\n` +
+                `If you need to note a related issue, put that in a comment on the issue itself, ` +
+                `not in the PR description.`
+              );
+              return;
+            }
+
+            core.info(`PR correctly closes exactly one issue: #${closingIssues[0]}.`);
