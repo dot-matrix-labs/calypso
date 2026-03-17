@@ -1661,6 +1661,32 @@ fn topo_order_states(
     ordered
 }
 
+/// Build outgoing transitions for a state, marking back-edges.
+/// A transition is a back-edge if its target appears earlier in the topological order.
+fn build_transitions(
+    state_name: &str,
+    ordered: &[String],
+    cfg: Option<&crate::blueprint_workflows::StateConfig>,
+) -> Vec<(String, String, bool)> {
+    let Some(next) = cfg.and_then(|c| c.next.as_ref()) else {
+        return Vec::new();
+    };
+    let state_pos = ordered.iter().position(|n| n == state_name);
+    next.all_event_keys()
+        .into_iter()
+        .filter_map(|key| {
+            next.target_for(key).map(|target| {
+                let target_pos = ordered.iter().position(|n| n == target);
+                let is_back = match (state_pos, target_pos) {
+                    (Some(s), Some(t)) => t <= s,
+                    _ => false,
+                };
+                (key.to_string(), target.to_string(), is_back)
+            })
+        })
+        .collect()
+}
+
 /// Interactive workflow navigator showing entry points and their states.
 ///
 /// Top-level rows are workflow entry points discovered from the embedded blueprints.
@@ -2079,6 +2105,552 @@ impl WorkflowNavigator {
     /// Returns the number of entry point workflows.
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+}
+
+// ── Workflow Graph View ─────────────────────────────────────────────────────
+
+/// A state within a sub-workflow, for display inside an expanded box.
+#[derive(Debug, Clone)]
+struct GvSubState {
+    name: String,
+    kind: Option<StateKind>,
+    /// Outgoing transitions: (event_key, target_name, is_back_edge).
+    transitions: Vec<(String, String, bool)>,
+}
+
+/// A node (state) in the workflow graph.
+#[derive(Debug, Clone)]
+struct GvStateNode {
+    name: String,
+    kind: Option<StateKind>,
+    /// Outgoing transitions: (event_key, target_name, is_back_edge).
+    transitions: Vec<(String, String, bool)>,
+    /// Sub-workflow info when kind == Workflow: (sub_workflow_name, ordered states).
+    sub_workflow: Option<(String, Vec<GvSubState>)>,
+}
+
+/// A cron-triggered workflow entry in the graph.
+#[derive(Debug, Clone)]
+struct GvEntry {
+    workflow_name: String,
+    cron: String,
+    nodes: Vec<GvStateNode>,
+}
+
+/// An action triggered when the user presses Enter on a selectable row.
+#[derive(Debug, Clone)]
+enum GvAction {
+    ToggleEntry(usize),
+    ToggleBox { entry: usize, state_name: String },
+}
+
+/// A flat rendered row (one terminal line) in the graph view.
+#[derive(Debug, Clone)]
+struct GvRow {
+    /// Display text (without ANSI codes; used for char-width calculation).
+    text: String,
+    /// Char offset (0-indexed) of the node indicator (○/●) within `text`, if any.
+    indicator_col: Option<usize>,
+    /// Whether this row represents the active workflow position.
+    is_active: bool,
+    /// Whether the cursor (▶) can land on this row.
+    is_selectable: bool,
+    /// Action performed when Enter is pressed.
+    action: Option<GvAction>,
+}
+
+/// Graph-style workflow view. Shows only cron-triggered entry points; states are
+/// connected by vertical lines and sub-workflows appear as expandable bordered boxes.
+pub struct WorkflowGraphView {
+    entries: Vec<GvEntry>,
+    active_workflow: Option<String>,
+    active_state: Option<String>,
+    /// Which cron workflow entries are expanded (showing their states).
+    expanded_entries: std::collections::BTreeSet<usize>,
+    /// Which sub-workflow boxes are expanded: (entry_idx, parent_state_name).
+    expanded_boxes: std::collections::BTreeSet<(usize, String)>,
+    selected: usize,
+    scroll: usize,
+}
+
+impl Default for WorkflowGraphView {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WorkflowGraphView {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            active_workflow: None,
+            active_state: None,
+            expanded_entries: std::collections::BTreeSet::new(),
+            expanded_boxes: std::collections::BTreeSet::new(),
+            selected: 0,
+            scroll: 0,
+        }
+    }
+
+    /// Build the graph view from embedded blueprint workflows, keeping only cron entries.
+    pub fn from_interpreter(interp: &WorkflowInterpreter) -> Self {
+        let mut entries = Vec::new();
+
+        for ep in &interp.entry_points() {
+            let EntryPoint::CronScheduled { workflow, cron, .. } = ep else {
+                continue;
+            };
+            let Some(wf) = interp.registry.get(workflow) else {
+                continue;
+            };
+
+            let ordered = topo_order_states(wf.initial_state.as_deref(), &wf.states);
+
+            let nodes = ordered
+                .iter()
+                .map(|state_name| {
+                    let cfg = wf.states.get(state_name);
+                    let kind = cfg.and_then(|c| c.kind.clone());
+                    let transitions = build_transitions(state_name, &ordered, cfg);
+
+                    let sub_workflow = if matches!(kind, Some(StateKind::Workflow)) {
+                        cfg.and_then(|c| c.workflow.as_deref())
+                            .and_then(|sub_name| {
+                                interp.registry.get(sub_name).map(|sub_wf| {
+                                    let sub_ordered = topo_order_states(
+                                        sub_wf.initial_state.as_deref(),
+                                        &sub_wf.states,
+                                    );
+                                    let sub_nodes = sub_ordered
+                                        .iter()
+                                        .map(|sub_state_name| {
+                                            let sub_cfg = sub_wf.states.get(sub_state_name);
+                                            let sub_kind = sub_cfg.and_then(|c| c.kind.clone());
+                                            let sub_transitions = build_transitions(
+                                                sub_state_name,
+                                                &sub_ordered,
+                                                sub_cfg,
+                                            );
+                                            GvSubState {
+                                                name: sub_state_name.clone(),
+                                                kind: sub_kind,
+                                                transitions: sub_transitions,
+                                            }
+                                        })
+                                        .collect();
+                                    (sub_name.to_string(), sub_nodes)
+                                })
+                            })
+                    } else {
+                        None
+                    };
+
+                    GvStateNode {
+                        name: state_name.clone(),
+                        kind,
+                        transitions,
+                        sub_workflow,
+                    }
+                })
+                .collect();
+
+            entries.push(GvEntry {
+                workflow_name: workflow.clone(),
+                cron: cron.clone(),
+                nodes,
+            });
+        }
+
+        Self {
+            entries,
+            active_workflow: None,
+            active_state: None,
+            expanded_entries: std::collections::BTreeSet::new(),
+            expanded_boxes: std::collections::BTreeSet::new(),
+            selected: 0,
+            scroll: 0,
+        }
+    }
+
+    /// Set the active execution position (highlights the current state in blue).
+    pub fn set_active_position(&mut self, exec: &WorkflowExecutionState) {
+        self.active_workflow = Some(exec.position.workflow.clone());
+        self.active_state = Some(exec.position.state.clone());
+
+        // Auto-expand the entry containing the active workflow.
+        for (i, entry) in self.entries.iter().enumerate() {
+            if entry.workflow_name == exec.position.workflow {
+                self.expanded_entries.insert(i);
+                break;
+            }
+        }
+
+        // Move cursor to the active state row.
+        let rows = self.visible_rows();
+        if let Some(pos) = rows.iter().position(|r| r.is_active && r.is_selectable) {
+            self.selected = pos;
+            self.adjust_scroll(rows.len());
+        }
+    }
+
+    /// Returns the number of cron entry workflows.
+    pub fn entry_count(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Compute the flat list of visible rows given the current expansion state.
+    fn visible_rows(&self) -> Vec<GvRow> {
+        let mut rows: Vec<GvRow> = Vec::new();
+
+        for (ei, entry) in self.entries.iter().enumerate() {
+            let is_expanded = self.expanded_entries.contains(&ei);
+
+            // ── Entry header (cron root node, always visible) ─────────────
+            let expand_icon = if is_expanded { "▾" } else { "▸" };
+            rows.push(GvRow {
+                text: format!(
+                    "  {}  ⏱  {}  ·  cron: {}",
+                    expand_icon, entry.workflow_name, entry.cron
+                ),
+                indicator_col: None,
+                is_active: false,
+                is_selectable: true,
+                action: Some(GvAction::ToggleEntry(ei)),
+            });
+
+            if !is_expanded {
+                continue;
+            }
+
+            for node in &entry.nodes {
+                let is_active = self
+                    .active_workflow
+                    .as_deref()
+                    .is_some_and(|w| w == entry.workflow_name)
+                    && self.active_state.as_deref().is_some_and(|s| s == node.name);
+
+                // ── Vertical connector before the state ───────────────────
+                rows.push(GvRow {
+                    text: "  │".to_string(),
+                    indicator_col: None,
+                    is_active: false,
+                    is_selectable: false,
+                    action: None,
+                });
+
+                // ── State node row ────────────────────────────────────────
+                // Layout: "  ○  <name>  <kind-icon>"
+                // indicator_col = 2 (the ○/● is at offset 2 in `text`)
+                let node_icon = if is_active { "●" } else { "○" };
+                let kind_icon = state_kind_icon(&node.kind);
+                rows.push(GvRow {
+                    text: format!("  {}  {}  {}", node_icon, node.name, kind_icon),
+                    indicator_col: Some(2),
+                    is_active,
+                    is_selectable: true,
+                    action: None,
+                });
+
+                // ── Sub-workflow box (when kind == Workflow) ──────────────
+                if let Some((sub_wf_name, sub_states)) = &node.sub_workflow {
+                    let box_expanded = self.expanded_boxes.contains(&(ei, node.name.clone()));
+                    let expand_icon = if box_expanded { "▾" } else { "▸" };
+
+                    // Box header — selectable, toggles expansion.
+                    rows.push(GvRow {
+                        text: format!("  ┌─ {} [{}] {} ──", node.name, sub_wf_name, expand_icon),
+                        indicator_col: None,
+                        is_active: false,
+                        is_selectable: true,
+                        action: Some(GvAction::ToggleBox {
+                            entry: ei,
+                            state_name: node.name.clone(),
+                        }),
+                    });
+
+                    if box_expanded {
+                        for (si, sub) in sub_states.iter().enumerate() {
+                            if si > 0 {
+                                rows.push(GvRow {
+                                    text: "  │  │".to_string(),
+                                    indicator_col: None,
+                                    is_active: false,
+                                    is_selectable: false,
+                                    action: None,
+                                });
+                            }
+
+                            let sub_active =
+                                self.active_state.as_deref().is_some_and(|s| s == sub.name);
+                            let sub_icon = if sub_active { "●" } else { "○" };
+                            let sub_kind_icon = state_kind_icon(&sub.kind);
+
+                            // "  │  ○  sub-name  kind-icon"
+                            // indicator_col = 5 (after "  │  ")
+                            rows.push(GvRow {
+                                text: format!("  │  {}  {}  {}", sub_icon, sub.name, sub_kind_icon),
+                                indicator_col: Some(5),
+                                is_active: sub_active,
+                                is_selectable: false,
+                                action: None,
+                            });
+
+                            // Condensed transition summary for this sub-state.
+                            if !sub.transitions.is_empty() {
+                                let trans_str: String = sub
+                                    .transitions
+                                    .iter()
+                                    .map(|(evt, tgt, back)| {
+                                        if *back {
+                                            format!("{evt} ↩ {tgt}")
+                                        } else {
+                                            format!("{evt} → {tgt}")
+                                        }
+                                    })
+                                    .collect::<Vec<_>>()
+                                    .join("  ·  ");
+                                rows.push(GvRow {
+                                    text: format!("  │     {}", trans_str),
+                                    indicator_col: None,
+                                    is_active: false,
+                                    is_selectable: false,
+                                    action: None,
+                                });
+                            }
+                        }
+                    } else {
+                        // Collapsed: show state count.
+                        rows.push(GvRow {
+                            text: format!("  │  {} states", sub_states.len()),
+                            indicator_col: None,
+                            is_active: false,
+                            is_selectable: false,
+                            action: None,
+                        });
+                    }
+
+                    // Box footer.
+                    rows.push(GvRow {
+                        text: "  └──────────────────────────────────────────".to_string(),
+                        indicator_col: None,
+                        is_active: false,
+                        is_selectable: false,
+                        action: None,
+                    });
+                }
+
+                // ── Transition summary below the node ─────────────────────
+                if !node.transitions.is_empty() {
+                    let trans_str: String = node
+                        .transitions
+                        .iter()
+                        .map(|(evt, tgt, back)| {
+                            if *back {
+                                format!("{evt} ↩ {tgt}")
+                            } else {
+                                format!("{evt} → {tgt}")
+                            }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("  ·  ");
+                    rows.push(GvRow {
+                        text: format!("     {}", trans_str),
+                        indicator_col: None,
+                        is_active: false,
+                        is_selectable: false,
+                        action: None,
+                    });
+                }
+            }
+        }
+
+        rows
+    }
+
+    /// Render the graph view into the paned layout.
+    pub fn render_paned(&self, stdout: &mut impl Write, layout: &PanedLayout) -> io::Result<()> {
+        use crossterm::style::{Color, Print, ResetColor, SetForegroundColor};
+
+        const HEADER_ROWS: u16 = 4;
+        let w = layout.cols as usize;
+        let content_rows = layout.content_rows;
+        let viewport_height = content_rows.saturating_sub(HEADER_ROWS) as usize;
+
+        // Header box.
+        write_at(
+            stdout,
+            0,
+            0,
+            &format!("┌{}┐", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 1, "│  Workflow Graph", w)?;
+        write_at(
+            stdout,
+            0,
+            2,
+            &format!("└{}┘", "─".repeat(w.saturating_sub(2))),
+            w,
+        )?;
+        write_at(stdout, 0, 3, "", w)?;
+
+        let rows = self.visible_rows();
+        let visible_start = self.scroll.min(rows.len().saturating_sub(1));
+
+        let mut render_row: u16 = HEADER_ROWS;
+        for (list_idx, gv_row) in rows.iter().enumerate() {
+            if render_row >= content_rows {
+                break;
+            }
+            if list_idx < visible_start {
+                continue;
+            }
+            if list_idx >= visible_start + viewport_height {
+                break;
+            }
+
+            let cursor = if list_idx == self.selected && gv_row.is_selectable {
+                "▶"
+            } else {
+                " "
+            };
+            let line = format!("{cursor}{}", gv_row.text);
+            write_at(stdout, 0, render_row, &line, w)?;
+
+            // Overlay the active indicator in blue.
+            if gv_row.is_active {
+                if let Some(icol) = gv_row.indicator_col {
+                    // +1 for the leading cursor char.
+                    let col = (icol + 1) as u16;
+                    queue!(
+                        stdout,
+                        MoveTo(col, render_row),
+                        SetForegroundColor(Color::Blue),
+                        Print("●"),
+                        ResetColor
+                    )?;
+                }
+            }
+
+            render_row += 1;
+        }
+
+        // Clear remaining rows.
+        while render_row < content_rows {
+            write_at(stdout, 0, render_row, "", w)?;
+            render_row += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Handle a key event, returning an `SmEvent`.
+    pub fn handle_key_event(&mut self, event: KeyEvent) -> SmEvent {
+        let rows = self.visible_rows();
+        let selectable: Vec<usize> = rows
+            .iter()
+            .enumerate()
+            .filter(|(_, r)| r.is_selectable)
+            .map(|(i, _)| i)
+            .collect();
+        let row_count = rows.len();
+
+        match event.code {
+            KeyCode::Up => {
+                if let Some(pos) = selectable.iter().rposition(|&i| i < self.selected) {
+                    self.selected = selectable[pos];
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Down => {
+                if let Some(pos) = selectable.iter().position(|&i| i > self.selected) {
+                    self.selected = selectable[pos];
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Enter | KeyCode::Right => {
+                if let Some(row) = rows.get(self.selected) {
+                    match &row.action {
+                        Some(GvAction::ToggleEntry(ei)) => {
+                            if self.expanded_entries.contains(ei) {
+                                self.expanded_entries.remove(ei);
+                            } else {
+                                self.expanded_entries.insert(*ei);
+                            }
+                        }
+                        Some(GvAction::ToggleBox { entry, state_name }) => {
+                            let key = (*entry, state_name.clone());
+                            if self.expanded_boxes.contains(&key) {
+                                self.expanded_boxes.remove(&key);
+                            } else {
+                                self.expanded_boxes.insert(key);
+                            }
+                        }
+                        None => {}
+                    }
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Left => {
+                if let Some(row) = rows.get(self.selected) {
+                    if let Some(GvAction::ToggleBox { entry, state_name }) = &row.action {
+                        self.expanded_boxes.remove(&(*entry, state_name.clone()));
+                        return SmEvent::Continue;
+                    }
+                }
+                if !self.expanded_boxes.is_empty() {
+                    if let Some(last) = self.expanded_boxes.iter().next_back().cloned() {
+                        self.expanded_boxes.remove(&last);
+                    }
+                } else if !self.expanded_entries.is_empty() {
+                    self.expanded_entries.clear();
+                } else {
+                    return SmEvent::Quit;
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Esc => {
+                if !self.expanded_boxes.is_empty() {
+                    self.expanded_boxes.clear();
+                    SmEvent::Continue
+                } else if !self.expanded_entries.is_empty() {
+                    self.expanded_entries.clear();
+                    SmEvent::Continue
+                } else {
+                    SmEvent::Quit
+                }
+            }
+            KeyCode::Char('g') => {
+                self.selected = 0;
+                self.scroll = 0;
+                SmEvent::Continue
+            }
+            KeyCode::Char('G') => {
+                if let Some(&last) = selectable.last() {
+                    self.selected = last;
+                    self.adjust_scroll(row_count);
+                }
+                SmEvent::Continue
+            }
+            KeyCode::Char('a') => SmEvent::JumpToAgents(None),
+            KeyCode::Char('q') => SmEvent::Quit,
+            _ => SmEvent::Continue,
+        }
+    }
+
+    fn adjust_scroll(&mut self, total_rows: usize) {
+        const VIEWPORT: usize = 15;
+        if self.selected < self.scroll {
+            self.scroll = self.selected;
+        } else if self.selected >= self.scroll + VIEWPORT {
+            self.scroll = self.selected + 1 - VIEWPORT;
+        }
+        if total_rows > VIEWPORT && self.scroll + VIEWPORT > total_rows {
+            self.scroll = total_rows - VIEWPORT;
+        }
     }
 }
 
@@ -2682,10 +3254,10 @@ pub enum AppEvent {
 pub struct AppShell {
     pub tab: AppTab,
     pub doctor: DoctorSurface,
-    /// Legacy feature-state pipeline view (used when no workflow navigator is loaded).
+    /// Legacy feature-state pipeline view (used when no workflow graph is loaded).
     pub sm: StateMachineSurface,
-    /// Workflow navigator (preferred over `sm` when populated).
-    pub wf_nav: Option<WorkflowNavigator>,
+    /// Workflow graph view (preferred over `sm` when populated).
+    pub wf_graph: Option<WorkflowGraphView>,
     /// Operator surface used for the Agents tab (absent when no feature is active).
     pub operator: Option<OperatorSurface>,
 }
@@ -2696,7 +3268,7 @@ impl AppShell {
             tab: AppTab::Doctor,
             doctor,
             sm: StateMachineSurface::new(),
-            wf_nav: None,
+            wf_graph: None,
             operator: None,
         }
     }
@@ -2706,8 +3278,8 @@ impl AppShell {
         self
     }
 
-    pub fn with_navigator(mut self, nav: WorkflowNavigator) -> Self {
-        self.wf_nav = Some(nav);
+    pub fn with_navigator(mut self, nav: WorkflowGraphView) -> Self {
+        self.wf_graph = Some(nav);
         self
     }
 
@@ -2740,7 +3312,7 @@ impl AppShell {
                 DoctorSurfaceEvent::Quit => AppEvent::Quit,
             },
             AppTab::StateMachine => {
-                let sm_event = if let Some(nav) = &mut self.wf_nav {
+                let sm_event = if let Some(nav) = &mut self.wf_graph {
                     nav.handle_key_event(event)
                 } else {
                     self.sm.handle_key_event(event)
@@ -2780,8 +3352,8 @@ impl AppShell {
         match self.tab {
             AppTab::Doctor => self.doctor.render_paned(stdout, layout)?,
             AppTab::StateMachine => {
-                if let Some(nav) = &self.wf_nav {
-                    nav.render_paned(stdout, layout)?;
+                if let Some(graph) = &self.wf_graph {
+                    graph.render_paned(stdout, layout)?;
                 } else {
                     self.sm.render_paned(stdout, layout)?;
                 }
@@ -2870,20 +3442,20 @@ fn render_agents_scaffold(stdout: &mut impl Write, layout: &PanedLayout) -> io::
     )
 }
 
-/// Try to load the workflow navigator from embedded blueprints.
+/// Try to load the workflow graph view from embedded blueprints.
 fn load_navigator_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) {
     if let Ok(interp) = WorkflowInterpreter::new() {
-        let mut nav = WorkflowNavigator::from_interpreter(&interp);
+        let mut graph = WorkflowGraphView::from_interpreter(&interp);
 
         // If a workflow execution state exists, highlight the active position.
         let exec_path = repo_root.join(".calypso").join("workflow-state.json");
         if let Ok(json) = std::fs::read_to_string(&exec_path)
             && let Ok(exec) = serde_json::from_str::<WorkflowExecutionState>(&json)
         {
-            nav.set_active_position(&exec);
+            graph.set_active_position(&exec);
         }
 
-        shell.wf_nav = Some(nav);
+        shell.wf_graph = Some(graph);
     }
 }
 

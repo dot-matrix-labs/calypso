@@ -8,8 +8,8 @@ use calypso_cli::state::{
 };
 use calypso_cli::tui::{
     AppEvent, AppShell, InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface,
-    SurfaceEvent, TerminalSize, WorkflowNavigator, answer_clarification, interrupt_active_sessions,
-    queue_follow_up,
+    SurfaceEvent, TerminalSize, WorkflowGraphView, WorkflowNavigator, answer_clarification,
+    interrupt_active_sessions, queue_follow_up,
 };
 
 fn sample_feature() -> FeatureState {
@@ -1349,11 +1349,11 @@ fn workflow_navigator_set_active_position() {
 fn app_shell_with_navigator_uses_navigator_for_sm_tab() {
     let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
     let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
-    let nav = WorkflowNavigator::from_interpreter(&interp);
+    let nav = WorkflowGraphView::from_interpreter(&interp);
     let shell = AppShell::new(doctor).with_navigator(nav);
 
-    // SM tab should use navigator, not the legacy SM surface.
-    assert!(shell.wf_nav.is_some());
+    // SM tab should use graph view, not the legacy SM surface.
+    assert!(shell.wf_graph.is_some());
 
     let layout = PanedLayout::from_size(TerminalSize {
         cols: 120,
@@ -1366,8 +1366,8 @@ fn app_shell_with_navigator_uses_navigator_for_sm_tab() {
     shell.render_paned(&mut buf, &layout).unwrap();
     let output = String::from_utf8_lossy(&buf);
     assert!(
-        output.contains("Workflows"),
-        "SM tab should show workflow navigator header"
+        output.contains("Workflow Graph"),
+        "SM tab should show workflow graph header"
     );
 }
 
@@ -1397,7 +1397,7 @@ fn app_shell_with_operator_shows_agents_tab() {
 fn app_shell_sm_tab_delegates_keys_to_navigator() {
     let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
     let interp = calypso_cli::interpreter::WorkflowInterpreter::new().unwrap();
-    let nav = WorkflowNavigator::from_interpreter(&interp);
+    let nav = WorkflowGraphView::from_interpreter(&interp);
     let mut shell = AppShell::new(doctor).with_navigator(nav);
     shell.tab = calypso_cli::tui::AppTab::StateMachine;
     let cwd = std::path::Path::new("/tmp");
@@ -1620,8 +1620,8 @@ fn app_shell_with_sm_sets_sm_surface() {
     let doctor = calypso_cli::tui::DoctorSurface::new(vec![], std::path::PathBuf::from("/tmp"));
     let sm = StateMachineSurface::from_feature_state(&feature_with_pending_gates());
     let shell = AppShell::new(doctor).with_sm(sm);
-    // wf_nav should remain None when using with_sm.
-    assert!(shell.wf_nav.is_none());
+    // wf_graph should remain None when using with_sm.
+    assert!(shell.wf_graph.is_none());
 }
 
 #[test]
