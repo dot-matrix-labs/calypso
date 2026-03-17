@@ -2519,18 +2519,18 @@ impl WorkflowGraphView {
             write_at(stdout, 0, render_row, &line, w)?;
 
             // Overlay the active indicator in blue.
-            if gv_row.is_active {
-                if let Some(icol) = gv_row.indicator_col {
-                    // +1 for the leading cursor char.
-                    let col = (icol + 1) as u16;
-                    queue!(
-                        stdout,
-                        MoveTo(col, render_row),
-                        SetForegroundColor(Color::Blue),
-                        Print("●"),
-                        ResetColor
-                    )?;
-                }
+            if gv_row.is_active
+                && let Some(icol) = gv_row.indicator_col
+            {
+                // +1 for the leading cursor char.
+                let col = (icol + 1) as u16;
+                queue!(
+                    stdout,
+                    MoveTo(col, render_row),
+                    SetForegroundColor(Color::Blue),
+                    Print("●"),
+                    ResetColor
+                )?;
             }
 
             render_row += 1;
@@ -2595,11 +2595,11 @@ impl WorkflowGraphView {
                 SmEvent::Continue
             }
             KeyCode::Left => {
-                if let Some(row) = rows.get(self.selected) {
-                    if let Some(GvAction::ToggleBox { entry, state_name }) = &row.action {
-                        self.expanded_boxes.remove(&(*entry, state_name.clone()));
-                        return SmEvent::Continue;
-                    }
+                if let Some(row) = rows.get(self.selected)
+                    && let Some(GvAction::ToggleBox { entry, state_name }) = &row.action
+                {
+                    self.expanded_boxes.remove(&(*entry, state_name.clone()));
+                    return SmEvent::Continue;
                 }
                 if !self.expanded_boxes.is_empty() {
                     if let Some(last) = self.expanded_boxes.iter().next_back().cloned() {
