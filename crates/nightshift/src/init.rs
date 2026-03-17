@@ -221,6 +221,12 @@ pub const WORKFLOW_RELEASE_CLI: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/release-cli.yml");
 pub const WORKFLOW_MERGE_QUEUE: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/merge-queue.yml");
+pub const WORKFLOW_PR_ISSUE_CHECKLIST: &str =
+    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-issue-checklist.yml");
+pub const WORKFLOW_PR_CONFLICTS: &str =
+    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-conflicts.yml");
+pub const WORKFLOW_PR_SINGLE_ISSUE: &str =
+    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-single-issue.yml");
 
 // ---------------------------------------------------------------------------
 // Hello World templates
@@ -1017,6 +1023,9 @@ pub fn refresh_workflows(
     let workflows = [
         ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
         ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
+        ("pr-issue-checklist.yml", WORKFLOW_PR_ISSUE_CHECKLIST),
+        ("pr-conflicts.yml", WORKFLOW_PR_CONFLICTS),
+        ("pr-single-issue.yml", WORKFLOW_PR_SINGLE_ISSUE),
         ("ci.yml", WORKFLOW_CI),
         ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
         ("rust-unit.yml", WORKFLOW_RUST_UNIT),
@@ -1125,6 +1134,9 @@ pub fn scaffold_github_actions(
     let workflows = [
         ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
         ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
+        ("pr-issue-checklist.yml", WORKFLOW_PR_ISSUE_CHECKLIST),
+        ("pr-conflicts.yml", WORKFLOW_PR_CONFLICTS),
+        ("pr-single-issue.yml", WORKFLOW_PR_SINGLE_ISSUE),
         ("ci.yml", WORKFLOW_CI),
         ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
         ("rust-unit.yml", WORKFLOW_RUST_UNIT),

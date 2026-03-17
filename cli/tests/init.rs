@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use calypso_cli::init::{
     InitEnvironment, InitError, InitProgress, InitRequest, InitStep, RepoInitStatus, WORKFLOW_CI,
-    WORKFLOW_MERGE_QUEUE, WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_DEPENDS_ON, detect_repo_status,
+    WORKFLOW_MERGE_QUEUE, WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_CONFLICTS, WORKFLOW_PR_DEPENDS_ON,
+    WORKFLOW_PR_ISSUE_CHECKLIST, WORKFLOW_PR_SINGLE_ISSUE, detect_repo_status,
     init_repository, refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
 use calypso_cli::state::RepositoryState;
@@ -747,7 +748,7 @@ fn scaffold_github_actions_writes_three_workflow_files() {
         scaffold_github_actions(&repo_path, &env, false).expect("scaffold should succeed");
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 10, "should scaffold 10 workflow files");
+    assert_eq!(workflows.len(), 13, "should scaffold 13 workflow files");
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -781,7 +782,19 @@ fn scaffold_github_actions_writes_three_workflow_files() {
         names.contains(&"merge-queue.yml"),
         "missing merge-queue.yml"
     );
-    assert_eq!(scaffolded.len(), 10);
+    assert!(
+        names.contains(&"pr-issue-checklist.yml"),
+        "missing pr-issue-checklist.yml"
+    );
+    assert!(
+        names.contains(&"pr-conflicts.yml"),
+        "missing pr-conflicts.yml"
+    );
+    assert!(
+        names.contains(&"pr-single-issue.yml"),
+        "missing pr-single-issue.yml"
+    );
+    assert_eq!(scaffolded.len(), 13);
 }
 
 #[test]
@@ -801,10 +814,10 @@ fn scaffold_github_actions_skips_existing_workflow_files() {
     let workflows = env.workflows_written.borrow();
     assert_eq!(
         workflows.len(),
-        9,
+        12,
         "should skip existing workflow file; got: {workflows:?}"
     );
-    assert_eq!(scaffolded.len(), 9);
+    assert_eq!(scaffolded.len(), 12);
 
     let names: Vec<&str> = workflows.iter().map(|(n, _)| n.as_str()).collect();
     assert!(
@@ -849,6 +862,36 @@ fn workflow_ci_content_is_valid_yaml() {
     let val: serde_yaml::Value =
         serde_yaml::from_str(WORKFLOW_CI).expect("ci.yml should be valid YAML");
     let map = val.as_mapping().expect("top-level should be a mapping");
+    assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
+}
+
+#[test]
+fn workflow_pr_issue_checklist_content_is_valid_yaml() {
+    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_PR_ISSUE_CHECKLIST)
+        .expect("pr-issue-checklist.yml should be valid YAML");
+    let map = val.as_mapping().expect("top-level should be a mapping");
+    assert!(map.contains_key(serde_yaml::Value::String("name".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("on".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
+}
+
+#[test]
+fn workflow_pr_conflicts_content_is_valid_yaml() {
+    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_PR_CONFLICTS)
+        .expect("pr-conflicts.yml should be valid YAML");
+    let map = val.as_mapping().expect("top-level should be a mapping");
+    assert!(map.contains_key(serde_yaml::Value::String("name".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("on".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
+}
+
+#[test]
+fn workflow_pr_single_issue_content_is_valid_yaml() {
+    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_PR_SINGLE_ISSUE)
+        .expect("pr-single-issue.yml should be valid YAML");
+    let map = val.as_mapping().expect("top-level should be a mapping");
+    assert!(map.contains_key(serde_yaml::Value::String("name".into())));
+    assert!(map.contains_key(serde_yaml::Value::String("on".into())));
     assert!(map.contains_key(serde_yaml::Value::String("jobs".into())));
 }
 
@@ -965,7 +1008,7 @@ fn refresh_workflows_overwrites_all_three_files() {
 
     let refreshed = refresh_workflows(&repo_path, &env).expect("refresh should succeed");
 
-    assert_eq!(refreshed.len(), 10, "should refresh all 10 workflow files");
+    assert_eq!(refreshed.len(), 13, "should refresh all 13 workflow files");
     assert!(refreshed.contains(&"pr-checklist.yml".to_string()));
     assert!(refreshed.contains(&"pr-depends-on.yml".to_string()));
     assert!(refreshed.contains(&"ci.yml".to_string()));
@@ -976,9 +1019,12 @@ fn refresh_workflows_overwrites_all_three_files() {
     assert!(refreshed.contains(&"rust-coverage.yml".to_string()));
     assert!(refreshed.contains(&"release-cli.yml".to_string()));
     assert!(refreshed.contains(&"merge-queue.yml".to_string()));
+    assert!(refreshed.contains(&"pr-issue-checklist.yml".to_string()));
+    assert!(refreshed.contains(&"pr-conflicts.yml".to_string()));
+    assert!(refreshed.contains(&"pr-single-issue.yml".to_string()));
 
     let workflows = env.workflows_written.borrow();
-    assert_eq!(workflows.len(), 10);
+    assert_eq!(workflows.len(), 13);
 }
 
 // ── init progress persistence tests (real filesystem) ──────────────────────────
