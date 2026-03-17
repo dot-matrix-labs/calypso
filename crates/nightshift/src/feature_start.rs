@@ -445,6 +445,8 @@ fn run_git(current_dir: &Path, args: &[&str]) -> Result<std::process::Output, Fe
     let output = Command::new("git")
         .args(args)
         .current_dir(current_dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(FeatureStartError::Io)?;
 
