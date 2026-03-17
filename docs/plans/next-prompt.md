@@ -1,1 +1,1 @@
-All CI fixes for PR #163 have been applied. Verify CI passes after push.
+Coverage CI fix has been pushed to main. Verify all CI workflows pass.
