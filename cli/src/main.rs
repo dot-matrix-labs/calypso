@@ -182,7 +182,7 @@ fn main() {
             }
         }
         [command, subcommand] if command == "state" && subcommand == "show" => {
-            let state_path = cwd.join(".calypso").join("state.json");
+            let state_path = cwd.join(".calypso").join("repository-state.json");
             match RepositoryState::load_from_path(&state_path) {
                 Ok(state) => println!(
                     "{}",
@@ -266,7 +266,7 @@ fn main() {
         }
         // calypso watch — live TUI from project directory state file
         [command] if command == "watch" => {
-            let state_path = cwd.join(".calypso").join("state.json");
+            let state_path = cwd.join(".calypso").join("repository-state.json");
             run_watch(&state_path.to_string_lossy());
         }
         // calypso watch --state <path>
@@ -303,7 +303,7 @@ fn main() {
         // calypso <path> — positional project directory (kept for backward compatibility)
         [path] if looks_like_path(path) => {
             let project_dir = std::path::Path::new(path);
-            let state_path = project_dir.join(".calypso").join("state.json");
+            let state_path = project_dir.join(".calypso").join("repository-state.json");
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
             } else {
@@ -312,7 +312,7 @@ fn main() {
         }
         // calypso --step — step mode: one step per Enter keypress
         [flag] if flag == "--step" => {
-            let state_path = cwd.join(".calypso").join("state.json");
+            let state_path = cwd.join(".calypso").join("repository-state.json");
             if state_path.exists() {
                 run_state_machine_step(&state_path);
             } else {
@@ -321,7 +321,7 @@ fn main() {
         }
         // calypso — no args: drive state machine if initialized, else show doctor TUI
         [] => {
-            let state_path = cwd.join(".calypso").join("state.json");
+            let state_path = cwd.join(".calypso").join("repository-state.json");
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
             } else {

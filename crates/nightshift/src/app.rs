@@ -613,10 +613,10 @@ pub fn state_status_json_report(feature: &FeatureState) -> StateStatusJsonReport
     }
 }
 
-/// Load state from `.calypso/state.json` and return the JSON report.
+/// Load state from `.calypso/repository-state.json` and return the JSON report.
 /// Returns `Ok(json)` on success, `Err(message)` when the file cannot be loaded.
 pub fn run_state_status_json(cwd: &Path) -> Result<String, String> {
-    let state_path = cwd.join(".calypso").join("state.json");
+    let state_path = cwd.join(".calypso").join("repository-state.json");
     let state =
         crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
     let json_report = state_status_json_report(&state.current_feature);
@@ -668,9 +668,9 @@ pub fn render_state_status(feature: &FeatureState) -> String {
     lines.join("\n")
 }
 
-/// Load state from `.calypso/state.json` and return a plain-text summary.
+/// Load state from `.calypso/repository-state.json` and return a plain-text summary.
 pub fn run_state_status_plain(cwd: &Path) -> Result<String, String> {
-    let state_path = cwd.join(".calypso").join("state.json");
+    let state_path = cwd.join(".calypso").join("repository-state.json");
     let state =
         crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
     Ok(render_state_status(&state.current_feature))
@@ -710,9 +710,9 @@ pub fn agents_json_report(feature: &FeatureState) -> AgentsJsonReport {
     }
 }
 
-/// Load state from `.calypso/state.json` and return the agents JSON report.
+/// Load state from `.calypso/repository-state.json` and return the agents JSON report.
 pub fn run_agents_json(cwd: &Path) -> Result<String, String> {
-    let state_path = cwd.join(".calypso").join("state.json");
+    let state_path = cwd.join(".calypso").join("repository-state.json");
     let state =
         crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
     let json_report = agents_json_report(&state.current_feature);
@@ -755,9 +755,9 @@ fn session_display_parts(session: &AgentSession) -> (&'static str, &'static str)
     }
 }
 
-/// Load state from `.calypso/state.json` and return a plain-text agents summary.
+/// Load state from `.calypso/repository-state.json` and return a plain-text agents summary.
 pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
-    let state_path = cwd.join(".calypso").join("state.json");
+    let state_path = cwd.join(".calypso").join("repository-state.json");
     let state =
         crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
     Ok(render_agents(&state.current_feature))

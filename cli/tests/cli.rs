@@ -25,12 +25,12 @@ fn temp_non_git_dir() -> std::path::PathBuf {
     dir
 }
 
-/// Create a temp project directory that has a `.calypso/state.json`.
+/// Create a temp project directory that has a `.calypso/repository-state.json`.
 fn temp_project_dir_with_state(state: &RepositoryState) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("calypso-cli-project-{}", unique_id()));
     let calypso_dir = dir.join(".calypso");
     std::fs::create_dir_all(&calypso_dir).expect("project dir should be created");
-    let state_path = calypso_dir.join("state.json");
+    let state_path = calypso_dir.join("repository-state.json");
     state.save_to_path(&state_path).expect("state should save");
     dir
 }

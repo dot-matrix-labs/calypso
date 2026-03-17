@@ -278,7 +278,7 @@ fn state_file_round_trip_three_sessions_all_roles_visible() {
     let dir = temp_dir("round-trip-three");
     let calypso_dir = dir.join(".calypso");
     std::fs::create_dir_all(&calypso_dir).expect("create .calypso dir");
-    let state_path = calypso_dir.join("state.json");
+    let state_path = calypso_dir.join("repository-state.json");
 
     // Build a RepositoryState with three sessions.
     let sessions = vec![
@@ -418,7 +418,7 @@ fn state_file_round_trip_preserves_session_output_lines() {
     let dir = temp_dir("round-trip-output");
     let calypso_dir = dir.join(".calypso");
     std::fs::create_dir_all(&calypso_dir).expect("create .calypso dir");
-    let state_path = calypso_dir.join("state.json");
+    let state_path = calypso_dir.join("repository-state.json");
 
     let session = running_session("engineer", &["Build output line A", "Build output line B"]);
     let original = repo_state_with_sessions(vec![session]);

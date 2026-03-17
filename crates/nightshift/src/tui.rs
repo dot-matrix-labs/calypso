@@ -2887,9 +2887,9 @@ fn load_navigator_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) 
     }
 }
 
-/// Try to load feature state from `.calypso/state.json` and populate the SM and operator surfaces.
+/// Try to load feature state from `.calypso/repository-state.json` and populate the SM and operator surfaces.
 fn load_feature_into_shell(shell: &mut AppShell, repo_root: &std::path::Path) {
-    let state_path = repo_root.join(".calypso").join("state.json");
+    let state_path = repo_root.join(".calypso").join("repository-state.json");
     if let Ok(repo_state) = RepositoryState::load_from_path(&state_path) {
         let feature = &repo_state.current_feature;
         shell.sm = StateMachineSurface::from_feature_state(feature);
