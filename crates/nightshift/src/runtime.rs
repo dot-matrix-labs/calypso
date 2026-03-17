@@ -216,6 +216,8 @@ fn git_output(current_dir: &Path, args: &[&str]) -> Result<String, RuntimeError>
     let output = Command::new("git")
         .args(args)
         .current_dir(current_dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(RuntimeError::Io)?;
 

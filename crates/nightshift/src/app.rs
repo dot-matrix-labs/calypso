@@ -457,6 +457,10 @@ pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOu
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
+        // Unset GIT_DIR / GIT_WORK_TREE so git subcommands discover the repo
+        // from `cwd` rather than inheriting a parent hook's git context.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
         .output()
         .map_err(|error| format!("failed to spawn `{program}`: {error}"))?;
 

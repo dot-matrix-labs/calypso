@@ -25,9 +25,15 @@ fn unique_tmpdir(prefix: &str) -> PathBuf {
     path
 }
 
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
+}
+
 fn make_git_repo_with_github_remote(dir: &Path) {
     let run = |args: &[&str]| {
-        Command::new("git")
+        git_cmd()
             .args(args)
             .current_dir(dir)
             .output()
@@ -39,7 +45,7 @@ fn make_git_repo_with_github_remote(dir: &Path) {
 
 fn make_git_repo_with_custom_remote(dir: &Path, remote_url: &str) {
     let run = |args: &[&str]| {
-        Command::new("git")
+        git_cmd()
             .args(args)
             .current_dir(dir)
             .output()

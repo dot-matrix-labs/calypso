@@ -502,12 +502,21 @@ pub trait InitEnvironment {
 // HostInitEnvironment
 // ---------------------------------------------------------------------------
 
+/// Returns a `Command` for `git` with `GIT_DIR` and `GIT_WORK_TREE` unset so
+/// that git discovers the repository from the `-C` path or `current_dir`,
+/// rather than from an inherited hook context.
+fn git_cmd() -> std::process::Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct HostInitEnvironment;
 
 impl InitEnvironment for HostInitEnvironment {
     fn is_git_repo(&self, path: &Path) -> Result<bool, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["-C", &path.to_string_lossy(), "rev-parse", "--git-dir"])
             .output()
             .map_err(InitError::Io)?;
@@ -515,7 +524,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn remote_url(&self, path: &Path) -> Result<String, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["-C", &path.to_string_lossy(), "remote", "get-url", "origin"])
             .output()
             .map_err(InitError::Io)?;
@@ -529,7 +538,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn default_branch(&self, path: &Path) -> Result<String, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -574,7 +583,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn git_init(&self, path: &Path) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args(["init"])
             .current_dir(path)
             .output()
@@ -622,7 +631,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn set_remote(&self, path: &Path, url: &str) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -650,7 +659,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn configure_githooks(&self, path: &Path) -> Result<(), InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
@@ -670,7 +679,7 @@ impl InitEnvironment for HostInitEnvironment {
     }
 
     fn git_hooks_path(&self, path: &Path) -> Result<PathBuf, InitError> {
-        let output = Command::new("git")
+        let output = git_cmd()
             .args([
                 "-C",
                 &path.to_string_lossy(),
