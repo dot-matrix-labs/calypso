@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # post-commit: Warns when the branch has accumulated >= 10 file changes vs. main.
-# At that point a PR is due — annotates next-prompt.md and prints a console notice.
 
 PR_REMINDER_THRESHOLD=10
 
@@ -19,23 +18,6 @@ if [ "$BRANCH_FILE_COUNT" -ge "$PR_REMINDER_THRESHOLD" ]; then
   echo "│  Open a pull request before this branch grows further.  │" >&2
   echo "└─────────────────────────────────────────────────────────┘" >&2
   echo "" >&2
-
-  cat >> docs/plans/next-prompt.md <<EOF
-
----
-
-## PR Due — Open Before Continuing
-
-This branch has changed ${BRANCH_FILE_COUNT} files since main. A pull request must be opened
-imminently. Do this before starting the next feature task:
-
-1. Ensure lint and types are clean.
-2. Push the branch: \`git push\`
-3. Open a PR: \`gh pr create\`
-4. After merge, pull main and continue on a fresh or rebased branch.
-
-Do not accumulate further unreviewed changes on this branch.
-EOF
 fi
 
 exit 0

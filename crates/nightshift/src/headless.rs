@@ -961,7 +961,7 @@ mod tests {
         let (shutdown, _tx) = quiet_shutdown();
 
         let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let _exit = run_driver_loop(&logger, bogus_path, &shutdown);
+        let _exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
 
         let output = writer.contents();
         // Should log a stepping event (with "unknown" since state can't be read)

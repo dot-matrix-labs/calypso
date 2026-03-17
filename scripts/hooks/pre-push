@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pre-push: Blueprint audit (blocks) + lint/format/type (blocks) + test suite (annotates).
+# pre-push: Blueprint audit (blocks) + lint/format/type (blocks) + test suite (blocks).
 
 set -euo pipefail
 
@@ -19,7 +19,6 @@ FORBIDDEN="redux|zustand|mobx|prisma|typeorm|drizzle-orm|@auth0/|@clerk/|mongoos
 PKG_HITS=$(find . -name "package.json" ! -path "*/node_modules/*" \
   -exec grep -lE "$FORBIDDEN" {} \; 2>/dev/null || true)
 [ -n "$PKG_HITS" ] && VIOLATIONS+=("Forbidden packages detected in:\n${PKG_HITS}")
-
 
 if [ ${#VIOLATIONS[@]} -gt 0 ]; then
   echo "" >&2
@@ -60,15 +59,19 @@ echo "pre-push: checking lint, format, and types..." >&2
 QUALITY_FAILED=0
 QUALITY_OUTPUT=""
 
-ESLINT_OUT=$(bun run eslint . --max-warnings=0 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$ESLINT_OUT\n"; }
-PRETTIER_OUT=$(bun run prettier --check . 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$PRETTIER_OUT\n"; }
-TSC_OUT=$(bun run tsc --noEmit 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$TSC_OUT\n"; }
+if [ -f Cargo.toml ]; then
+  FMT_OUT=$(cargo fmt --check 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$FMT_OUT\n"; }
+  CLIPPY_OUT=$(cargo clippy --all-targets -- -D warnings 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$CLIPPY_OUT\n"; }
+else
+  ESLINT_OUT=$(bun run eslint . --max-warnings=0 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$ESLINT_OUT\n"; }
+  PRETTIER_OUT=$(bun run prettier --check . 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$PRETTIER_OUT\n"; }
+  TSC_OUT=$(bun run tsc --noEmit 2>&1) || { QUALITY_FAILED=1; QUALITY_OUTPUT+="$TSC_OUT\n"; }
+fi
 
 if [ $QUALITY_FAILED -ne 0 ]; then
   echo "" >&2
   echo "PUSH BLOCKED: Lint, format, or type errors must be resolved before pushing." >&2
   echo -e "$QUALITY_OUTPUT" >&2
-  echo "These were warned about at commit time. Fix them, update next-prompt.md, and commit." >&2
   echo "" >&2
   exit 1
 fi
@@ -77,35 +80,26 @@ fi
 
 echo "pre-push: running full test suite..." >&2
 
-TEST_OUTPUT=$(bun test 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+if [ -f Cargo.toml ]; then
+  TEST_OUTPUT=$(cargo test 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+else
+  TEST_OUTPUT=$(bun test 2>&1) && TEST_EXIT=0 || TEST_EXIT=$?
+fi
 
 if [ $TEST_EXIT -ne 0 ]; then
-  FAILING=$(echo "$TEST_OUTPUT" | grep -E "^\s*(FAIL|✗|×|●|not ok)" | head -30 || true)
-
-  cat >> docs/plans/next-prompt.md <<EOF
-
----
-
-## FAILING TESTS — Must be addressed before next push
-
-The following tests were failing at the time of the last push.
-They must be **checked, fixed, or rewritten. Never ignore or skip them.**
-
-\`\`\`
-${FAILING}
-\`\`\`
-
-For each failure: determine whether the test is wrong (fix the test to match
-correct behaviour) or the implementation is wrong (fix the code). Do not
-disable, comment out, or add skip/todo markers to avoid addressing failures.
-
-EOF
-
+  if [ -f Cargo.toml ]; then
+    FAILING=$(echo "$TEST_OUTPUT" | grep -E "^(test .* FAILED|error\[)" | head -30 || true)
+  else
+    FAILING=$(echo "$TEST_OUTPUT" | grep -E "^\s*(FAIL|✗|×|●|not ok)" | head -30 || true)
+  fi
   echo "" >&2
-  echo "WARNING: Test failures detected. Push is proceeding, but" >&2
-  echo "docs/plans/next-prompt.md has been updated with the failing tests." >&2
-  echo "They must be resolved — not ignored — in the next commit." >&2
+  echo "PUSH BLOCKED: Test failures must be resolved before pushing." >&2
+  echo "$FAILING" >&2
   echo "" >&2
+  echo "Determine whether each test is wrong (fix the test) or the implementation is wrong" >&2
+  echo "(fix the code). Do not disable, skip, or add todo markers to avoid failures." >&2
+  echo "" >&2
+  exit 1
 fi
 
 exit 0

@@ -9,7 +9,7 @@ You are an autonomous agent. Complete the assigned task in a single pass with mi
 ## Phase 1: Orient
 
 1. Read `agent-context/index.md`. This is the full document graph and keyword index.
-2. Read `docs/plans/next-prompt.md` if it exists. This is your assigned task.
+2. Check the GitHub issues tracker for the current task. The Plan tracking issue lists work in batch order. Pick the next unstarted issue in the earliest open batch.
 3. IF no task is assigned: ask the human what to build. This is the ONE acceptable reason to ask.
 
 ---
