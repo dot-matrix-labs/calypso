@@ -416,6 +416,9 @@ policy_gates:
       - .github/workflows/rust-e2e.yml
       - .github/workflows/rust-coverage.yml
       - .github/workflows/release-cli.yml
+      - .github/workflows/pr-issue-checklist.yml
+      - .github/workflows/pr-conflicts.yml
+      - .github/workflows/pr-single-issue.yml
   - gate_id: merge-drift-reviewed
     evaluator: builtin.git.is_main_compatible
     kind: hook

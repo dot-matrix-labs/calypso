@@ -1,0 +1,95 @@
+name: PR conflicts
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Also run on a schedule to catch PRs that become conflicted after main moves
+  schedule:
+    - cron: '*/30 * * * *'
+
+jobs:
+  conflicts:
+    name: conflicts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check for merge conflicts
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // On schedule, check all open non-draft PRs.
+            // On pull_request event, check only the triggering PR.
+            let prs = [];
+
+            if (context.eventName === 'pull_request') {
+              prs = [context.payload.pull_request];
+            } else {
+              // Scheduled run — fetch all open, non-draft PRs
+              const { data } = await github.rest.pulls.list({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                state: 'open',
+                per_page: 100,
+              });
+              prs = data.filter(pr => !pr.draft);
+            }
+
+            let conflicted = [];
+
+            for (const pr of prs) {
+              // mergeable can be null while GitHub is computing it — poll briefly
+              let mergeable = pr.mergeable;
+              if (mergeable === null || mergeable === undefined) {
+                await new Promise(r => setTimeout(r, 3000));
+                const { data: fresh } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: pr.number,
+                });
+                mergeable = fresh.mergeable;
+              }
+
+              if (mergeable === false) {
+                conflicted.push(`#${pr.number} — ${pr.title} (${pr.html_url})`);
+              }
+            }
+
+            if (context.eventName === 'pull_request') {
+              // For PR events: fail this check directly so it appears on the PR
+              const thisPR = prs[0];
+              let mergeable = thisPR.mergeable;
+              if (mergeable === null || mergeable === undefined) {
+                await new Promise(r => setTimeout(r, 3000));
+                const { data: fresh } = await github.rest.pulls.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  pull_number: thisPR.number,
+                });
+                mergeable = fresh.mergeable;
+              }
+
+              if (mergeable === false) {
+                core.setFailed(
+                  `⛔ MERGE CONFLICT DETECTED\n\n` +
+                  `This PR has conflicts with the base branch and cannot be merged.\n\n` +
+                  `To fix:\n` +
+                  `  git fetch origin\n` +
+                  `  git rebase origin/main\n` +
+                  `  # resolve conflicts\n` +
+                  `  git push --force-with-lease`
+                );
+              } else {
+                core.info('No merge conflicts detected.');
+              }
+            } else {
+              // Scheduled run — post a summary (no single PR to fail)
+              if (conflicted.length > 0) {
+                core.warning(
+                  `${conflicted.length} PR${conflicted.length === 1 ? '' : 's'} with merge conflicts:\n` +
+                  conflicted.map(p => `  • ${p}`).join('\n')
+                );
+              } else {
+                core.info('No conflicted PRs found.');
+              }
+            }

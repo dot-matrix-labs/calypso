@@ -1,0 +1,76 @@
+name: PR issue checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+  merge_group:
+
+jobs:
+  issue-checklist:
+    name: issue-checklist
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check linked issue has no unchecked tasks
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            if (!context.payload.pull_request) {
+              core.info('merge_group context — skipping issue checklist check.');
+              return;
+            }
+
+            const body = context.payload.pull_request.body || '';
+
+            // Extract all "Closes #N" / "Fixes #N" / "Resolves #N" references
+            const pattern = /(?:closes|fixes|resolves)\s+#(\d+)/gi;
+            const issueNumbers = [];
+            let match;
+            while ((match = pattern.exec(body)) !== null) {
+              issueNumbers.push(parseInt(match[1], 10));
+            }
+
+            if (issueNumbers.length === 0) {
+              core.info('No linked issue found — skipping issue checklist check.');
+              return;
+            }
+
+            let totalIncomplete = 0;
+            const failures = [];
+
+            for (const issueNumber of issueNumbers) {
+              let issue;
+              try {
+                ({ data: issue } = await github.rest.issues.get({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                }));
+              } catch (e) {
+                core.warning(`Could not fetch issue #${issueNumber}: ${e.message}`);
+                continue;
+              }
+
+              const issueBody = issue.body || '';
+              const incomplete = (issueBody.match(/- \[ \]/g) || []).length;
+
+              if (incomplete > 0) {
+                totalIncomplete += incomplete;
+                failures.push(
+                  `Issue #${issueNumber} ("${issue.title}") has ${incomplete} unchecked task${incomplete === 1 ? '' : 's'}.`
+                );
+              } else {
+                core.info(`Issue #${issueNumber}: all tasks checked.`);
+              }
+            }
+
+            if (failures.length > 0) {
+              core.setFailed(
+                `Cannot merge — linked issue has incomplete tasks:\n` +
+                failures.map(f => `  • ${f}`).join('\n') + '\n' +
+                `Complete all acceptance criteria and test plan items before merging.`
+              );
+            } else {
+              core.info('All linked issues have complete task lists.');
+            }
