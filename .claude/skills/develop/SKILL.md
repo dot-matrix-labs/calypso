@@ -19,8 +19,18 @@ If $ARGUMENTS is empty, fetch the Plan tracking issue and show the user the next
 unstarted task. Ask which task to work on.
 
 ```bash
-gh issue list --repo sduvignau/calypso-tasks --search "Plan" --state open --json number,title
-gh issue view {plan-issue-number} --repo sduvignau/calypso-tasks --json body -q .body
+gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
+gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body
+```
+
+---
+
+## Setup
+
+Before running any `gh` issue commands, detect the tasks repository:
+
+```bash
+TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name) + "-tasks"')
 ```
 
 ---
@@ -30,7 +40,7 @@ gh issue view {plan-issue-number} --repo sduvignau/calypso-tasks --json body -q 
 1. Identify the target issue from the Plan tracking issue.
 2. Fetch the full issue body:
    ```bash
-   gh issue view {issue-number} --repo sduvignau/calypso-tasks --json title,body,state -q '.title,.body'
+   gh issue view {issue-number} --repo {tasks-repo} --json title,body,state -q '.title,.body'
    ```
 3. Verify all dependencies (issues listed in the Dependencies section) are closed.
    If any dependency is open, tell the user and stop.
@@ -139,7 +149,7 @@ After the subagent completes:
 
 1. Check CI status on the PR:
    ```bash
-   gh pr checks {pr-number} --repo sduvignau/calypso-tasks
+   gh pr checks {pr-number} --repo {tasks-repo}
    ```
 
 2. If CI fails, investigate and fix (or report to user).

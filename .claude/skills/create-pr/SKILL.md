@@ -18,11 +18,21 @@ $ARGUMENTS should be the issue number. If empty, ask the user which issue this P
 
 ---
 
+## Setup
+
+Before running any `gh` issue commands, detect the tasks repository:
+
+```bash
+TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name) + "-tasks"')
+```
+
+---
+
 ## Phase 1: Verify readiness
 
 1. Fetch the issue:
    ```bash
-   gh issue view {issue-number} --repo sduvignau/calypso-tasks --json title,body -q '.title,.body'
+   gh issue view {issue-number} --repo {tasks-repo} --json title,body -q '.title,.body'
    ```
 
 2. Parse the Acceptance Criteria and Test Plan sections.
