@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Calypso — Live Webview</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      flowchart: { curve: 'basis', padding: 24, nodeSpacing: 50, rankSpacing: 60 },
+      themeVariables: {
+        primaryColor: '#f8fafc',
+        primaryTextColor: '#1e293b',
+        primaryBorderColor: '#cbd5e1',
+        lineColor: '#64748b',
+        background: '#ffffff',
+        edgeLabelBackground: '#f1f5f9',
+        fontSize: '13px',
+      },
+    });
+  </script>
+
+  <script type="importmap">
+    { "imports": { "lit": "https://cdn.jsdelivr.net/gh/lit/dist@3/core/lit-core.min.js" } }
+  </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: #0f172a;
+      color: #f1f5f9;
+      min-height: 100vh;
+    }
+    code, .mono { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <calypso-app></calypso-app>
+
+  <script type="module">
+    import { LitElement, html, css } from 'lit';
+
+    // ── Constants ──────────────────────────────────────────────────────────────
+
+    const KIND = {
+      agent:         { color: '#3b82f6', label: 'Agent' },
+      deterministic: { color: '#475569', label: 'Deterministic' },
+      'git-hook':    { color: '#f97316', label: 'Git Hook' },
+      human:         { color: '#f59e0b', label: 'Human' },
+      github:        { color: '#10b981', label: 'GitHub' },
+      terminal:      { color: '#8b5cf6', label: 'Terminal' },
+      workflow:      { color: '#0ea5e9', label: 'Workflow' },
+    };
+
+    const POLL_INTERVAL_MS = 2000;
+
+    // ── Mermaid helpers ────────────────────────────────────────────────────────
+
+    function sid(id) { return id.replace(/-/g, '_'); }
+
+    function nodeShape(kind) {
+      switch (kind) {
+        case 'deterministic': return ['[',   ']'  ];
+        case 'human':         return ['{{',  '}}' ];
+        case 'github':        return ['([',  '])' ];
+        case 'terminal':      return ['((',  '))' ];
+        case 'workflow':      return ['[[',  ']]' ];
+        default:              return ['(',   ')'  ];
+      }
+    }
+
+    function extractEdges(states) {
+      const edges = [];
+      const push = (from, label, to) => {
+        if (to && states[to]) edges.push({ from: sid(from), label, to: sid(to) });
+      };
+      for (const [id, s] of Object.entries(states)) {
+        const n = s?.next;
+        if (!n) continue;
+        if (n.on_success)   push(id, 'success',   n.on_success);
+        if (n.on_failure)   push(id, 'failure',   n.on_failure);
+        if (n.on_rejection) push(id, 'rejection', n.on_rejection);
+        if (n.on_complete)  push(id, 'complete',  n.on_complete);
+        if (n.on_pass)      push(id, 'pass',      n.on_pass);
+        if (n.on_fail)      push(id, 'fail',      n.on_fail);
+        if (n.pass)         push(id, 'pass',      n.pass);
+        if (n.fail)         push(id, 'fail',      n.fail);
+        const onMap = n.on || n[true];
+        if (onMap && typeof onMap === 'object') {
+          for (const [cond, to] of Object.entries(onMap)) push(id, String(cond), String(to));
+        }
+      }
+      return edges;
+    }
+
+    function resolveTargetNode(toId, parentStates, workflowsByName) {
+      const s = parentStates[toId];
+      if (s?.kind === 'workflow') {
+        const subDoc = workflowsByName[s.workflow];
+        if (subDoc?.initial_state) return `${sid(toId)}__${sid(subDoc.initial_state)}`;
+      }
+      return sid(toId);
+    }
+
+    function _safeLabel(s) { return s.replace(/[<>{}"|]/g, ''); }
+    function mermaidClass(kind) { return (kind || 'agent').replace(/-/g, '_'); }
+
+    function _classDefs() {
+      return Object.entries(KIND).map(([k, { color }]) => {
+        const darkText = k === 'human' || k === 'git-hook';
+        const tc = darkText ? '#1e293b' : '#fff';
+        return `  classDef ${mermaidClass(k)} fill:${color},stroke:${color}cc,color:${tc}`;
+      });
+    }
+
+    function buildMermaid(doc, workflowsByName = {}, activeState = null) {
+      const states = doc.states || {};
+      const lines  = ['flowchart TD'];
+      const cls    = [];
+
+      for (const [id, s] of Object.entries(states)) {
+        if (s?.kind === 'workflow') {
+          const subDoc = workflowsByName[s.workflow];
+          const prefix = `${sid(id)}__`;
+          if (subDoc?.states) {
+            lines.push(`  subgraph ${sid(id)}["${id}"]`);
+            for (const [subId, subS] of Object.entries(subDoc.states)) {
+              const [o, c] = nodeShape(subS?.kind);
+              lines.push(`    ${prefix}${sid(subId)}${o}"${subId}"${c}`);
+              cls.push(`  class ${prefix}${sid(subId)} ${mermaidClass(subS?.kind)}`);
+            }
+            for (const { from, label, to } of extractEdges(subDoc.states)) {
+              lines.push(`    ${prefix}${from} -->|${_safeLabel(label)}| ${prefix}${to}`);
+            }
+            lines.push(`  end`);
+          } else {
+            lines.push(`  ${sid(id)}[["${id}\\n(${s.workflow})"]]]`);
+            cls.push(`  class ${sid(id)} ${mermaidClass('workflow')}`);
+          }
+        } else {
+          const [o, c] = nodeShape(s?.kind);
+          lines.push(`  ${sid(id)}${o}"${id}"${c}`);
+          cls.push(`  class ${sid(id)} ${mermaidClass(s?.kind)}`);
+        }
+      }
+      lines.push('');
+
+      for (const [id, s] of Object.entries(states)) {
+        const n = s?.next;
+        if (!n) continue;
+
+        if (s?.kind === 'workflow') {
+          const subDoc = workflowsByName[s.workflow];
+          if (!subDoc?.states) continue;
+          const prefix = `${sid(id)}__`;
+          const onMap = n.on || n[true];
+          if (!onMap || typeof onMap !== 'object') continue;
+          for (const [exitId, target] of Object.entries(onMap)) {
+            const tgt = String(target);
+            if (!states[tgt] || !subDoc.states[exitId]) continue;
+            const toNode = resolveTargetNode(tgt, states, workflowsByName);
+            lines.push(`  ${prefix}${sid(exitId)} -->|${_safeLabel(String(exitId))}| ${toNode}`);
+          }
+        } else {
+          const addEdge = (label, to) => {
+            if (!to || !states[to]) return;
+            const toNode = resolveTargetNode(to, states, workflowsByName);
+            lines.push(`  ${sid(id)} -->|${_safeLabel(label)}| ${toNode}`);
+          };
+          if (n.on_success)   addEdge('success',   n.on_success);
+          if (n.on_failure)   addEdge('failure',   n.on_failure);
+          if (n.on_rejection) addEdge('rejection', n.on_rejection);
+          if (n.on_complete)  addEdge('complete',  n.on_complete);
+          if (n.on_pass)      addEdge('pass',      n.on_pass);
+          if (n.on_fail)      addEdge('fail',      n.on_fail);
+          if (n.pass)         addEdge('pass',       n.pass);
+          if (n.fail)         addEdge('fail',       n.fail);
+          const onMap = n.on || n[true];
+          if (onMap && typeof onMap === 'object') {
+            for (const [cond, to] of Object.entries(onMap)) addEdge(String(cond), String(to));
+          }
+        }
+      }
+      lines.push('');
+
+      lines.push(..._classDefs(), ...cls);
+
+      // Highlight active state in amber
+      if (activeState && states[activeState]) {
+        lines.push('  classDef activeState fill:#f59e0b,stroke:#d97706,color:#1e293b,stroke-width:3px');
+        lines.push(`  class ${sid(activeState)} activeState`);
+      }
+
+      return lines.join('\n');
+    }
+
+    function buildHolisticMermaid(docs) {
+      if (!docs.length) return 'flowchart TD\n  empty["No workflows loaded"]';
+      const lines = ['flowchart TD'];
+      const cls   = [];
+      for (let i = 0; i < docs.length; i++) {
+        const doc    = docs[i];
+        const p      = `wf${i}`;
+        const states = doc.states || {};
+        const label  = (doc.name || `Workflow ${i + 1}`).replace(/"/g, '');
+        lines.push(`  subgraph ${p}["${label}"]`);
+        for (const [id, s] of Object.entries(states)) {
+          const [o, c] = nodeShape(s?.kind);
+          lines.push(`    ${p}_${sid(id)}${o}"${id}"${c}`);
+          cls.push(`  class ${p}_${sid(id)} ${mermaidClass(s?.kind)}`);
+        }
+        for (const { from, label: lbl, to } of extractEdges(states)) {
+          lines.push(`    ${p}_${from} -->|${_safeLabel(lbl)}| ${p}_${to}`);
+        }
+        lines.push(`  end`);
+        lines.push('');
+      }
+      lines.push(..._classDefs(), ...cls);
+      return lines.join('\n');
+    }
+
+    // ── <calypso-graph> ────────────────────────────────────────────────────────
+
+    class CalypsoGraph extends LitElement {
+      static properties = {
+        doc:         { type: Object  },
+        holistic:    { type: Boolean },
+        allDocs:     { type: Array   },
+        activeState: { type: String  },
+      };
+      createRenderRoot() { return this; }
+
+      async updated(changed) {
+        if (!['doc', 'holistic', 'allDocs', 'activeState'].some(k => changed.has(k))) return;
+        const el = this.querySelector('#mg');
+        if (!el) return;
+
+        const workflowsByName = {};
+        for (const d of (this.allDocs || [])) {
+          if (d?.name) workflowsByName[d.name] = d;
+        }
+
+        let def;
+        if (this.holistic && this.allDocs?.length) {
+          def = buildHolisticMermaid(this.allDocs);
+        } else if (this.doc?.states) {
+          def = buildMermaid(this.doc, workflowsByName, this.activeState);
+        } else {
+          el.innerHTML = '<p style="color:#64748b;padding:20px">No states found in document.</p>';
+          return;
+        }
+
+        el.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center">Rendering diagram\u2026</p>';
+        try {
+          const { svg } = await mermaid.render('mg' + Date.now(), def);
+          el.innerHTML = svg;
+          const s = el.querySelector('svg');
+          if (s) { s.style.width = '100%'; s.style.height = 'auto'; s.style.maxWidth = '100%'; }
+        } catch (e) {
+          el.innerHTML = `<pre style="color:#f87171;padding:16px;font-size:0.75rem;white-space:pre-wrap">${e.message}\n\n${def}</pre>`;
+        }
+      }
+
+      render() { return html`<div id="mg"></div>`; }
+    }
+    customElements.define('calypso-graph', CalypsoGraph);
+
+    // ── <calypso-app> ──────────────────────────────────────────────────────────
+
+    class CalypsoApp extends LitElement {
+      static properties = {
+        // Live state from /api/state
+        liveState:          { type: Object  },
+        // Parsed workflow documents from /api/workflows
+        allDocs:            { type: Array   },
+        workflowsByName:    { type: Object  },
+        // Currently displayed workflow (selected or active)
+        selectedWfName:     { type: String  },
+        doc:                { type: Object  },
+        // Active state info
+        activeWorkflow:     { type: String  },
+        activeState:        { type: String  },
+        activeStateKind:    { type: String  },
+        availableTransitions: { type: Array },
+        cronWorkflows:      { type: Array   },
+        // UI state
+        view:               { type: String  },
+        holistic:           { type: Boolean },
+        liveFlash:          { type: Boolean },
+        loading:            { type: Boolean },
+        error:              { type: String  },
+      };
+
+      constructor() {
+        super();
+        this.liveState = null;
+        this.allDocs = [];
+        this.workflowsByName = {};
+        this.selectedWfName = null;
+        this.doc = null;
+        this.activeWorkflow = null;
+        this.activeState = null;
+        this.activeStateKind = null;
+        this.availableTransitions = [];
+        this.cronWorkflows = [];
+        this.view = 'diagram';
+        this.holistic = false;
+        this.liveFlash = false;
+        this.loading = true;
+        this.error = null;
+        this._pollTimer = null;
+        this._lastStateJson = null;
+      }
+
+      connectedCallback() {
+        super.connectedCallback();
+        this._loadWorkflows().then(() => this._pollState());
+        this._pollTimer = setInterval(() => this._pollState(), POLL_INTERVAL_MS);
+      }
+
+      disconnectedCallback() {
+        super.disconnectedCallback();
+        clearInterval(this._pollTimer);
+      }
+
+      // ── Data loading ───────────────────────────────────────────────────────
+
+      async _loadWorkflows() {
+        try {
+          const res = await fetch('/api/workflows');
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const entries = await res.json();
+          const docs = entries.map(({ name, yaml }) => {
+            try {
+              const doc = jsyaml.load(yaml);
+              if (doc) doc._stem = name;
+              return doc;
+            } catch { return null; }
+          }).filter(Boolean);
+          this.allDocs = docs;
+          const map = {};
+          for (const d of docs) {
+            if (d?.name) map[d.name] = d;
+            if (d?._stem) map[d._stem] = d;
+          }
+          this.workflowsByName = map;
+        } catch (e) {
+          this.error = `Failed to load workflows: ${e.message}`;
+        } finally {
+          this.loading = false;
+        }
+      }
+
+      async _pollState() {
+        try {
+          const res = await fetch('/api/state');
+          if (!res.ok) return;
+          const json = await res.text();
+          if (json === this._lastStateJson) return;
+
+          this._lastStateJson = json;
+          const data = JSON.parse(json);
+          this.liveState = data;
+
+          // Extract active workflow / state
+          const ws = data.workflow_state;
+          const newWf = ws?.workflow || ws?.active_workflow || null;
+          const newState = ws?.state || ws?.current_state || null;
+
+          if (newWf !== this.activeWorkflow || newState !== this.activeState) {
+            this.liveFlash = true;
+            setTimeout(() => { this.liveFlash = false; }, 800);
+          }
+
+          this.activeWorkflow = newWf;
+          this.activeState = newState;
+          this.activeStateKind = data.active_state_kind || null;
+          this.availableTransitions = data.active_transitions || [];
+          this.cronWorkflows = data.cron_workflows || [];
+
+          // Select the active workflow doc (unless user has manually selected)
+          if (this.activeWorkflow && !this.selectedWfName) {
+            const d = this.workflowsByName[this.activeWorkflow];
+            if (d) this.doc = d;
+          } else if (this.selectedWfName) {
+            const d = this.workflowsByName[this.selectedWfName];
+            if (d) this.doc = d;
+          }
+        } catch { /* silent — server may not be ready */ }
+      }
+
+      _selectWorkflow(name) {
+        this.selectedWfName = name || null;
+        const d = name ? this.workflowsByName[name] : null;
+        this.doc = d || null;
+      }
+
+      // ── Event triggers ─────────────────────────────────────────────────────
+
+      async _triggerEvent(event) {
+        try {
+          await fetch('/api/trigger', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ event }),
+          });
+        } catch { /* best effort */ }
+      }
+
+      async _cronNow(workflow) {
+        try {
+          await fetch('/api/cron-now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workflow }),
+          });
+        } catch { /* best effort */ }
+      }
+
+      // ── Styles ─────────────────────────────────────────────────────────────
+
+      static styles = css`
+        :host { display: block; background: #0f172a; min-height: 100vh; }
+
+        header {
+          background: #1e293b; border-bottom: 1px solid #334155;
+          padding: 0 24px; height: 52px;
+          display: flex; align-items: center; gap: 14px;
+          position: sticky; top: 0; z-index: 100; flex-wrap: wrap;
+        }
+        .logo {
+          font-size: 0.9rem; font-weight: 700; color: #38bdf8;
+          letter-spacing: -0.02em; white-space: nowrap;
+        }
+        .logo span { color: #475569; font-weight: 400; }
+        .divider { color: #334155; }
+
+        select {
+          background: #0f172a; color: #f1f5f9; border: 1px solid #334155;
+          border-radius: 6px; padding: 5px 10px; font-size: 0.82rem; cursor: pointer; outline: none;
+        }
+        select:focus { border-color: #38bdf8; }
+
+        .live-dot {
+          width: 7px; height: 7px; border-radius: 50%;
+          background: #10b981; flex-shrink: 0;
+          opacity: 0.35; transition: opacity 0.2s;
+        }
+        .live-dot.flash {
+          opacity: 1;
+          animation: live-pulse 0.8s ease-out forwards;
+        }
+        @keyframes live-pulse {
+          0%   { transform: scale(1);   opacity: 1; }
+          40%  { transform: scale(2);   opacity: 0.8; }
+          100% { transform: scale(1);   opacity: 0.35; }
+        }
+
+        .tabs { margin-left: auto; display: flex; gap: 4px; }
+        .tab {
+          background: none; border: 1px solid #334155; border-radius: 6px;
+          color: #64748b; padding: 5px 12px; font-size: 0.78rem;
+          cursor: pointer; transition: all 0.12s; font-family: inherit;
+        }
+        .tab:hover { border-color: #475569; color: #94a3b8; }
+        .tab.active { background: #38bdf810; border-color: #38bdf8; color: #38bdf8; }
+
+        main { padding: 24px; max-width: 1600px; margin: 0 auto; }
+
+        /* Live state panel */
+        .state-panel {
+          background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+          padding: 14px 18px; margin-bottom: 16px;
+          display: flex; align-items: flex-start; gap: 24px; flex-wrap: wrap;
+        }
+        .state-panel-item { display: flex; flex-direction: column; gap: 3px; }
+        .state-label {
+          font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em;
+          color: #475569; font-weight: 700;
+        }
+        .state-value {
+          font-size: 0.82rem; color: #e2e8f0;
+          font-family: ui-monospace, monospace;
+        }
+        .state-value.active { color: #38bdf8; }
+        .state-value.none { color: #475569; font-style: italic; }
+        .kind-badge {
+          display: inline-block; font-size: 0.65rem; font-weight: 700;
+          padding: 1px 6px; border-radius: 4px; text-transform: uppercase;
+          letter-spacing: 0.06em; margin-left: 6px; vertical-align: middle;
+        }
+
+        /* Human event trigger panel */
+        .trigger-panel {
+          background: #1e293b; border: 1px solid #f59e0b55; border-radius: 8px;
+          padding: 14px 18px; margin-bottom: 16px;
+        }
+        .trigger-title {
+          font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.1em; color: #f59e0b; margin-bottom: 10px;
+        }
+        .trigger-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+        .trigger-btn {
+          background: #f59e0b15; border: 1px solid #f59e0b55; border-radius: 6px;
+          color: #fbbf24; padding: 6px 14px; font-size: 0.78rem;
+          cursor: pointer; transition: all 0.12s; font-family: inherit;
+          font-family: ui-monospace, monospace;
+        }
+        .trigger-btn:hover { background: #f59e0b25; border-color: #f59e0b; color: #f59e0b; }
+
+        /* Cron panel */
+        .cron-panel {
+          background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+          padding: 14px 18px; margin-bottom: 16px;
+        }
+        .cron-title {
+          font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+          letter-spacing: 0.1em; color: #64748b; margin-bottom: 10px;
+        }
+        .cron-row {
+          display: flex; align-items: center; gap: 10px; padding: 5px 0;
+          border-bottom: 1px solid #0f172a; flex-wrap: wrap;
+        }
+        .cron-row:last-child { border-bottom: none; }
+        .cron-run-btn {
+          background: #0ea5e915; border: 1px solid #0ea5e955; border-radius: 5px;
+          color: #38bdf8; padding: 3px 10px; font-size: 0.73rem;
+          cursor: pointer; transition: all 0.12s; font-family: inherit; white-space: nowrap;
+        }
+        .cron-run-btn:hover { background: #0ea5e925; border-color: #38bdf8; }
+        .cron-name { font-family: ui-monospace, monospace; font-size: 0.78rem; color: #e2e8f0; }
+        .cron-expr { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #475569; }
+        .cron-desc { font-size: 0.73rem; color: #64748b; flex: 1; }
+
+        .legend {
+          display: flex; gap: 14px; flex-wrap: wrap;
+          margin-bottom: 14px; padding: 10px 14px;
+          background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+        }
+        .leg { display: flex; align-items: center; gap: 6px; font-size: 0.74rem; color: #94a3b8; }
+        .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+        .diagram-toolbar {
+          display: flex; gap: 6px; margin-bottom: 10px; align-items: center; flex-wrap: wrap;
+        }
+        .ctrl-btn {
+          background: #1e293b; border: 1px solid #334155; border-radius: 6px;
+          color: #94a3b8; padding: 5px 12px; font-size: 0.78rem;
+          cursor: pointer; transition: all 0.12s; font-family: inherit;
+          display: inline-flex; align-items: center; gap: 5px;
+        }
+        .ctrl-btn:hover { border-color: #475569; color: #e2e8f0; }
+        .ctrl-btn.active { background: #38bdf810; border-color: #38bdf8; color: #38bdf8; }
+
+        .diagram-wrap {
+          background: #fff; border-radius: 10px;
+          padding: 20px; overflow-x: auto; min-height: 180px;
+        }
+
+        .status { padding: 40px; text-align: center; font-size: 0.875rem; }
+        .status.err { color: #f87171; }
+        .status.load { color: #64748b; }
+      `;
+
+      // ── Render helpers ─────────────────────────────────────────────────────
+
+      _kindBadge(kind) {
+        if (!kind) return '';
+        const { color, label } = KIND[kind] || KIND.agent;
+        const tc = kind === 'human' ? '#1e293b' : '#fff';
+        return html`<span class="kind-badge" style="background:${color}22;color:${color};border:1px solid ${color}55">${label}</span>`;
+      }
+
+      _renderStatePanel() {
+        const wf = this.activeWorkflow;
+        const st = this.activeState;
+        const kind = this.activeStateKind;
+        return html`
+          <div class="state-panel">
+            <div class="state-panel-item">
+              <div class="state-label">Active workflow</div>
+              <div class="state-value ${wf ? 'active' : 'none'}">${wf || 'none'}</div>
+            </div>
+            <div class="state-panel-item">
+              <div class="state-label">Current state</div>
+              <div class="state-value ${st ? 'active' : 'none'}">
+                ${st || 'none'}
+                ${st ? this._kindBadge(kind) : ''}
+              </div>
+            </div>
+            <div class="state-panel-item" style="margin-left:auto">
+              <div class="state-label">Live</div>
+              <div title="Polls /api/state every ${POLL_INTERVAL_MS / 1000}s">
+                <div class="live-dot ${this.liveFlash ? 'flash' : ''}"></div>
+              </div>
+            </div>
+          </div>
+        `;
+      }
+
+      _renderTriggerPanel() {
+        if (this.activeStateKind !== 'human' || !this.availableTransitions.length) return '';
+        return html`
+          <div class="trigger-panel">
+            <div class="trigger-title">&#9889; Trigger event</div>
+            <div class="trigger-buttons">
+              ${this.availableTransitions.map(ev => html`
+                <button class="trigger-btn" @click=${() => this._triggerEvent(ev)}>${ev}</button>
+              `)}
+            </div>
+          </div>
+        `;
+      }
+
+      _renderCronPanel() {
+        if (!this.cronWorkflows.length) return '';
+        return html`
+          <div class="cron-panel">
+            <div class="cron-title">&#9201; Scheduled workflows</div>
+            ${this.cronWorkflows.map(cw => html`
+              <div class="cron-row">
+                <button class="cron-run-btn" @click=${() => this._cronNow(cw.name)}>&#9654; Run now</button>
+                <span class="cron-name">${cw.name}</span>
+                ${cw.cron ? html`<span class="cron-expr">cron: ${cw.cron}</span>` : ''}
+                ${cw.description ? html`<span class="cron-desc">${cw.description}</span>` : ''}
+              </div>
+            `)}
+          </div>
+        `;
+      }
+
+      // ── Main render ────────────────────────────────────────────────────────
+
+      render() {
+        const { view } = this;
+        const wfNames = this.allDocs.map(d => d?._stem || d?.name).filter(Boolean);
+
+        return html`
+          <header>
+            <div class="logo">calypso <span>/ webview</span></div>
+            <span class="divider">|</span>
+            <select @change=${e => this._selectWorkflow(e.target.value || null)}>
+              <option value="">-- active workflow --</option>
+              ${wfNames.map(name => html`
+                <option value=${name} ?selected=${name === this.selectedWfName}>${name}</option>
+              `)}
+            </select>
+            <div class="tabs">
+              ${['diagram', 'cron'].map(v => html`
+                <button class="tab ${view === v ? 'active' : ''}" @click=${() => this.view = v}>${v}</button>
+              `)}
+            </div>
+          </header>
+
+          <main>
+            ${this.loading ? html`<div class="status load">Loading workflows\u2026</div>` : ''}
+            ${this.error   ? html`<div class="status err">Error: ${this.error}</div>` : ''}
+
+            ${this._renderStatePanel()}
+            ${this._renderTriggerPanel()}
+
+            ${view === 'diagram' ? html`
+              <div class="legend">
+                ${Object.entries(KIND).map(([k, { color, label }]) => html`
+                  <div class="leg">
+                    <div class="leg-dot" style="background:${color}"></div>
+                    <span>${label}</span>
+                  </div>
+                `)}
+                <div class="leg" style="margin-left:auto;color:#f59e0b;font-size:0.68rem">
+                  &#11044; amber = active state
+                </div>
+              </div>
+              <div class="diagram-toolbar">
+                <button
+                  class="ctrl-btn ${this.holistic ? 'active' : ''}"
+                  @click=${() => this.holistic = !this.holistic}
+                  title="Show all workflows as one combined graph"
+                >
+                  ${this.holistic ? '\u2296 collapse' : '\u2295 expand all'}
+                </button>
+              </div>
+              <div class="diagram-wrap">
+                <calypso-graph
+                  .doc=${this.doc || (this.allDocs[0] || null)}
+                  .holistic=${this.holistic}
+                  .allDocs=${this.allDocs}
+                  .activeState=${this.activeState}
+                ></calypso-graph>
+              </div>
+            ` : ''}
+
+            ${view === 'cron' ? this._renderCronPanel() : ''}
+          </main>
+        `;
+      }
+    }
+    customElements.define('calypso-app', CalypsoApp);
+  </script>
+</body>
+</html>

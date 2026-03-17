@@ -767,6 +767,18 @@ pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
 // Feature 4 — workflows (list / show / validate)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Feature — webview
+// ---------------------------------------------------------------------------
+
+/// Start the local HTTP webview server on `127.0.0.1:{port}`.
+///
+/// Blocks until the process is killed. Intended to be called from the CLI
+/// `webview` command.
+pub fn run_webview(cwd: &Path, port: u16) {
+    crate::webview::run_webview(cwd, port);
+}
+
 /// Return a newline-separated list of all embedded blueprint workflow name stems.
 pub fn run_workflows_list() -> String {
     crate::blueprint_workflows::BlueprintWorkflowLibrary::list()
