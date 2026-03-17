@@ -694,4 +694,44 @@ states:
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    #[test]
+    fn handle_connection_parses_content_length_and_reads_body() {
+        // Covers lines for Content-Length header parsing (line 69) and body
+        // read_exact (line 76) inside handle_connection.
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let tmp = std::env::temp_dir().join("calypso-webview-handle-conn-post");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cwd = tmp.clone();
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(stream, &cwd);
+        });
+
+        let body = br#"{"event":"test"}"#;
+        let request = format!(
+            "POST /api/trigger HTTP/1.1\r\nHost: localhost\r\nContent-Length: {}\r\n\r\n",
+            body.len()
+        );
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client.write_all(request.as_bytes()).unwrap();
+        client.write_all(body).unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            response.contains("200 OK"),
+            "expected 200 OK for POST trigger"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

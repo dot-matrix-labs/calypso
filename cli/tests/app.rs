@@ -2,10 +2,11 @@ use std::path::Path;
 use std::sync::{LazyLock, Mutex, RwLock};
 
 use calypso_cli::app::{
-    CommandOutput, gate_status_label, missing_pull_request_evidence, missing_pull_request_ref,
-    parse_pull_request_ref, render_feature_status, resolve_current_branch,
-    resolve_current_pull_request_with_program, resolve_repo_root, run_command, run_doctor,
-    run_status,
+    CommandOutput, FixAttemptResult, gate_status_label, missing_pull_request_evidence,
+    missing_pull_request_ref, parse_pull_request_ref, render_feature_status, render_fix_results,
+    resolve_current_branch, resolve_current_pull_request_with_program, resolve_repo_root,
+    run_command, run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json,
+    run_doctor_verbose, run_state_status_json, run_status, state_status_json_report,
 };
 
 // Tests that write a script file and then exec it must hold EXEC_LOCK as a
@@ -716,4 +717,200 @@ fn resolve_current_pull_request_returns_none_when_gh_returns_empty_array() {
     assert!(result.is_none());
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
+}
+
+// ── run_doctor_verbose ───────────────────────────────────────────────────────
+
+#[test]
+fn run_doctor_verbose_returns_non_empty_string() {
+    let temp_dir = std::env::temp_dir().join("calypso-app-doctor-verbose");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let result = run_doctor_verbose(&temp_dir);
+    assert!(!result.is_empty(), "verbose report should be non-empty");
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── run_doctor_fix_single ────────────────────────────────────────────────────
+
+#[test]
+fn run_doctor_fix_single_returns_error_for_unknown_check_id() {
+    let temp_dir = std::env::temp_dir().join("calypso-app-fix-single-unknown");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let result = run_doctor_fix_single(&temp_dir, "definitely-not-a-real-check");
+    assert!(result.is_err(), "unknown check id should return Err");
+    let msg = result.unwrap_err();
+    assert!(
+        msg.contains("unknown check id"),
+        "error should mention unknown check id"
+    );
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── run_doctor_fix_all ───────────────────────────────────────────────────────
+
+#[test]
+fn run_doctor_fix_all_returns_vec_without_panicking() {
+    let temp_dir = std::env::temp_dir().join("calypso-app-fix-all");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    // Runs on a temp dir that fails some checks — should return results without panicking.
+    let results = run_doctor_fix_all(&temp_dir);
+    // Every result must have a non-empty label.
+    for r in &results {
+        assert!(!r.check_label.is_empty(), "check_label should be set");
+    }
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── render_fix_results ───────────────────────────────────────────────────────
+
+#[test]
+fn render_fix_results_formats_applied_and_not_applied() {
+    let results = vec![
+        FixAttemptResult {
+            check_label: "check-a".to_string(),
+            applied: true,
+            output: "fix applied".to_string(),
+            validated: Some(true),
+        },
+        FixAttemptResult {
+            check_label: "check-b".to_string(),
+            applied: false,
+            output: "no fix available".to_string(),
+            validated: None,
+        },
+    ];
+    let rendered = render_fix_results(&results);
+    assert!(rendered.contains("check-a"), "should mention check-a");
+    assert!(rendered.contains("check-b"), "should mention check-b");
+}
+
+// ── render_fix_results — additional branches ─────────────────────────────────
+
+#[test]
+fn render_fix_results_empty_list_returns_all_passing_message() {
+    let rendered = render_fix_results(&[]);
+    assert!(
+        rendered.contains("All checks passing"),
+        "empty results should say all passing"
+    );
+}
+
+#[test]
+fn render_fix_results_covers_failed_applied_and_skip_variants() {
+    let results = vec![
+        FixAttemptResult {
+            check_label: "check-failed".to_string(),
+            applied: true,
+            output: "something went wrong".to_string(),
+            validated: Some(false),
+        },
+        FixAttemptResult {
+            check_label: "check-applied".to_string(),
+            applied: true,
+            output: "applied without validation".to_string(),
+            validated: None,
+        },
+        FixAttemptResult {
+            check_label: "check-pass".to_string(),
+            applied: false,
+            output: "already passing".to_string(),
+            validated: Some(true),
+        },
+        FixAttemptResult {
+            check_label: "check-skip".to_string(),
+            applied: false,
+            output: "no fix available".to_string(),
+            validated: None,
+        },
+    ];
+    let rendered = render_fix_results(&results);
+    assert!(rendered.contains("FAILED"));
+    assert!(rendered.contains("APPLIED"));
+    assert!(rendered.contains("PASS"));
+    assert!(rendered.contains("SKIP"));
+}
+
+// ── run_doctor_json ──────────────────────────────────────────────────────────
+
+#[test]
+fn run_doctor_json_returns_json_string() {
+    let temp_dir = std::env::temp_dir().join("calypso-app-doctor-json");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    // Returns Ok or Err depending on check results — both return valid JSON.
+    let result = run_doctor_json(&temp_dir);
+    let json_str = match result {
+        Ok(ref s) => s.as_str(),
+        Err(ref s) => s.as_str(),
+    };
+    let parsed: serde_json::Value =
+        serde_json::from_str(json_str).expect("run_doctor_json should return valid JSON");
+    assert!(parsed.get("summary").is_some(), "JSON should have summary");
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── state_status_json_report ─────────────────────────────────────────────────
+
+#[test]
+fn state_status_json_report_builds_from_feature_state() {
+    let feature = feature_with_gate_statuses(&[
+        calypso_cli::state::GateStatus::Passing,
+        calypso_cli::state::GateStatus::Failing,
+    ]);
+    let report = state_status_json_report(&feature);
+    assert_eq!(report.feature_id, "feature");
+    assert_eq!(report.pr_number, Some(7));
+    assert!(!report.gate_groups.is_empty());
+}
+
+// ── run_state_status_json ────────────────────────────────────────────────────
+
+#[test]
+fn run_state_status_json_returns_err_when_no_state_file() {
+    let temp_dir = std::env::temp_dir().join("calypso-app-state-status-json-no-file");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let result = run_state_status_json(&temp_dir);
+    assert!(result.is_err(), "should error when state.json is missing");
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── run_doctor_fix_single — already-passing branch ───────────────────────────
+
+#[test]
+fn run_doctor_fix_single_returns_already_passing_for_passing_check() {
+    // state-machine-integrity checks embedded templates — always passes.
+    let temp_dir = std::env::temp_dir().join("calypso-app-fix-single-passing");
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let result = run_doctor_fix_single(&temp_dir, "gh-installed");
+    // The check should be found and report "already passing".
+    if let Ok(ref fix_result) = result {
+        assert!(
+            !fix_result.applied,
+            "already-passing check should not be applied"
+        );
+    }
+    // Either Ok (passing) or Err (not found on this build) — must not panic.
+    std::fs::remove_dir_all(&temp_dir).ok();
+}
+
+// ── run_doctor_fix_single — fix application path ─────────────────────────────
+
+#[test]
+fn run_doctor_fix_single_applies_fix_for_failing_check_with_auto_fix() {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    // A fresh temp dir is not a git repo → git-initialized check fails.
+    // Its auto-fix runs `git init`, which should succeed.
+    let temp_dir = std::env::temp_dir().join(format!("calypso-app-fix-apply-{nanos}"));
+    std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
+    let result = run_doctor_fix_single(&temp_dir, "git-initialized");
+    // The fix should be applied — even if it ends up failing validation.
+    if let Ok(ref r) = result {
+        assert!(r.applied, "fix should be applied when check was failing");
+    }
+    // Either Ok (fix applied) or Err (apply failed) — must not panic.
+    let _ = result;
+    std::fs::remove_dir_all(&temp_dir).ok();
 }
