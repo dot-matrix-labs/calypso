@@ -82,13 +82,24 @@ fn make_temp_dir(name: &str) -> std::path::PathBuf {
 
 fn init_git_repo(branch: &str) -> std::path::PathBuf {
     let repo_root = make_temp_dir("calypso-cli-app-tests");
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", branch])
         .current_dir(&repo_root)
         .output()
         .expect("git init should run successfully");
-
     repo_root
+}
+
+/// Returns a `Command` for `git` with `GIT_DIR` and `GIT_WORK_TREE` unset.
+///
+/// When cargo runs tests inside a pre-push hook, git sets `GIT_DIR` in the
+/// environment. Any spawned `git` subprocess inherits it and operates on the
+/// outer repo instead of the temporary test repo. Unsetting those variables
+/// forces git to discover the correct repo from `current_dir()`.
+fn git_cmd() -> std::process::Command {
+    let mut cmd = std::process::Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
 }
 
 #[test]
@@ -227,12 +238,12 @@ fn resolve_current_pull_request_returns_error_when_no_github_remote() {
     let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-no-remote");
     // Init a git repo but with no remote.
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", "feat/test"])
         .current_dir(&temp_dir)
         .output()
         .expect("git init should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
@@ -265,12 +276,12 @@ fn resolve_current_pull_request_parses_successful_output() {
     // resolve_current_pull_request_with_program to work (it resolves owner/repo and branch).
     let temp_dir = make_temp_dir("calypso-cli-resolve-pr");
     // Init a git repo with a GitHub remote.
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", "feat/test-pr"])
         .current_dir(&temp_dir)
         .output()
         .expect("git init should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "remote",
             "add",
@@ -281,7 +292,7 @@ fn resolve_current_pull_request_parses_successful_output() {
         .output()
         .expect("git remote add should run");
     std::fs::write(temp_dir.join("README"), "init").expect("readme should write");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
@@ -430,12 +441,12 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-error");
     // Init a git repo with a GitHub remote.
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", "feat/test-err"])
         .current_dir(&temp_dir)
         .output()
         .expect("git init should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "remote",
             "add",
@@ -445,7 +456,7 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
@@ -505,7 +516,7 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
 
     let repo_root = init_git_repo("feat/run-status-gh-error");
     // Add a GitHub remote so resolve_owner_repo works.
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "remote",
             "add",
@@ -517,12 +528,12 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
         .expect("git remote add should run");
     // Make an initial commit so the repo is valid
     std::fs::write(repo_root.join("README"), "init").expect("readme should write");
-    std::process::Command::new("git")
+    git_cmd()
         .args(["add", "."])
         .current_dir(&repo_root)
         .output()
         .expect("git add should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
@@ -583,12 +594,12 @@ fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_js
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-malformed");
     // Init a git repo with a GitHub remote.
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", "feat/test-malformed"])
         .current_dir(&temp_dir)
         .output()
         .expect("git init should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "remote",
             "add",
@@ -598,7 +609,7 @@ fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_js
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
@@ -647,12 +658,12 @@ fn resolve_current_pull_request_returns_none_when_gh_returns_empty_array() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-no-pr");
     // Init a git repo with a GitHub remote.
-    std::process::Command::new("git")
+    git_cmd()
         .args(["init", "-b", "feat/test-no-pr"])
         .current_dir(&temp_dir)
         .output()
         .expect("git init should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "remote",
             "add",
@@ -662,7 +673,7 @@ fn resolve_current_pull_request_returns_none_when_gh_returns_empty_array() {
         .current_dir(&temp_dir)
         .output()
         .expect("git remote add should run");
-    std::process::Command::new("git")
+    git_cmd()
         .args([
             "-c",
             "user.email=test@test.com",
