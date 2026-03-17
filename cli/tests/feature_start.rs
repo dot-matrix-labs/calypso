@@ -212,8 +212,14 @@ fn path_mutex() -> &'static Mutex<()> {
     PATH_MUTEX.get_or_init(|| Mutex::new(()))
 }
 
+fn git_cmd() -> Command {
+    let mut cmd = Command::new("git");
+    cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE");
+    cmd
+}
+
 fn run_git(repo_root: &Path, args: &[&str]) {
-    let output = Command::new("git")
+    let output = git_cmd()
         .args(args)
         .current_dir(repo_root)
         .output()
@@ -497,7 +503,7 @@ fn start_feature_creates_real_git_worktree_and_seeded_state() {
             );
             assert_eq!(persisted.current_feature.pull_request.number, 27);
 
-            let worktree_git = Command::new("git")
+            let worktree_git = git_cmd()
                 .args(["branch", "--show-current"])
                 .current_dir(&result.worktree_path)
                 .output()
@@ -775,7 +781,7 @@ fn host_environment_rolls_back_branch_and_worktree_when_gh_pr_create_fails() {
                 "worktree should be removed on rollback"
             );
 
-            let branch_check = Command::new("git")
+            let branch_check = git_cmd()
                 .args([
                     "show-ref",
                     "--verify",
