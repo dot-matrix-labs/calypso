@@ -68,7 +68,7 @@ Commands:
   status              Render the feature status for the project directory
   state               Alias for `state status`
   state --json        Alias for `state status --json`
-  state status        Show a human-readable summary of .calypso/state.json
+  state status        Show a human-readable summary of .calypso/repository-state.json
   state status --json Output state status as JSON
   state show          Print the current state file as raw JSON
   agents              Show active agent sessions

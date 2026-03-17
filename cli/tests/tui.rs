@@ -1930,7 +1930,7 @@ fn run_watch_with_valid_state_roundtrips() {
     };
     let dir = std::env::temp_dir().join(format!("calypso_test_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("state.json");
+    let path = dir.join("repository-state.json");
 
     let state = RepositoryState {
         version: 1,
@@ -1965,7 +1965,7 @@ fn run_watch_with_runner_error_propagates() {
     };
     let dir = std::env::temp_dir().join(format!("calypso_test_err_{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("state.json");
+    let path = dir.join("repository-state.json");
 
     let state = RepositoryState {
         version: 1,

@@ -70,7 +70,7 @@ fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
 fn write_state(dir: &Path, state: &RepositoryState) -> PathBuf {
     let state_dir = dir.join(".calypso");
     std::fs::create_dir_all(&state_dir).expect("create .calypso dir");
-    let path = state_dir.join("state.json");
+    let path = state_dir.join("repository-state.json");
     state.save_to_path(&path).expect("save state");
     path
 }
