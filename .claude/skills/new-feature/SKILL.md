@@ -26,6 +26,18 @@ Do NOT proceed until all four are provided.
 
 ---
 
+## Setup
+
+Before running any `gh` issue commands, detect the tasks repository:
+
+```bash
+TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name) + "-tasks"')
+```
+
+Use `$TASKS_REPO` (or `{tasks-repo}` in command templates below) wherever `--repo` is needed for issue operations.
+
+---
+
 ## Phase 1: Intake validation
 
 Confirm the request has:
@@ -56,13 +68,13 @@ Fetch the current "Plan" tracking issue to understand what has been built, what 
 in progress, and what is planned next:
 
 ```bash
-gh issue list --repo sduvignau/calypso-tasks --search "Plan" --state open --json number,title
+gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
 ```
 
 Then read its body:
 
 ```bash
-gh issue view {plan-issue-number} --repo sduvignau/calypso-tasks --json body -q .body
+gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body
 ```
 
 Understand the current phases, completed features, and pending work. The new feature
@@ -100,7 +112,7 @@ Report your evaluation to the user with one of three outcomes:
 
 ### What you MUST do
 
-Create a GitHub issue on `sduvignau/calypso-tasks` using `gh issue create` with the
+Create a GitHub issue on `{tasks-repo}` using `gh issue create` with the
 following structure. Every section is required.
 
 ```
@@ -171,7 +183,7 @@ body and ask for confirmation before running `gh issue create`.
 
 ```bash
 gh issue create \
-  --repo sduvignau/calypso-tasks \
+  --repo {tasks-repo} \
   --title "{title}" \
   --body "{body}"
 ```
@@ -188,7 +200,7 @@ tracks all features organized by phase. There must be exactly one.
 ### Step 1: Find the tracking issue
 
 ```bash
-gh issue list --repo sduvignau/calypso-tasks --search "Plan" --state open --json number,title
+gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
 ```
 
 Look for an issue with the exact title "Plan". If multiple matches, pick the one
@@ -226,7 +238,7 @@ invent phase names.
 1. Fetch the current tracking issue body:
 
    ```bash
-   gh issue view {plan-issue-number} --repo sduvignau/calypso-tasks --json body -q .body
+   gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body
    ```
 
 2. Determine the correct phase for the new feature. Consider:
@@ -247,7 +259,7 @@ invent phase names.
 
 5. Update the tracking issue:
    ```bash
-   gh issue edit {plan-issue-number} --repo sduvignau/calypso-tasks --body "{updated body}"
+   gh issue edit {plan-issue-number} --repo {tasks-repo} --body "{updated body}"
    ```
 
 ### What you MUST NOT do in this phase
