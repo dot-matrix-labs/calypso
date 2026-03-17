@@ -18,14 +18,30 @@ const INDEX_HTML: &str = include_str!("webview_index.html");
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/// Start the local webview HTTP server on `127.0.0.1:{port}`.
+/// Returns the first non-loopback IPv4 address of this machine, if any.
+fn public_ip() -> Option<std::net::Ipv4Addr> {
+    use std::net::{SocketAddr, UdpSocket};
+    // Connect to an external address (no data is sent) to discover the local
+    // source IP the OS would use for outbound traffic.
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    match socket.local_addr().ok()? {
+        SocketAddr::V4(addr) => Some(*addr.ip()),
+        SocketAddr::V6(_) => None,
+    }
+}
+
+/// Start the local webview HTTP server on `0.0.0.0:{port}` (all interfaces).
 ///
-/// Blocks forever (until the process is killed). Each connection is handled on
-/// a dedicated thread.
+/// Prints the local URL and the public/LAN IP if detectable. Blocks forever
+/// (until the process is killed). Each connection is handled on a dedicated thread.
 pub fn run_webview(cwd: &Path, port: u16) {
-    let addr = format!("127.0.0.1:{port}");
+    let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).expect("bind failed — port may already be in use");
-    println!("Calypso webview running at http://{addr}");
+    println!("Calypso webview running at http://localhost:{port}");
+    if let Some(ip) = public_ip() {
+        println!("                       http://{ip}:{port}  (network)");
+    }
     println!("Press Ctrl+C to stop.");
     for stream in listener.incoming().flatten() {
         let cwd = cwd.to_path_buf();
