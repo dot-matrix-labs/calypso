@@ -57,6 +57,53 @@ This vision has always required superhuman implementation capacity. We have arri
 
 ---
 
+## Why
+
+**1 — Programming took a leap — and changed the build vs. buy calculus**
+
+- An AI operator delivers what a 20-person team would take years to build
+- The cost of building has dropped sharply
+- The cost of depending on third parties has not
+- Buying SaaS was how you avoided writing expensive code — today you pay a premium to not have control
+
+→ Building is no longer the risk. External dependency is now the risk.
+
+**2 — "Vibe coding" is not an enterprise standard — it is a false sense of progress**
+
+Generating software has become easy. Operating critical systems remains hard.
+
+Your expectations: security, reliability, business continuity.
+
+The reality of improvised apps: no threat model, no consistent controls, no incident response.
+
+The real world charges: hackers and ransomware, data leaks or loss, production failures, audits and compliance.
+
+It is not a question of "if" — it is "when." Works in the demo, fails in the crisis.
+
+→ On the day you need it most, it exposes you.
+
+**3 — AI on top of silos is a structural ceiling**
+
+It looks like progress, but it is a local maximum. Organizations implementing AI are discovering they need to rebuild their data systems — and end up with a new patchwork of vendors instead of the old one. You cannot reason well about data you do not control, cannot see in full, or have fragmented across systems.
+
+→ Fragmentation limits any AI.
+
+**4 — Without a greenfield project, there is no real transformation**
+
+AI demands a data architecture from the start. Legacy + ETL + SaaS exports do not solve it. You end up reconciling imperfect data, adapting models to the past, and accumulating complexity. You cannot transform an enterprise with AI if it cannot even send invoices correctly.
+
+The alternative: owned data from day one, AI integrated from day one, every feature compounding the advantage.
+
+→ Stop patching. Start building advantage.
+
+**5 — Superfield — for greenfield AI projects**
+
+An AI model that defines how custom enterprise platforms should be built — with AI integrated from the start, designed to continuously improve. An engineering brain that condenses thousands of hours of real-world experience.
+
+→ Let AI build the software it wants — not within human constraints.
+
+---
+
 ## The Blueprint
 
 Calypso is opinionated. Several choices are counter-intuitive coming from a human development culture — they make full sense once humans are out of the development loop.
