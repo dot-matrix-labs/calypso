@@ -1032,6 +1032,24 @@ mod tests {
         write_gha_file(&repo_root, "rust-e2e.yml", "Rust E2E", &["test"]);
         write_gha_file(&repo_root, "rust-coverage.yml", "Rust Coverage", &["test"]);
         write_gha_file(&repo_root, "release-cli.yml", "Release CLI", &["release"]);
+        write_gha_file(
+            &repo_root,
+            "pr-issue-checklist.yml",
+            "PR issue checklist",
+            &["issue-checklist"],
+        );
+        write_gha_file(
+            &repo_root,
+            "pr-conflicts.yml",
+            "PR conflicts",
+            &["conflicts"],
+        );
+        write_gha_file(
+            &repo_root,
+            "pr-single-issue.yml",
+            "PR single issue",
+            &["single-issue"],
+        );
 
         let audit = run_audit(&repo_root, false);
 

@@ -8,8 +8,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use calypso_cli::init::{
     InitEnvironment, InitError, InitProgress, InitRequest, InitStep, RepoInitStatus, WORKFLOW_CI,
     WORKFLOW_MERGE_QUEUE, WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_CONFLICTS, WORKFLOW_PR_DEPENDS_ON,
-    WORKFLOW_PR_ISSUE_CHECKLIST, WORKFLOW_PR_SINGLE_ISSUE, detect_repo_status,
-    init_repository, refresh_workflows, run_init_interactive, scaffold_github_actions,
+    WORKFLOW_PR_ISSUE_CHECKLIST, WORKFLOW_PR_SINGLE_ISSUE, detect_repo_status, init_repository,
+    refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
 use calypso_cli::state::RepositoryState;
 
@@ -877,8 +877,8 @@ fn workflow_pr_issue_checklist_content_is_valid_yaml() {
 
 #[test]
 fn workflow_pr_conflicts_content_is_valid_yaml() {
-    let val: serde_yaml::Value = serde_yaml::from_str(WORKFLOW_PR_CONFLICTS)
-        .expect("pr-conflicts.yml should be valid YAML");
+    let val: serde_yaml::Value =
+        serde_yaml::from_str(WORKFLOW_PR_CONFLICTS).expect("pr-conflicts.yml should be valid YAML");
     let map = val.as_mapping().expect("top-level should be a mapping");
     assert!(map.contains_key(serde_yaml::Value::String("name".into())));
     assert!(map.contains_key(serde_yaml::Value::String("on".into())));
