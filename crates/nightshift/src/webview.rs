@@ -37,7 +37,10 @@ fn public_ip() -> Option<std::net::Ipv4Addr> {
 /// (until the process is killed). Each connection is handled on a dedicated thread.
 pub fn run_webview(cwd: &Path, port: u16) {
     let addr = format!("0.0.0.0:{port}");
-    let listener = TcpListener::bind(&addr).expect("bind failed — port may already be in use");
+    let listener = TcpListener::bind(&addr).unwrap_or_else(|_| {
+        eprintln!("error: port {port} is already in use. Try: calypso webview --port <N>");
+        std::process::exit(1);
+    });
     println!("Calypso webview running at http://localhost:{port}");
     if let Some(ip) = public_ip() {
         println!("                       http://{ip}:{port}  (network)");
