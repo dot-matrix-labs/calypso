@@ -5,25 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Calypso — Live Webview</title>
 
-  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@maleta/blokjs/dist/blokjs.min.js"></script>
-  <script>
-    mermaid.initialize({
-      startOnLoad: false,
-      theme: 'base',
-      flowchart: { curve: 'basis', padding: 24, nodeSpacing: 50, rankSpacing: 60 },
-      themeVariables: {
-        primaryColor: '#f8fafc',
-        primaryTextColor: '#1e293b',
-        primaryBorderColor: '#cbd5e1',
-        lineColor: '#64748b',
-        background: '#ffffff',
-        edgeLabelBackground: '#f1f5f9',
-        fontSize: '13px',
-      },
-    });
-  </script>
+  <!-- Dependency tracking — must be the first script -->
+  <script>window.__missingScripts = [];</script>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"
+          onerror="window.__missingScripts.push('js-yaml@4.1.0 — https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"
+          onerror="window.__missingScripts.push('mermaid@10.9.0 — https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js')"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@maleta/blokjs/dist/blokjs.min.js"
+          onerror="window.__missingScripts.push('@maleta/blokjs — https://cdn.jsdelivr.net/npm/@maleta/blokjs/dist/blokjs.min.js')"></script>
 
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,6 +24,7 @@
     }
     code, .mono { font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace; }
 
+    /* ── Header ──────────────────────────────────────────────────────────────── */
     header {
       background: #1e293b;
       border-bottom: 1px solid #334155;
@@ -87,9 +77,11 @@
     }
     .tab:hover { border-color: #475569; color: #94a3b8; }
     .tab.active { background: #38bdf810; border-color: #38bdf8; color: #38bdf8; }
+    .tab.debug-tab.active { background: #8b5cf610; border-color: #8b5cf6; color: #a78bfa; }
 
     main { padding: 24px; max-width: 1600px; margin: 0 auto; }
 
+    /* ── State panel ─────────────────────────────────────────────────────────── */
     .state-panel {
       background: #1e293b; border: 1px solid #334155; border-radius: 8px;
       padding: 14px 18px; margin-bottom: 16px;
@@ -107,6 +99,7 @@
     }
     .live-item { margin-left: auto; }
 
+    /* ── Trigger panel ───────────────────────────────────────────────────────── */
     .trigger-panel {
       background: #1e293b; border: 1px solid #f59e0b55; border-radius: 8px;
       padding: 14px 18px; margin-bottom: 16px;
@@ -120,6 +113,7 @@
     }
     .trigger-btn:hover { background: #f59e0b25; border-color: #f59e0b; color: #f59e0b; }
 
+    /* ── Cron panel ──────────────────────────────────────────────────────────── */
     .cron-panel {
       background: #1e293b; border: 1px solid #334155; border-radius: 8px;
       padding: 14px 18px; margin-bottom: 16px;
@@ -140,6 +134,7 @@
     .cron-expr { font-family: ui-monospace, monospace; font-size: 0.72rem; color: #475569; }
     .cron-desc { font-size: 0.73rem; color: #64748b; flex: 1; }
 
+    /* ── Legend ──────────────────────────────────────────────────────────────── */
     .legend {
       display: flex; gap: 14px; flex-wrap: wrap;
       margin-bottom: 14px; padding: 10px 14px;
@@ -149,6 +144,7 @@
     .leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
     .active-legend { margin-left: auto; color: #f59e0b; font-size: 0.68rem; }
 
+    /* ── Diagram ─────────────────────────────────────────────────────────────── */
     .diagram-toolbar { display: flex; gap: 6px; margin-bottom: 10px; align-items: center; flex-wrap: wrap; }
     .ctrl-btn {
       background: #1e293b; border: 1px solid #334155; border-radius: 6px;
@@ -157,18 +153,222 @@
     }
     .ctrl-btn:hover { border-color: #475569; color: #e2e8f0; }
     .ctrl-btn.active { background: #38bdf810; border-color: #38bdf8; color: #38bdf8; }
-
     .diagram-wrap { background: #fff; border-radius: 10px; padding: 20px; overflow-x: auto; min-height: 180px; }
 
     .status { padding: 40px; text-align: center; font-size: 0.875rem; }
-    .status.err { color: #f87171; }
     .status.load { color: #64748b; }
+
+    /* ── Static startup error (vanilla JS, no blokjs) ────────────────────────── */
+    .static-error-page {
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 40px; text-align: center;
+    }
+    .static-error-icon { font-size: 2.5rem; margin-bottom: 20px; }
+    .static-error-title { font-size: 1.15rem; font-weight: 700; color: #f87171; margin-bottom: 10px; }
+    .static-error-subtitle { font-size: 0.82rem; color: #64748b; margin-bottom: 20px; }
+    .script-error-list { list-style: none; margin-bottom: 24px; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+    .script-error-item code {
+      display: block; background: #1e293b; border: 1px solid #f8717133;
+      border-radius: 6px; padding: 8px 14px;
+      font-family: ui-monospace, monospace; font-size: 0.78rem; color: #fca5a5;
+    }
+    .static-error-hint { font-size: 0.78rem; color: #475569; margin-bottom: 20px; max-width: 480px; line-height: 1.6; }
+    .static-retry-btn {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      color: #f1f5f9; padding: 10px 28px; font-size: 0.875rem;
+      cursor: pointer; font-family: inherit; transition: all 0.12s;
+    }
+    .static-retry-btn:hover { border-color: #475569; background: #263044; }
+
+    /* ── Startup error component (blokjs-rendered) ───────────────────────────── */
+    .startup-error {
+      background: #1e293b; border: 1px solid #f8717144; border-radius: 10px;
+      padding: 28px; margin-bottom: 20px;
+    }
+    .startup-error-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+    .startup-error-badge {
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+      padding: 3px 8px; border-radius: 4px;
+      background: #f8717120; color: #f87171; border: 1px solid #f8717155;
+      white-space: nowrap;
+    }
+    .startup-error-title { font-size: 1rem; font-weight: 700; color: #f87171; }
+    .startup-error-msg {
+      font-size: 0.875rem; color: #e2e8f0; margin-bottom: 16px;
+      font-family: ui-monospace, monospace; line-height: 1.6;
+    }
+    .startup-error-section { margin-top: 14px; }
+    .startup-error-section-label {
+      font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.1em;
+      color: #475569; font-weight: 700; margin-bottom: 6px;
+    }
+    .startup-error-pre {
+      background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+      padding: 12px; font-size: 0.75rem; color: #94a3b8;
+      font-family: ui-monospace, monospace; white-space: pre-wrap;
+      word-break: break-all; max-height: 200px; overflow-y: auto;
+    }
+    .startup-error-status {
+      font-size: 0.82rem; font-weight: 700;
+      color: #f87171; font-family: ui-monospace, monospace;
+    }
+    .startup-error-actions { display: flex; gap: 10px; margin-top: 22px; flex-wrap: wrap; }
+    .startup-error-btn {
+      background: none; border: 1px solid #334155; border-radius: 6px;
+      color: #94a3b8; padding: 8px 18px; font-size: 0.8rem;
+      cursor: pointer; transition: all 0.12s; font-family: inherit;
+    }
+    .startup-error-btn:hover { border-color: #475569; color: #e2e8f0; }
+    .startup-error-btn--retry { background: #f8717110; border-color: #f8717155; color: #f87171; }
+    .startup-error-btn--retry:hover { background: #f8717120; border-color: #f87171; }
+    .startup-error-btn--debug { border-color: #8b5cf644; color: #a78bfa; }
+    .startup-error-btn--debug:hover { background: #8b5cf610; border-color: #8b5cf6; }
+
+    /* ── Poll error banner ───────────────────────────────────────────────────── */
+    .poll-error-banner {
+      background: #f59e0b0a; border: 1px solid #f59e0b33; border-radius: 7px;
+      padding: 9px 14px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .poll-error-icon { font-size: 0.85rem; flex-shrink: 0; color: #f59e0b; }
+    .poll-error-msg { font-size: 0.78rem; color: #fbbf24; flex: 1; font-family: ui-monospace, monospace; }
+    .poll-error-dismiss {
+      background: none; border: none; color: #475569; cursor: pointer;
+      font-size: 1rem; padding: 0 4px; font-family: inherit; line-height: 1;
+    }
+    .poll-error-dismiss:hover { color: #94a3b8; }
+
+    /* ── Action error notification ───────────────────────────────────────────── */
+    .action-error {
+      background: #ef44441a; border: 1px solid #ef444444; border-radius: 7px;
+      padding: 9px 14px; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .action-error-icon { font-size: 0.85rem; flex-shrink: 0; color: #f87171; }
+    .action-error-msg { font-size: 0.78rem; color: #f87171; flex: 1; font-family: ui-monospace, monospace; }
+    .action-error-dismiss {
+      background: none; border: none; color: #475569; cursor: pointer;
+      font-size: 1rem; padding: 0 4px; font-family: inherit; line-height: 1;
+    }
+    .action-error-dismiss:hover { color: #94a3b8; }
+
+    /* ── Debug panel ─────────────────────────────────────────────────────────── */
+    .debug-toolbar {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .debug-sub-tab {
+      background: none; border: 1px solid #334155; border-radius: 6px;
+      color: #64748b; padding: 4px 12px; font-size: 0.76rem;
+      cursor: pointer; transition: all 0.12s; font-family: inherit;
+    }
+    .debug-sub-tab:hover { border-color: #475569; color: #94a3b8; }
+    .debug-sub-tab.active { background: #8b5cf610; border-color: #8b5cf6; color: #a78bfa; }
+    .debug-clear-btn {
+      margin-left: auto;
+      background: none; border: 1px solid #1e293b; border-radius: 6px;
+      color: #334155; padding: 4px 12px; font-size: 0.76rem;
+      cursor: pointer; transition: all 0.12s; font-family: inherit;
+    }
+    .debug-clear-btn:hover { border-color: #ef4444; color: #f87171; }
+
+    .debug-log {
+      background: #080d16; border: 1px solid #1e293b; border-radius: 8px;
+      max-height: 620px; overflow-y: auto;
+    }
+    .debug-empty {
+      padding: 40px; text-align: center; color: #1e293b;
+      font-size: 0.8rem; font-family: ui-monospace, monospace;
+    }
+    .debug-entry {
+      padding: 7px 14px; border-bottom: 1px solid #0f172a;
+      font-family: ui-monospace, monospace; font-size: 0.75rem;
+      display: grid;
+      grid-template-columns: 6.5rem 3rem 1fr 4rem;
+      gap: 8px; align-items: baseline;
+    }
+    .debug-entry:last-child { border-bottom: none; }
+    .debug-entry-ts   { color: #1e293b; white-space: nowrap; }
+    .debug-entry-status { font-weight: 700; white-space: nowrap; text-align: center; }
+    .debug-entry-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .debug-entry-elapsed { color: #334155; white-space: nowrap; text-align: right; font-size: 0.7rem; }
+    .debug-entry-body {
+      grid-column: 1 / -1;
+      color: #475569; font-size: 0.72rem;
+      white-space: pre-wrap; word-break: break-all;
+      max-height: 140px; overflow-y: auto;
+      background: #0f172a; border-radius: 4px; padding: 6px 10px; margin-top: 2px;
+    }
+    .debug-entry--ok    .debug-entry-status { color: #10b981; }
+    .debug-entry--ok    .debug-entry-label  { color: #334155; }
+    .debug-entry--error .debug-entry-status { color: #f87171; }
+    .debug-entry--error .debug-entry-label  { color: #fca5a5; }
+    .debug-entry--warn  .debug-entry-status { color: #f59e0b; }
+    .debug-entry--warn  .debug-entry-label  { color: #fbbf24; }
+    .debug-entry--info  .debug-entry-status { color: #38bdf8; }
+    .debug-entry--info  .debug-entry-label  { color: #7dd3fc; }
+
+    .debug-state-wrap {
+      background: #080d16; border: 1px solid #1e293b; border-radius: 8px;
+      max-height: 620px; overflow-y: auto;
+    }
+    .debug-state-pre {
+      padding: 18px; font-family: ui-monospace, monospace; font-size: 0.75rem;
+      color: #64748b; white-space: pre; word-break: break-all; line-height: 1.65;
+    }
+    .debug-state-empty {
+      padding: 40px; text-align: center; color: #1e293b;
+      font-size: 0.8rem; font-family: ui-monospace, monospace;
+    }
   </style>
 </head>
 <body>
   <div id="app"></div>
 
   <script>
+    // ── Static startup error ───────────────────────────────────────────────────
+    // Rendered via vanilla JS when CDN scripts fail — blokjs may not be available.
+    function renderStaticStartupError(missing) {
+      const items = missing.map(function(name) {
+        return '<li class="script-error-item"><code>' + name + '</code></li>';
+      }).join('');
+      document.getElementById('app').innerHTML =
+        '<div class="static-error-page">' +
+          '<div class="static-error-icon">\u26a0</div>' +
+          '<h1 class="static-error-title">Startup Failed \u2014 Scripts Did Not Load</h1>' +
+          '<p class="static-error-subtitle">The following dependencies could not be fetched from CDN:</p>' +
+          '<ul class="script-error-list">' + items + '</ul>' +
+          '<p class="static-error-hint">Check your network connection and that jsDelivr CDN is reachable from this host. The webview requires js-yaml, mermaid, and blokjs to run.</p>' +
+          '<button class="static-retry-btn" onclick="location.reload()">\u21ba Retry</button>' +
+        '</div>';
+    }
+
+    // ── Dependency check ───────────────────────────────────────────────────────
+    var __missing = (window.__missingScripts || []).slice();
+    if (typeof jsyaml  === 'undefined' && __missing.indexOf('js-yaml')  === -1) __missing.push('js-yaml (loaded silently without error but undefined)');
+    if (typeof mermaid === 'undefined' && __missing.indexOf('mermaid')  === -1) __missing.push('mermaid (loaded silently without error but undefined)');
+    if (typeof blok    === 'undefined' && __missing.indexOf('blokjs')   === -1) __missing.push('blokjs (loaded silently without error but undefined)');
+
+    if (__missing.length > 0) {
+      renderStaticStartupError(__missing);
+    } else {
+
+    // ── Mermaid init ───────────────────────────────────────────────────────────
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'base',
+      flowchart: { curve: 'basis', padding: 24, nodeSpacing: 50, rankSpacing: 60 },
+      themeVariables: {
+        primaryColor: '#f8fafc',
+        primaryTextColor: '#1e293b',
+        primaryBorderColor: '#cbd5e1',
+        lineColor: '#64748b',
+        background: '#ffffff',
+        edgeLabelBackground: '#f1f5f9',
+        fontSize: '13px',
+      },
+    });
+
     // ── Constants ──────────────────────────────────────────────────────────────
 
     const KIND = {
@@ -182,6 +382,10 @@
     };
 
     const POLL_MS = 2000;
+
+    function logTs() {
+      return new Date().toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    }
 
     // ── Mermaid helpers ────────────────────────────────────────────────────────
 
@@ -348,21 +552,35 @@
 
     blok.mount('#app', {
       state: {
+        // Workflow data
         allDocs: [],
         workflowsByName: {},
         selectedWfName: '',
         doc: null,
+        // Live state
         activeWorkflow: null,
         activeState: null,
         activeStateKind: null,
         availableTransitions: [],
         cronWorkflows: [],
+        // UI
         view: 'diagram',
         holistic: false,
         liveFlash: false,
         loading: true,
-        error: null,
         kindEntries: Object.entries(KIND).map(([key, { color, label }]) => ({ key, color, label })),
+        // Startup error — each field is a plain string to avoid null→{} blokjs quirk
+        startupErrorPhase: '',
+        startupErrorMsg: '',
+        startupErrorStatus: '',
+        startupErrorBody: '',
+        // Runtime errors
+        pollError: '',
+        actionError: '',
+        // Debug
+        debugLog: [],
+        lastStateJson: '',
+        debugSubview: 'log',
       },
 
       computed: {
@@ -377,16 +595,39 @@
         kindBadgeBorder() { const k = KIND[this.activeStateKind]; return k ? `1px solid ${k.color}55` : 'none'; },
         isViewDiagram() { return this.view === 'diagram'; },
         isViewCron() { return this.view === 'cron'; },
+        isViewDebug() { return this.view === 'debug'; },
         showTriggerPanel() { return this.activeStateKind === 'human' && this.availableTransitions.length > 0; },
         showCronPanel() { return this.cronWorkflows.length > 0; },
         holisticBtnText() { return this.holistic ? '\u2296 collapse' : '\u2295 expand all'; },
-        hasError() { return !!this.error; },
-        errorMsg() { return this.error ? `Error: ${this.error}` : ''; },
+        // Startup error
+        hasStartupError() { return typeof this.startupErrorMsg === 'string' && this.startupErrorMsg.length > 0; },
+        showMainContent() { return !this.hasStartupError && !this.loading; },
+        startupPhaseBadge() {
+          const labels = { fetch: 'HTTP Error', parse: 'Parse Error', network: 'Network Error', yaml: 'YAML Error' };
+          return labels[this.startupErrorPhase] || 'Startup Error';
+        },
+        hasStartupStatus() { return typeof this.startupErrorStatus === 'string' && this.startupErrorStatus.length > 0; },
+        hasStartupBody() { return typeof this.startupErrorBody === 'string' && this.startupErrorBody.length > 0; },
+        // Runtime errors
+        hasPollError() { return typeof this.pollError === 'string' && this.pollError.length > 0; },
+        hasActionError() { return typeof this.actionError === 'string' && this.actionError.length > 0; },
+        // Debug
+        hasDebugLog() { return this.debugLog.length > 0; },
+        isDebugSubviewLog() { return this.debugSubview === 'log'; },
+        isDebugSubviewState() { return this.debugSubview === 'state'; },
+        hasLastState() { return typeof this.lastStateJson === 'string' && this.lastStateJson.length > 0; },
+        formattedState() {
+          if (!this.lastStateJson) return '';
+          try { return JSON.stringify(JSON.parse(this.lastStateJson), null, 2); }
+          catch { return this.lastStateJson; }
+        },
       },
 
       methods: {
         mount() {
-          this.loadWorkflows().then(() => this.pollState());
+          this.loadWorkflows().then(() => {
+            if (!this.startupErrorMsg) this.pollState();
+          });
           this._pollTimer = setInterval(() => this.pollState(), POLL_MS);
         },
 
@@ -394,18 +635,109 @@
           clearInterval(this._pollTimer);
         },
 
-        async loadWorkflows() {
+        // ── Debug logging ──────────────────────────────────────────────────────
+
+        addLog(entry) {
           try {
-            const res = await fetch('/api/workflows');
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const entries = await res.json();
+            if (!entry.id) entry.id = performance.now() + Math.random();
+            const prev = Array.isArray(this.debugLog) ? this.debugLog : [];
+            this.debugLog = [entry].concat(prev).slice(0, 500);
+          } catch (_) {}
+        },
+
+        // ── Tracked fetch — logs all requests to the debug panel ───────────────
+
+        async trackedFetch(url, opts) {
+          const ts = logTs();
+          const t0 = performance.now();
+          const method = (opts && opts.method) || 'GET';
+          try {
+            const res = await fetch(url, opts);
+            const elapsed = Math.round(performance.now() - t0) + 'ms';
+            let body = '';
+            try { body = await res.clone().text(); } catch (_) {}
+            if (body.length > 2000) body = body.slice(0, 2000) + '\n\u2026 (truncated)';
+            this.addLog({
+              ts,
+              cssClass: 'debug-entry ' + (res.ok ? 'debug-entry--ok' : 'debug-entry--error'),
+              label: method + ' ' + url,
+              status: String(res.status),
+              elapsed,
+              body,
+            });
+            return res;
+          } catch (e) {
+            const elapsed = Math.round(performance.now() - t0) + 'ms';
+            const msg = e instanceof Error ? e.message : String(e);
+            this.addLog({
+              ts,
+              cssClass: 'debug-entry debug-entry--error',
+              label: method + ' ' + url,
+              status: 'ERR',
+              elapsed,
+              body: msg,
+            });
+            throw e;
+          }
+        },
+
+        // ── Startup: load workflows ────────────────────────────────────────────
+
+        async loadWorkflows() {
+          this.startupErrorPhase = '';
+          this.startupErrorMsg = '';
+          this.startupErrorStatus = '';
+          this.startupErrorBody = '';
+          try {
+            let res;
+            try {
+              res = await this.trackedFetch('/api/workflows');
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              this.startupErrorPhase = 'network';
+              this.startupErrorMsg = 'Could not reach the Calypso server: ' + msg;
+              return;
+            }
+
+            if (!res.ok) {
+              let body = '';
+              try { body = await res.text(); } catch (_) {}
+              this.startupErrorPhase = 'fetch';
+              this.startupErrorMsg = '/api/workflows returned ' + res.status;
+              this.startupErrorStatus = String(res.status);
+              this.startupErrorBody = body;
+              return;
+            }
+
+            let entries;
+            try {
+              entries = await res.json();
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              this.startupErrorPhase = 'parse';
+              this.startupErrorMsg = 'Failed to parse /api/workflows response as JSON: ' + msg;
+              return;
+            }
+
             const docs = entries.map(({ name, yaml }) => {
               try {
                 const doc = jsyaml.load(yaml);
                 if (doc) doc._stem = name;
                 return doc;
-              } catch { return null; }
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                this.addLog({
+                  ts: logTs(),
+                  cssClass: 'debug-entry debug-entry--warn',
+                  label: 'YAML parse: ' + name,
+                  status: 'WARN',
+                  elapsed: '',
+                  body: msg,
+                });
+                return null;
+              }
             }).filter(Boolean);
+
             this.allDocs = docs;
             const map = {};
             for (const d of docs) {
@@ -413,66 +745,116 @@
               if (d?._stem) map[d._stem] = d;
             }
             this.workflowsByName = map;
-          } catch (e) {
-            this.error = `Failed to load workflows: ${e.message}`;
           } finally {
             this.loading = false;
           }
         },
 
+        // ── State polling ──────────────────────────────────────────────────────
+
         async pollState() {
+          if (this.hasStartupError) return;
+
+          let res;
           try {
-            const res = await fetch('/api/state');
-            if (!res.ok) return;
-            const json = await res.text();
-            if (json === this._lastStateJson) return;
-            this._lastStateJson = json;
-            const data = JSON.parse(json);
+            res = await this.trackedFetch('/api/state');
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            this.pollError = 'Cannot reach server: ' + msg;
+            return;
+          }
 
-            const ws = data.workflow_state;
-            const newWf = ws?.workflow || ws?.active_workflow || null;
-            const newState = ws?.state || ws?.current_state || null;
+          if (!res.ok) {
+            this.pollError = '/api/state returned ' + res.status;
+            return;
+          }
 
-            if (newWf !== this.activeWorkflow || newState !== this.activeState) {
-              this.liveFlash = true;
-              setTimeout(() => { this.liveFlash = false; }, 800);
-            }
+          let json;
+          try { json = await res.text(); } catch (e) {
+            this.pollError = 'Failed to read state response';
+            return;
+          }
 
-            this.activeWorkflow = newWf;
-            this.activeState = newState;
-            this.activeStateKind = data.active_state_kind || null;
-            this.availableTransitions = data.active_transitions || [];
-            this.cronWorkflows = data.cron_workflows || [];
+          if (json === this._lastStateJson) return;
+          this._lastStateJson = json;
+          this.lastStateJson = json;
+          this.pollError = '';
 
-            if (this.activeWorkflow && !this.selectedWfName) {
-              const d = this.workflowsByName[this.activeWorkflow];
-              if (d) this.doc = d;
-            }
-          } catch { /* silent — server may not be ready */ }
+          let data;
+          try { data = JSON.parse(json); } catch (e) {
+            this.pollError = 'State JSON parse error: ' + (e instanceof Error ? e.message : String(e));
+            return;
+          }
+
+          const ws = data.workflow_state;
+          const newWf = (ws && (ws.workflow || ws.active_workflow)) || null;
+          const newState = (ws && (ws.state || ws.current_state)) || null;
+
+          if (newWf !== this.activeWorkflow || newState !== this.activeState) {
+            this.liveFlash = true;
+            setTimeout(() => { this.liveFlash = false; }, 800);
+          }
+
+          this.activeWorkflow = newWf;
+          this.activeState = newState;
+          this.activeStateKind = data.active_state_kind || null;
+          this.availableTransitions = data.active_transitions || [];
+          this.cronWorkflows = data.cron_workflows || [];
+
+          if (this.activeWorkflow && !this.selectedWfName) {
+            const d = this.workflowsByName[this.activeWorkflow];
+            if (d) this.doc = d;
+          }
         },
 
-        setView(v) { this.view = v; },
-        toggleHolistic() { this.holistic = !this.holistic; },
+        // ── Actions ────────────────────────────────────────────────────────────
 
         async triggerEvent(ev) {
           try {
-            await fetch('/api/trigger', {
+            const res = await this.trackedFetch('/api/trigger', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ event: ev }),
             });
-          } catch { /* best effort */ }
+            if (!res.ok) {
+              this.actionError = 'Trigger "' + ev + '" returned HTTP ' + res.status;
+            }
+          } catch (e) {
+            this.actionError = 'Trigger "' + ev + '" failed: ' + (e instanceof Error ? e.message : String(e));
+          }
         },
 
         async cronNow(workflow) {
           try {
-            await fetch('/api/cron-now', {
+            const res = await this.trackedFetch('/api/cron-now', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ workflow }),
             });
-          } catch { /* best effort */ }
+            if (!res.ok) {
+              this.actionError = 'Run "' + workflow + '" returned HTTP ' + res.status;
+            }
+          } catch (e) {
+            this.actionError = 'Run "' + workflow + '" failed: ' + (e instanceof Error ? e.message : String(e));
+          }
         },
+
+        // ── UI controls ────────────────────────────────────────────────────────
+
+        setView(v) { this.view = v; },
+        setDebugSubview(v) { this.debugSubview = v; },
+        toggleHolistic() { this.holistic = !this.holistic; },
+        dismissPollError() { this.pollError = ''; },
+        dismissActionError() { this.actionError = ''; },
+        clearDebugLog() { this.debugLog = []; },
+
+        async retryLoad() {
+          this.loading = true;
+          await this.loadWorkflows();
+          if (!this.startupErrorMsg) this.pollState();
+        },
+
+        // ── Mermaid rendering ──────────────────────────────────────────────────
 
         async renderMermaid() {
           const el = this.refs.mgContainer;
@@ -501,7 +883,16 @@
             const s = el.querySelector('svg');
             if (s) { s.style.width = '100%'; s.style.height = 'auto'; s.style.maxWidth = '100%'; }
           } catch (e) {
-            el.innerHTML = `<pre style="color:#f87171;padding:16px;font-size:0.75rem;white-space:pre-wrap">${e.message}\n\n${def}</pre>`;
+            const msg = e instanceof Error ? e.message : String(e);
+            this.addLog({
+              ts: logTs(),
+              cssClass: 'debug-entry debug-entry--error',
+              label: 'mermaid render error',
+              status: 'ERR',
+              elapsed: '',
+              body: msg + '\n\nDefinition:\n' + def,
+            });
+            el.innerHTML = `<pre style="color:#f87171;padding:16px;font-size:0.75rem;white-space:pre-wrap">${msg}\n\n${def}</pre>`;
           }
         },
       },
@@ -511,12 +902,19 @@
         async activeState() { await this.renderMermaid(); },
         async holistic() { await this.renderMermaid(); },
         async allDocs() { await this.renderMermaid(); },
+        selectedWfName() {
+          if (this.selectedWfName) {
+            const d = this.workflowsByName[this.selectedWfName];
+            if (d) this.doc = d;
+          }
+        },
       },
 
       view: ($) => ({
         div: {
           children: [
-            // ── Header ───────────────────────────────────────────────────────
+
+            // ── Header ─────────────────────────────────────────────────────────
             {
               header: {
                 children: [
@@ -538,9 +936,7 @@
                         {
                           each: $.wfNames,
                           as: 'wfn',
-                          children: [
-                            { option: { value: $.wfn, text: $.wfn } },
-                          ],
+                          children: [{ option: { value: $.wfn, text: $.wfn } }],
                         },
                       ],
                     },
@@ -551,6 +947,7 @@
                       children: [
                         { button: { class: { tab: true, active: $.isViewDiagram }, text: 'diagram', click: "setView('diagram')" } },
                         { button: { class: { tab: true, active: $.isViewCron }, text: 'cron', click: "setView('cron')" } },
+                        { button: { class: { tab: true, 'debug-tab': true, active: $.isViewDebug }, text: 'debug', click: "setView('debug')" } },
                       ],
                     },
                   },
@@ -558,89 +955,69 @@
               },
             },
 
-            // ── Main ─────────────────────────────────────────────────────────
+            // ── Main ───────────────────────────────────────────────────────────
             {
               main: {
                 children: [
-                  // Loading / error
-                  { when: $.loading, children: [{ div: { class: 'status load', text: 'Loading workflows\u2026' } }] },
-                  { when: $.hasError, children: [{ div: { class: 'status err', text: $.errorMsg } }] },
 
-                  // Live state panel
+                  // Loading
                   {
-                    div: {
-                      class: 'state-panel',
-                      children: [
-                        {
-                          div: {
-                            class: 'state-panel-item',
-                            children: [
-                              { div: { class: 'state-label', text: 'Active workflow' } },
-                              { div: { class: ['state-value', { active: $.hasActiveWorkflow, none: $.not.hasActiveWorkflow }], text: $.activeWorkflowLabel } },
-                            ],
-                          },
-                        },
-                        {
-                          div: {
-                            class: 'state-panel-item',
-                            children: [
-                              { div: { class: 'state-label', text: 'Current state' } },
-                              {
-                                div: {
-                                  class: ['state-value', { active: $.hasActiveState, none: $.not.hasActiveState }],
-                                  children: [
-                                    { span: { text: $.activeStateLabel } },
-                                    {
-                                      when: $.hasActiveState,
-                                      children: [
-                                        {
-                                          span: {
-                                            class: 'kind-badge',
-                                            style: { background: $.kindBadgeBg, color: $.kindBadgeColor, border: $.kindBadgeBorder },
-                                            text: $.kindBadgeLabel,
-                                          },
-                                        },
-                                      ],
-                                    },
-                                  ],
-                                },
-                              },
-                            ],
-                          },
-                        },
-                        {
-                          div: {
-                            class: 'state-panel-item live-item',
-                            children: [
-                              { div: { class: 'state-label', text: 'Live' } },
-                              { div: { class: { 'live-dot': true, flash: $.liveFlash } } },
-                            ],
-                          },
-                        },
-                      ],
-                    },
+                    when: $.loading,
+                    children: [{ div: { class: 'status load', text: 'Loading workflows\u2026' } }],
                   },
 
-                  // Human event trigger panel
+                  // ── Startup error component ───────────────────────────────────
                   {
-                    when: $.showTriggerPanel,
+                    when: $.hasStartupError,
                     children: [
                       {
                         div: {
-                          class: 'trigger-panel',
+                          class: 'startup-error',
                           children: [
-                            { div: { class: 'trigger-title', text: '\u26a1 Trigger event' } },
                             {
                               div: {
-                                class: 'trigger-buttons',
+                                class: 'startup-error-header',
                                 children: [
-                                  {
-                                    each: $.availableTransitions,
-                                    as: 'ev',
+                                  { div: { class: 'startup-error-badge', text: $.startupPhaseBadge } },
+                                  { div: { class: 'startup-error-title', text: 'Calypso webview failed to start' } },
+                                ],
+                              },
+                            },
+                            { div: { class: 'startup-error-msg', text: $.startupErrorMsg } },
+                            {
+                              when: $.hasStartupStatus,
+                              children: [
+                                {
+                                  div: {
+                                    class: 'startup-error-section',
                                     children: [
-                                      { button: { class: 'trigger-btn', click: 'triggerEvent(ev)', text: $.ev } },
+                                      { div: { class: 'startup-error-section-label', text: 'HTTP Status' } },
+                                      { div: { class: 'startup-error-status', text: $.startupErrorStatus } },
                                     ],
                                   },
+                                },
+                              ],
+                            },
+                            {
+                              when: $.hasStartupBody,
+                              children: [
+                                {
+                                  div: {
+                                    class: 'startup-error-section',
+                                    children: [
+                                      { div: { class: 'startup-error-section-label', text: 'Response body' } },
+                                      { pre: { class: 'startup-error-pre', text: $.startupErrorBody } },
+                                    ],
+                                  },
+                                },
+                              ],
+                            },
+                            {
+                              div: {
+                                class: 'startup-error-actions',
+                                children: [
+                                  { button: { class: 'startup-error-btn startup-error-btn--retry', click: 'retryLoad', text: '\u21ba Retry' } },
+                                  { button: { class: 'startup-error-btn startup-error-btn--debug', click: "setView('debug')", text: '\u25b6 View debug log' } },
                                 ],
                               },
                             },
@@ -650,94 +1027,308 @@
                     ],
                   },
 
-                  // ── Diagram tab ─────────────────────────────────────────────
+                  // ── Main content (no startup error, not loading) ───────────────
                   {
-                    when: $.isViewDiagram,
+                    when: $.showMainContent,
                     children: [
-                      // Kind legend
-                      {
-                        div: {
-                          class: 'legend',
-                          children: [
-                            {
-                              each: $.kindEntries,
-                              as: 'ke',
-                              key: 'ke.key',
-                              children: [
-                                {
-                                  div: {
-                                    class: 'leg',
-                                    children: [
-                                      { div: { class: 'leg-dot', style: { background: $.ke.color } } },
-                                      { span: { text: $.ke.label } },
-                                    ],
-                                  },
-                                },
-                              ],
-                            },
-                            { div: { class: 'leg active-legend', text: '\u2b24 amber = active state' } },
-                          ],
-                        },
-                      },
-                      // Toolbar
-                      {
-                        div: {
-                          class: 'diagram-toolbar',
-                          children: [
-                            { button: { class: { 'ctrl-btn': true, active: $.holistic }, click: 'toggleHolistic', text: $.holisticBtnText } },
-                          ],
-                        },
-                      },
-                      // Mermaid container
-                      {
-                        div: {
-                          class: 'diagram-wrap',
-                          children: [
-                            { div: { ref: 'mgContainer' } },
-                          ],
-                        },
-                      },
-                    ],
-                  },
 
-                  // ── Cron tab ────────────────────────────────────────────────
-                  {
-                    when: $.isViewCron,
-                    children: [
+                      // Poll error banner
                       {
-                        when: $.showCronPanel,
+                        when: $.hasPollError,
                         children: [
                           {
                             div: {
-                              class: 'cron-panel',
+                              class: 'poll-error-banner',
                               children: [
-                                { div: { class: 'cron-title', text: '\u23f1 Scheduled workflows' } },
+                                { span: { class: 'poll-error-icon', text: '\u26a0' } },
+                                { span: { class: 'poll-error-msg', text: $.pollError } },
+                                { button: { class: 'poll-error-dismiss', click: 'dismissPollError', text: '\u00d7' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+
+                      // Action error notification
+                      {
+                        when: $.hasActionError,
+                        children: [
+                          {
+                            div: {
+                              class: 'action-error',
+                              children: [
+                                { span: { class: 'action-error-icon', text: '\u2715' } },
+                                { span: { class: 'action-error-msg', text: $.actionError } },
+                                { button: { class: 'action-error-dismiss', click: 'dismissActionError', text: '\u00d7' } },
+                              ],
+                            },
+                          },
+                        ],
+                      },
+
+                      // Live state panel
+                      {
+                        div: {
+                          class: 'state-panel',
+                          children: [
+                            {
+                              div: {
+                                class: 'state-panel-item',
+                                children: [
+                                  { div: { class: 'state-label', text: 'Active workflow' } },
+                                  { div: { class: ['state-value', { active: $.hasActiveWorkflow, none: $.not.hasActiveWorkflow }], text: $.activeWorkflowLabel } },
+                                ],
+                              },
+                            },
+                            {
+                              div: {
+                                class: 'state-panel-item',
+                                children: [
+                                  { div: { class: 'state-label', text: 'Current state' } },
+                                  {
+                                    div: {
+                                      class: ['state-value', { active: $.hasActiveState, none: $.not.hasActiveState }],
+                                      children: [
+                                        { span: { text: $.activeStateLabel } },
+                                        {
+                                          when: $.hasActiveState,
+                                          children: [
+                                            {
+                                              span: {
+                                                class: 'kind-badge',
+                                                style: { background: $.kindBadgeBg, color: $.kindBadgeColor, border: $.kindBadgeBorder },
+                                                text: $.kindBadgeLabel,
+                                              },
+                                            },
+                                          ],
+                                        },
+                                      ],
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                            {
+                              div: {
+                                class: 'state-panel-item live-item',
+                                children: [
+                                  { div: { class: 'state-label', text: 'Live' } },
+                                  { div: { class: { 'live-dot': true, flash: $.liveFlash } } },
+                                ],
+                              },
+                            },
+                          ],
+                        },
+                      },
+
+                      // Human trigger panel
+                      {
+                        when: $.showTriggerPanel,
+                        children: [
+                          {
+                            div: {
+                              class: 'trigger-panel',
+                              children: [
+                                { div: { class: 'trigger-title', text: '\u26a1 Trigger event' } },
                                 {
-                                  each: $.cronWorkflows,
-                                  as: 'cw',
-                                  key: 'cw.name',
-                                  children: [
-                                    {
-                                      div: {
-                                        class: 'cron-row',
+                                  div: {
+                                    class: 'trigger-buttons',
+                                    children: [
+                                      {
+                                        each: $.availableTransitions,
+                                        as: 'ev',
                                         children: [
-                                          { button: { class: 'cron-run-btn', click: 'cronNow(cw.name)', text: '\u25b6 Run now' } },
-                                          { span: { class: 'cron-name', text: $.cw.name } },
-                                          { when: $.cw.cron, children: [{ span: { class: 'cron-expr', text: $.cw.cron } }] },
-                                          { when: $.cw.description, children: [{ span: { class: 'cron-desc', text: $.cw.description } }] },
+                                          { button: { class: 'trigger-btn', click: 'triggerEvent(ev)', text: $.ev } },
                                         ],
                                       },
-                                    },
-                                  ],
+                                    ],
+                                  },
                                 },
                               ],
                             },
                           },
                         ],
                       },
+
+                      // ── Diagram tab ─────────────────────────────────────────────
                       {
-                        when: $.not.showCronPanel,
-                        children: [{ div: { class: 'status load', text: 'No scheduled workflows found.' } }],
+                        when: $.isViewDiagram,
+                        children: [
+                          {
+                            div: {
+                              class: 'legend',
+                              children: [
+                                {
+                                  each: $.kindEntries,
+                                  as: 'ke',
+                                  key: 'ke.key',
+                                  children: [
+                                    {
+                                      div: {
+                                        class: 'leg',
+                                        children: [
+                                          { div: { class: 'leg-dot', style: { background: $.ke.color } } },
+                                          { span: { text: $.ke.label } },
+                                        ],
+                                      },
+                                    },
+                                  ],
+                                },
+                                { div: { class: 'leg active-legend', text: '\u2b24 amber = active state' } },
+                              ],
+                            },
+                          },
+                          {
+                            div: {
+                              class: 'diagram-toolbar',
+                              children: [
+                                { button: { class: { 'ctrl-btn': true, active: $.holistic }, click: 'toggleHolistic', text: $.holisticBtnText } },
+                              ],
+                            },
+                          },
+                          {
+                            div: {
+                              class: 'diagram-wrap',
+                              children: [{ div: { ref: 'mgContainer' } }],
+                            },
+                          },
+                        ],
+                      },
+
+                      // ── Cron tab ────────────────────────────────────────────────
+                      {
+                        when: $.isViewCron,
+                        children: [
+                          {
+                            when: $.showCronPanel,
+                            children: [
+                              {
+                                div: {
+                                  class: 'cron-panel',
+                                  children: [
+                                    { div: { class: 'cron-title', text: '\u23f1 Scheduled workflows' } },
+                                    {
+                                      each: $.cronWorkflows,
+                                      as: 'cw',
+                                      key: 'cw.name',
+                                      children: [
+                                        {
+                                          div: {
+                                            class: 'cron-row',
+                                            children: [
+                                              { button: { class: 'cron-run-btn', click: 'cronNow(cw.name)', text: '\u25b6 Run now' } },
+                                              { span: { class: 'cron-name', text: $.cw.name } },
+                                              { when: $.cw.cron, children: [{ span: { class: 'cron-expr', text: $.cw.cron } }] },
+                                              { when: $.cw.description, children: [{ span: { class: 'cron-desc', text: $.cw.description } }] },
+                                            ],
+                                          },
+                                        },
+                                      ],
+                                    },
+                                  ],
+                                },
+                              },
+                            ],
+                          },
+                          {
+                            when: $.not.showCronPanel,
+                            children: [{ div: { class: 'status load', text: 'No scheduled workflows found.' } }],
+                          },
+                        ],
+                      },
+
+                    ],
+                  },
+
+                  // ── Debug tab (always accessible, even on startup error) ─────────
+                  {
+                    when: $.isViewDebug,
+                    children: [
+                      {
+                        div: {
+                          class: 'debug-panel',
+                          children: [
+                            // Toolbar
+                            {
+                              div: {
+                                class: 'debug-toolbar',
+                                children: [
+                                  { button: { class: { 'debug-sub-tab': true, active: $.isDebugSubviewLog }, click: "setDebugSubview('log')", text: 'Request log' } },
+                                  { button: { class: { 'debug-sub-tab': true, active: $.isDebugSubviewState }, click: "setDebugSubview('state')", text: 'Live state' } },
+                                  { button: { class: 'debug-clear-btn', click: 'clearDebugLog', text: 'Clear log' } },
+                                ],
+                              },
+                            },
+
+                            // Request log
+                            {
+                              when: $.isDebugSubviewLog,
+                              children: [
+                                {
+                                  div: {
+                                    class: 'debug-log',
+                                    children: [
+                                      {
+                                        when: $.not.hasDebugLog,
+                                        children: [{ div: { class: 'debug-empty', text: 'No requests yet.' } }],
+                                      },
+                                      {
+                                        when: $.hasDebugLog,
+                                        children: [
+                                          {
+                                            each: $.debugLog,
+                                            as: 'entry',
+                                            key: 'entry.id',
+                                            children: [
+                                              {
+                                                div: {
+                                                  class: $.entry.cssClass,
+                                                  children: [
+                                                    { span: { class: 'debug-entry-ts', text: $.entry.ts } },
+                                                    { span: { class: 'debug-entry-status', text: $.entry.status } },
+                                                    { span: { class: 'debug-entry-label', text: $.entry.label } },
+                                                    { span: { class: 'debug-entry-elapsed', text: $.entry.elapsed } },
+                                                    {
+                                                      when: $.entry.body,
+                                                      children: [{ pre: { class: 'debug-entry-body', text: $.entry.body } }],
+                                                    },
+                                                  ],
+                                                },
+                                              },
+                                            ],
+                                          },
+                                        ],
+                                      },
+                                    ],
+                                  },
+                                },
+                              ],
+                            },
+
+                            // Live state dump
+                            {
+                              when: $.isDebugSubviewState,
+                              children: [
+                                {
+                                  div: {
+                                    class: 'debug-state-wrap',
+                                    children: [
+                                      {
+                                        when: $.hasLastState,
+                                        children: [{ pre: { class: 'debug-state-pre', text: $.formattedState } }],
+                                      },
+                                      {
+                                        when: $.not.hasLastState,
+                                        children: [{ div: { class: 'debug-state-empty', text: 'No state received yet.' } }],
+                                      },
+                                    ],
+                                  },
+                                },
+                              ],
+                            },
+
+                          ],
+                        },
                       },
                     ],
                   },
@@ -745,10 +1336,13 @@
                 ],
               },
             },
+
           ],
         },
       }),
     });
+
+    } // end dependency check
   </script>
 </body>
 </html>
