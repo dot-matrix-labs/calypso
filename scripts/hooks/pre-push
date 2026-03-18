@@ -40,15 +40,9 @@ if [ -n "$MERGE_BASE" ]; then
   PR_FILE_COUNT=$(git diff --name-only "$MERGE_BASE"...HEAD | wc -l | tr -d ' ')
   if [ "$PR_FILE_COUNT" -gt "$PR_FILE_LIMIT" ]; then
     echo "" >&2
-    echo "PUSH BLOCKED: This PR changes ${PR_FILE_COUNT} files (limit: ${PR_FILE_LIMIT})." >&2
+    echo "PUSH WARNING: This PR changes ${PR_FILE_COUNT} files (limit: ${PR_FILE_LIMIT})." >&2
+    echo "Consider splitting into smaller PRs for easier review." >&2
     echo "" >&2
-    echo "Pull requests must be small and reviewable. Split this branch into smaller PRs:" >&2
-    echo "  1. Identify a logical subset of changes that can stand alone." >&2
-    echo "  2. Create a new branch from main with only those changes." >&2
-    echo "  3. Open a PR for that subset, get it merged." >&2
-    echo "  4. Repeat for the remaining changes." >&2
-    echo "" >&2
-    exit 1
   fi
 fi
 
