@@ -551,8 +551,71 @@
       return lines.join('\n');
     }
 
+    // ── BlokJS reference ──────────────────────────────────────────────────────
+    //
+    // blok.mount(target, options) — mounts the root app, returns { destroy() }.
+    //
+    // Top-level config keys (all optional except view):
+    //   state    — reactive state object; access as this.<key> or $.<key> in view.
+    //              RESERVED names (cannot be state keys): store, loading, error,
+    //              refs, el, route, emit, navigate.
+    //   computed — derived values: computed: { full() { return this.a + this.b } }
+    //              re-evaluated on every read; read-only.
+    //   methods  — functions: methods: { inc() { this.count++ } }
+    //              async methods auto-track: this.loading.<name> / this.error.<name>.
+    //   mount()  — lifecycle hook, called after DOM insertion via queueMicrotask.
+    //              this.refs and this.el are available. NOT inside methods:{}.
+    //   unmount()— lifecycle hook, called before element is removed. NOT inside methods:{}.
+    //   watch    — reactions: watch: { key(newVal, oldVal) { ... } }
+    //   view($)  — REQUIRED. Function returning plain-object DOM description (see below).
+    //
+    // View DSL quick-reference:
+    //   Text:        { div: { text: $.count } }  or  { div: 'hello' }
+    //   HTML:        { div: { html: $.rawHtml } }  (trusted content only)
+    //   Children:    { div: { children: [ {p: 'a'}, {p: 'b'} ] } }
+    //   Conditional: { when: $.flag, children: [...] }  /  { when: $.not.flag, children: [...] }
+    //   Loop:        { each: $.items, as: 'item', key: 'id', children: [{ div: { text: $.item.name } }] }
+    //   Model:       { input: { type: 'text', model: $.search } }
+    //   Class:       { div: { class: 'static' } }
+    //                { div: { class: $.dynClass } }
+    //                { div: { class: { active: $.isActive, off: $.isOff } } }
+    //                { div: { class: ['base', { highlight: $.isOn }] } }
+    //   Style:       { div: { style: { color: 'red', background: $.bg } } }
+    //   Attrs:       { img: { bind: { src: $.url, alt: $.title } } }
+    //   Events:      { button: { click: 'methodName' } }
+    //                { button: { click: 'remove(item)' } }          // resolved arg
+    //                { button: { click: "select('literal')" } }     // string literal
+    //                { button: { click: { handler: 'fn', stop: true } } }
+    //                { form:   { submit: 'handleSubmit' } }         // preventDefault auto-applied
+    //                { button: { click: 'flag = true' } }           // inline state assignment
+    //   Refs:        { input: { ref: 'myInput' } }  → this.refs.myInput
+    //   Components:  { MyComp: { prop: $.val } }
+    //   Emit (child→parent):  child: this.emit('remove', item)
+    //                         parent: { MyComp: { on_remove: 'handleRemove' } }
+    //   Slots:       parent passes children:[...]; child renders { slot: true }
+    //
+    // this context (methods / computed / watch / mount / unmount):
+    //   this.<stateKey>          read/write state
+    //   this.<computedKey>       read computed (read-only)
+    //   this.store.<name>        access named store
+    //   this.refs.<name>         DOM element refs (available after mount)
+    //   this.el                  root element
+    //   this.loading.<method>    true while async method runs
+    //   this.error.<method>      Error or null after async method
+    //   this.emit(event, data)   emit to parent
+    //   this.navigate(path|num)  router navigation
+    //
+    // Stores: blok.store('name', { state, computed, methods })
+    //   Access anywhere via this.store.<name>.<key>
+    //
+    // Reactivity: proxy-based; array mutations (push/pop/splice/sort/…) are reactive;
+    //   multiple sync state changes are batched and flush in one DOM update.
+    //
+    // Source: https://maleta.github.io/blokjs/docs/
+
     // ── App ────────────────────────────────────────────────────────────────────
 
+    try {
     blok.mount('#app', {
       state: {
         // Workflow data
@@ -570,7 +633,7 @@
         view: 'diagram',
         holistic: false,
         liveFlash: false,
-        loading: true,
+        isLoading: true,
         kindEntries: Object.entries(KIND).map(([key, { color, label }]) => ({ key, color, label })),
         // Startup error — each field is a plain string to avoid null→{} blokjs quirk
         startupErrorPhase: '',
@@ -604,7 +667,7 @@
         holisticBtnText() { return this.holistic ? '\u2296 collapse' : '\u2295 expand all'; },
         // Startup error
         hasStartupError() { return typeof this.startupErrorMsg === 'string' && this.startupErrorMsg.length > 0; },
-        showMainContent() { return !this.hasStartupError && !this.loading; },
+        showMainContent() { return !this.hasStartupError && !this.isLoading; },
         startupPhaseBadge() {
           const labels = { fetch: 'HTTP Error', parse: 'Parse Error', network: 'Network Error', yaml: 'YAML Error' };
           return labels[this.startupErrorPhase] || 'Startup Error';
@@ -627,19 +690,6 @@
       },
 
       methods: {
-        mount() {
-          console.log('[calypso] mount() lifecycle called');
-          this.loadWorkflows().then(() => {
-            console.log('[calypso] loadWorkflows() resolved, startupErrorMsg:', this.startupErrorMsg || '(none)');
-            if (!this.startupErrorMsg) this.pollState();
-          });
-          this._pollTimer = setInterval(() => this.pollState(), POLL_MS);
-        },
-
-        unmount() {
-          clearInterval(this._pollTimer);
-        },
-
         // ── Debug logging ──────────────────────────────────────────────────────
 
         addLog(entry) {
@@ -755,7 +805,7 @@
             }
             this.workflowsByName = map;
           } finally {
-            this.loading = false;
+            this.isLoading = false;
           }
         },
 
@@ -858,7 +908,7 @@
         clearDebugLog() { this.debugLog = []; },
 
         async retryLoad() {
-          this.loading = true;
+          this.isLoading = true;
           await this.loadWorkflows();
           if (!this.startupErrorMsg) this.pollState();
         },
@@ -904,6 +954,19 @@
             el.innerHTML = `<pre style="color:#f87171;padding:16px;font-size:0.75rem;white-space:pre-wrap">${msg}\n\n${def}</pre>`;
           }
         },
+      },
+
+      mount() {
+        console.log('[calypso] mount() lifecycle called');
+        this.loadWorkflows().then(() => {
+          console.log('[calypso] loadWorkflows() resolved, startupErrorMsg:', this.startupErrorMsg || '(none)');
+          if (!this.startupErrorMsg) this.pollState();
+        });
+        this._pollTimer = setInterval(() => this.pollState(), POLL_MS);
+      },
+
+      unmount() {
+        clearInterval(this._pollTimer);
       },
 
       watch: {
@@ -971,7 +1034,7 @@
 
                   // Loading
                   {
-                    when: $.loading,
+                    when: $.isLoading,
                     children: [{ div: { class: 'status load', text: 'Loading workflows\u2026' } }],
                   },
 
@@ -1350,6 +1413,10 @@
         },
       }),
     });
+    console.log('[calypso] blok.mount() returned without throwing');
+    } catch (err) {
+      console.error('[calypso] blok.mount() threw:', err);
+    }
 
     } // end dependency check
   </script>
