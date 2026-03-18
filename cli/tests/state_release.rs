@@ -1,7 +1,7 @@
 use calypso_cli::state::{
     DeploymentRecord, DeploymentState, DeploymentTransitionError, FeatureState, FeatureType,
     PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError, RepositoryIdentity,
-    RepositoryState, SchedulingMeta, WorkflowState,
+    RepositoryState, SchedulingMeta,
 };
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ fn minimal_feature() -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::New,
+        workflow_state: "new".to_string(),
         gate_groups: Vec::new(),
         active_sessions: Vec::new(),
         feature_type: FeatureType::Feat,

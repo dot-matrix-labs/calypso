@@ -1318,7 +1318,7 @@ fn do_init_steps(
 }
 
 fn default_feature_state() -> crate::state::FeatureState {
-    use crate::state::{FeatureState, FeatureType, PullRequestRef, SchedulingMeta, WorkflowState};
+    use crate::state::{FeatureState, FeatureType, PullRequestRef, SchedulingMeta};
 
     FeatureState {
         feature_id: String::new(),
@@ -1330,7 +1330,7 @@ fn default_feature_state() -> crate::state::FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::New,
+        workflow_state: "new".to_string(),
         gate_groups: vec![],
         active_sessions: vec![],
         feature_type: FeatureType::Feat,

@@ -5,9 +5,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
-use crate::state::{
-    FeatureState, GateInitializationError, PullRequestRef, RepositoryState, StateError,
-};
+use crate::state::{FeatureState, PullRequestRef, RepositoryState, StateError};
 use crate::template::{TemplateError, TemplateSet, resolve_template_set_for_path};
 
 const STATE_DIRECTORY: &str = ".calypso";
@@ -176,8 +174,7 @@ pub fn load_or_initialize_runtime(
             &context.feature.worktree_path,
             context.feature.pull_request.clone(),
             &template,
-        )
-        .map_err(RuntimeError::GateInitialization)?;
+        );
 
         let state = RepositoryState {
             version: STATE_VERSION,
@@ -253,7 +250,6 @@ pub enum RuntimeError {
     Json(serde_json::Error),
     Template(TemplateError),
     State(StateError),
-    GateInitialization(GateInitializationError),
     CommandFailed { program: String, details: String },
     PullRequestNotFound(String),
     MissingRepositoryName,
@@ -268,9 +264,6 @@ impl fmt::Display for RuntimeError {
             RuntimeError::Json(error) => write!(f, "runtime JSON error: {error}"),
             RuntimeError::Template(error) => write!(f, "runtime template error: {error}"),
             RuntimeError::State(error) => write!(f, "runtime state error: {error}"),
-            RuntimeError::GateInitialization(error) => {
-                write!(f, "runtime gate initialization error: {error}")
-            }
             RuntimeError::CommandFailed { program, details } => {
                 write!(f, "{program} command failed: {details}")
             }

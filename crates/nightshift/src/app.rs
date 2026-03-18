@@ -219,8 +219,7 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
             .clone()
             .unwrap_or_else(missing_pull_request_ref),
         &template,
-    )
-    .expect("embedded templates should initialize feature state");
+    );
 
     let doctor_evidence =
         collect_doctor_report(&HostDoctorEnvironment, &repo_root).to_builtin_evidence();
@@ -283,7 +282,7 @@ pub fn render_feature_status(
                 .map(|pr| format!("#{} {}", pr.number, pr.url))
                 .unwrap_or_else(|| "missing".to_string())
         ),
-        format!("Workflow state: {:?}", feature.workflow_state),
+        format!("Workflow state: {}", feature.workflow_state),
     ];
 
     for group in &feature.gate_groups {
@@ -610,7 +609,7 @@ pub fn state_status_json_report(feature: &FeatureState) -> StateStatusJsonReport
         feature_id: feature.feature_id.clone(),
         branch: feature.branch.clone(),
         pr_number,
-        workflow_state: feature.workflow_state.as_str().to_string(),
+        workflow_state: feature.workflow_state.clone(),
         gate_groups,
         blocking_gate_ids: feature.blocking_gate_ids(),
         active_session_count: feature.active_sessions.len(),
@@ -639,7 +638,7 @@ pub fn render_state_status(feature: &FeatureState) -> String {
         String::new()
     };
     lines.push(format!("branch:  {}{}", feature.branch, pr_part));
-    lines.push(format!("state:   {}", feature.workflow_state.as_str()));
+    lines.push(format!("state:   {}", feature.workflow_state));
 
     if !feature.gate_groups.is_empty() {
         lines.push(String::new());
@@ -1075,7 +1074,7 @@ mod tests {
     // ── render_feature_status dev phase integration ───────────────────────
 
     fn make_minimal_feature() -> FeatureState {
-        use crate::state::{PullRequestRef, WorkflowState};
+        use crate::state::PullRequestRef;
         FeatureState {
             feature_id: "test-feat".to_string(),
             branch: "main".to_string(),
@@ -1086,7 +1085,7 @@ mod tests {
             },
             github_snapshot: None,
             github_error: None,
-            workflow_state: WorkflowState::New,
+            workflow_state: "new".to_string(),
             gate_groups: vec![],
             active_sessions: vec![],
             feature_type: crate::state::FeatureType::Feat,

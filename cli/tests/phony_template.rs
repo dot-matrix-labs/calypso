@@ -2,7 +2,7 @@
 //! using an injectable PhonyExecutor.
 //!
 //! The phony template defines a minimal 3-step pipeline using canonical
-//! WorkflowState slugs: new -> prd-review -> architecture-plan.
+//! State name slugs: new -> prd-review -> architecture-plan.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,7 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use calypso_cli::driver::{DriverMode, DriverStepResult, SessionExecutor, StateMachineDriver};
 use calypso_cli::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
 use calypso_cli::state::{
-    FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
+    FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta,
 };
 use calypso_cli::template::TemplateSet;
 
@@ -33,8 +33,8 @@ fn temp_dir(label: &str) -> PathBuf {
     dir
 }
 
-/// Build a minimal `RepositoryState` at the given `WorkflowState`.
-fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
+/// Build a minimal `RepositoryState` at the given state name.
+fn minimal_state(workflow_state: &str) -> RepositoryState {
     RepositoryState {
         version: 1,
         repo_id: "phony-repo".to_string(),
@@ -49,7 +49,7 @@ fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
             },
             github_snapshot: None,
             github_error: None,
-            workflow_state,
+            workflow_state: workflow_state.to_string(),
             gate_groups: vec![],
             active_sessions: vec![],
             feature_type: FeatureType::Feat,
@@ -85,12 +85,12 @@ struct PhonyExecutor {
 }
 
 impl PhonyExecutor {
-    fn ok_advancing(next: WorkflowState) -> Arc<Self> {
+    fn ok_advancing(next: &str) -> Arc<Self> {
         Arc::new(Self {
             outcome: ExecutionOutcome::Ok {
                 summary: "phony ok".to_string(),
                 artifact_refs: vec![],
-                advanced_to: Some(next),
+                advanced_to: Some(next.to_string()),
             },
         })
     }
@@ -207,16 +207,16 @@ fn phony_driver(state_path: PathBuf, executor: Arc<dyn SessionExecutor>) -> Stat
 #[test]
 fn driver_advances_from_new_to_prd_review_with_phony_ok() {
     let dir = temp_dir("advance-new");
-    let state = minimal_state(WorkflowState::New);
+    let state = minimal_state("new");
     let state_path = write_state(&dir, &state);
 
-    let executor = PhonyExecutor::ok_advancing(WorkflowState::PrdReview);
+    let executor = PhonyExecutor::ok_advancing("prd-review");
     let driver = phony_driver(state_path, executor);
 
     let result = driver.step();
     assert_eq!(
         result,
-        DriverStepResult::Advanced(WorkflowState::PrdReview),
+        DriverStepResult::Advanced("prd-review".to_string()),
         "agent step on 'new' state should advance to 'prd-review'"
     );
 
@@ -226,16 +226,16 @@ fn driver_advances_from_new_to_prd_review_with_phony_ok() {
 #[test]
 fn driver_advances_from_prd_review_to_architecture_plan_with_phony_ok() {
     let dir = temp_dir("advance-prd");
-    let state = minimal_state(WorkflowState::PrdReview);
+    let state = minimal_state("prd-review");
     let state_path = write_state(&dir, &state);
 
-    let executor = PhonyExecutor::ok_advancing(WorkflowState::ArchitecturePlan);
+    let executor = PhonyExecutor::ok_advancing("architecture-plan");
     let driver = phony_driver(state_path, executor);
 
     let result = driver.step();
     assert_eq!(
         result,
-        DriverStepResult::Advanced(WorkflowState::ArchitecturePlan),
+        DriverStepResult::Advanced("architecture-plan".to_string()),
         "agent step on 'prd-review' should advance to 'architecture-plan'"
     );
 
@@ -247,28 +247,28 @@ fn driver_step_sequence_new_to_prd_review_to_architecture_plan() {
     // Manually advance through the phony pipeline one step at a time,
     // updating the state file between each call.
     let dir = temp_dir("sequence");
-    let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
+    let state_path = write_state(&dir, &minimal_state("new"));
 
     // Step 1: new -> prd-review
-    let executor = PhonyExecutor::ok_advancing(WorkflowState::PrdReview);
+    let executor = PhonyExecutor::ok_advancing("prd-review");
     let driver = phony_driver(state_path.clone(), executor);
     let r1 = driver.step();
-    assert_eq!(r1, DriverStepResult::Advanced(WorkflowState::PrdReview));
+    assert_eq!(r1, DriverStepResult::Advanced("prd-review".to_string()));
 
     // Advance state file manually (PhonyExecutor doesn't write to disk).
-    write_state(&dir, &minimal_state(WorkflowState::PrdReview));
+    write_state(&dir, &minimal_state("prd-review"));
 
     // Step 2: prd-review -> architecture-plan
-    let executor = PhonyExecutor::ok_advancing(WorkflowState::ArchitecturePlan);
+    let executor = PhonyExecutor::ok_advancing("architecture-plan");
     let driver = phony_driver(state_path.clone(), executor);
     let r2 = driver.step();
     assert_eq!(
         r2,
-        DriverStepResult::Advanced(WorkflowState::ArchitecturePlan)
+        DriverStepResult::Advanced("architecture-plan".to_string())
     );
 
     // Advance state file manually.
-    write_state(&dir, &minimal_state(WorkflowState::ArchitecturePlan));
+    write_state(&dir, &minimal_state("architecture-plan"));
 
     // Step 3: architecture-plan has no further forward transition in the phony
     // template; PhonyExecutor returns Ok with no advancement -> Unchanged.
@@ -287,7 +287,7 @@ fn driver_step_sequence_new_to_prd_review_to_architecture_plan() {
 #[test]
 fn driver_stays_unchanged_when_executor_returns_ok_with_no_advance() {
     let dir = temp_dir("unchanged");
-    let state = minimal_state(WorkflowState::New);
+    let state = minimal_state("new");
     let state_path = write_state(&dir, &state);
 
     let executor = PhonyExecutor::ok_no_advance();
@@ -306,7 +306,7 @@ fn driver_stays_unchanged_when_executor_returns_ok_with_no_advance() {
 #[test]
 fn driver_returns_failed_when_executor_returns_nok() {
     let dir = temp_dir("failed");
-    let state = minimal_state(WorkflowState::New);
+    let state = minimal_state("new");
     let state_path = write_state(&dir, &state);
 
     let executor = PhonyExecutor::nok("simulated gate failure");
@@ -324,7 +324,7 @@ fn driver_returns_failed_when_executor_returns_nok() {
 #[test]
 fn run_auto_stops_on_failed_result() {
     let dir = temp_dir("auto-stop");
-    let state = minimal_state(WorkflowState::New);
+    let state = minimal_state("new");
     let state_path = write_state(&dir, &state);
 
     let executor = PhonyExecutor::nok("gate blocked");

@@ -21,7 +21,6 @@ use crate::claude::{
 };
 use crate::state::{
     AgentSession, AgentSessionStatus, AgentTerminalOutcome, GateStatus, RepositoryState,
-    TransitionFacts, WorkflowState,
 };
 
 // ── Configuration ─────────────────────────────────────────────────────────────
@@ -37,8 +36,7 @@ pub struct ExecutionConfig {
     /// Optional task-specific prompt context injected from `prompts.yml`.
     pub task_context: Option<String>,
     /// When set, restricts advancement to only these next states (from YAML transitions).
-    /// Overrides the hardcoded `WorkflowState::valid_next_states()`.
-    pub allowed_next_states: Option<Vec<WorkflowState>>,
+    pub allowed_next_states: Option<Vec<String>>,
 }
 
 impl Default for ExecutionConfig {
@@ -63,7 +61,7 @@ pub enum ExecutionOutcome {
         artifact_refs: Vec<String>,
         /// The state the feature advanced to, or `None` if already terminal /
         /// no suitable forward transition existed.
-        advanced_to: Option<WorkflowState>,
+        advanced_to: Option<String>,
     },
     /// Claude reported failure; state is unchanged.
     Nok { summary: String, reason: String },
@@ -268,7 +266,7 @@ fn build_prompt(role: &str, state: &RepositoryState, task_context: Option<&str>)
            [CALYPSO:CLARIFICATION]<your question here>",
         role = role,
         feature_id = feature.feature_id,
-        stage = feature.workflow_state.as_str(),
+        stage = feature.workflow_state,
         branch = feature.branch,
         pr_number = feature.pull_request.number,
         pr_url = feature.pull_request.url,
@@ -338,7 +336,7 @@ fn apply_outcome(
     session_id: &str,
     _role: &str,
     outcome: ClaudeOutcome,
-    allowed_next_states: Option<&[WorkflowState]>,
+    allowed_next_states: Option<&[String]>,
 ) -> Result<ExecutionOutcome, ExecutionError> {
     match outcome {
         ClaudeOutcome::Ok {
@@ -351,8 +349,7 @@ fn apply_outcome(
 
             // Attempt forward state transition.
             let prev_state = state.current_feature.workflow_state.clone();
-            let facts = forward_facts();
-            let advanced_to = advance_if_gates_pass(state, &facts, allowed_next_states);
+            let advanced_to = advance_if_gates_pass(state, allowed_next_states);
 
             finish_session(
                 state,
@@ -413,20 +410,9 @@ fn apply_outcome(
         }
 
         ClaudeOutcome::Aborted { reason } => {
-            // Leave gate evidence as-is (pending); transition feature to Aborted.
-            let facts = TransitionFacts {
-                aborted: true,
-                ..Default::default()
-            };
-
-            if state
-                .current_feature
-                .transition_to(WorkflowState::Aborted, &facts)
-                .is_ok()
-            {
-                // Only update scheduling on successful transition.
-                state.current_feature.scheduling.last_advanced_at = Some(now_rfc3339());
-            }
+            // Leave gate evidence as-is (pending); move feature to aborted state.
+            state.current_feature.workflow_state = "aborted".to_string();
+            state.current_feature.scheduling.last_advanced_at = Some(now_rfc3339());
 
             finish_session(
                 state,
@@ -457,56 +443,30 @@ fn mark_agent_gates(state: &mut RepositoryState, status: GateStatus) {
     }
 }
 
-/// Build a `TransitionFacts` that allows all linear forward transitions.
-fn forward_facts() -> TransitionFacts {
-    TransitionFacts {
-        stage_complete: true,
-        ready_for_review: true,
-        feature_binding_complete: true,
-        ..Default::default()
-    }
-}
-
-/// If all gate groups are passing, attempt to advance to the first non-blocking
-/// forward state.  Returns `Some(next)` on success, `None` otherwise.
+/// If all gate groups are passing, attempt to advance to the first non-special
+/// forward state from `allowed_next_states`.  Returns `Some(next)` on success,
+/// `None` if gates are failing or no valid forward state exists.
 fn advance_if_gates_pass(
     state: &mut RepositoryState,
-    facts: &TransitionFacts,
-    allowed_next_states: Option<&[WorkflowState]>,
-) -> Option<WorkflowState> {
+    allowed_next_states: Option<&[String]>,
+) -> Option<String> {
     let all_passing = state
         .current_feature
         .gate_groups
         .iter()
         .all(|g| g.rollup_status() == crate::state::GateGroupStatus::Passing);
 
-    // If there are no gate groups we still advance (gates are optional).
-    let should_advance = all_passing || state.current_feature.gate_groups.is_empty();
-
-    if !should_advance {
+    // Gates are optional; advance when all pass or none are defined.
+    if !all_passing && !state.current_feature.gate_groups.is_empty() {
         return None;
     }
 
-    if let Some(allowed) = allowed_next_states {
-        // Template-defined transitions: bypass hardcoded validation and advance directly.
-        let next = allowed
-            .iter()
-            .find(|s| !matches!(s, WorkflowState::Blocked | WorkflowState::Aborted))
-            .cloned()?;
-        state.current_feature.workflow_state = next.clone();
-        return Some(next);
-    }
+    let next = allowed_next_states?
+        .iter()
+        .find(|s| s.as_str() != "blocked" && s.as_str() != "aborted")
+        .cloned()?;
 
-    let valid = state.current_feature.workflow_state.valid_next_states();
-    let next = valid
-        .into_iter()
-        .find(|s| !matches!(s, WorkflowState::Blocked | WorkflowState::Aborted))?;
-
-    state
-        .current_feature
-        .transition_to(next.clone(), facts)
-        .ok()?;
-
+    state.current_feature.workflow_state = next.clone();
     Some(next)
 }
 
@@ -627,10 +587,10 @@ fn is_leap(year: u64) -> bool {
 mod tests {
     use super::*;
     use crate::state::{
-        FeatureState, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState, WorkflowState,
+        FeatureState, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState,
     };
 
-    fn minimal_feature(state: WorkflowState) -> FeatureState {
+    fn minimal_feature(workflow_state: &str) -> FeatureState {
         FeatureState {
             feature_id: "test-feature".to_string(),
             branch: "feat/test".to_string(),
@@ -641,7 +601,7 @@ mod tests {
             },
             github_snapshot: None,
             github_error: None,
-            workflow_state: state,
+            workflow_state: workflow_state.to_string(),
             gate_groups: vec![],
             active_sessions: vec![],
             feature_type: crate::state::FeatureType::Feat,
@@ -653,7 +613,7 @@ mod tests {
         }
     }
 
-    fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
+    fn minimal_state(workflow_state: &str) -> RepositoryState {
         RepositoryState {
             version: 1,
             repo_id: "test-repo".to_string(),
@@ -668,7 +628,7 @@ mod tests {
 
     #[test]
     fn build_prompt_contains_role_and_stage() {
-        let state = minimal_state(WorkflowState::Implementation);
+        let state = minimal_state("implementation");
         let prompt = build_prompt("implementer", &state, None);
         assert!(prompt.contains("implementer"), "prompt missing role");
         assert!(prompt.contains("implementation"), "prompt missing stage");
@@ -681,7 +641,7 @@ mod tests {
 
     #[test]
     fn mark_agent_gates_sets_all_gates() {
-        let mut state = minimal_state(WorkflowState::Implementation);
+        let mut state = minimal_state("implementation");
         state.current_feature.gate_groups = vec![GateGroup {
             id: "g1".to_string(),
             label: "Group 1".to_string(),
@@ -702,21 +662,28 @@ mod tests {
     }
 
     #[test]
-    fn advance_if_gates_pass_advances_from_implementation() {
-        let mut state = minimal_state(WorkflowState::Implementation);
-        // No gate groups → should advance.
-        let facts = forward_facts();
-        let advanced = advance_if_gates_pass(&mut state, &facts, None);
+    fn advance_if_gates_pass_advances_when_allowed_state_given() {
+        let mut state = minimal_state("implementation");
+        let allowed = vec!["qa-validation".to_string()];
+        let advanced = advance_if_gates_pass(&mut state, Some(&allowed));
         assert!(advanced.is_some(), "should advance when gates are empty");
-        assert_eq!(
-            state.current_feature.workflow_state,
-            WorkflowState::QaValidation
+        assert_eq!(state.current_feature.workflow_state, "qa-validation");
+    }
+
+    #[test]
+    fn advance_if_gates_pass_returns_none_when_no_allowed_states() {
+        let mut state = minimal_state("implementation");
+        let advanced = advance_if_gates_pass(&mut state, None);
+        assert!(
+            advanced.is_none(),
+            "should not advance without allowed states"
         );
+        assert_eq!(state.current_feature.workflow_state, "implementation");
     }
 
     #[test]
     fn advance_if_gates_pass_does_not_advance_when_failing_gates() {
-        let mut state = minimal_state(WorkflowState::Implementation);
+        let mut state = minimal_state("implementation");
         state.current_feature.gate_groups = vec![GateGroup {
             id: "g1".to_string(),
             label: "Group 1".to_string(),
@@ -727,13 +694,10 @@ mod tests {
                 status: GateStatus::Failing,
             }],
         }];
-        let facts = forward_facts();
-        let advanced = advance_if_gates_pass(&mut state, &facts, None);
+        let allowed = vec!["qa-validation".to_string()];
+        let advanced = advance_if_gates_pass(&mut state, Some(&allowed));
         assert!(advanced.is_none(), "should not advance with failing gates");
-        assert_eq!(
-            state.current_feature.workflow_state,
-            WorkflowState::Implementation
-        );
+        assert_eq!(state.current_feature.workflow_state, "implementation");
     }
 
     #[test]
@@ -745,7 +709,7 @@ mod tests {
 
     #[test]
     fn finish_session_updates_status_in_place() {
-        let mut state = minimal_state(WorkflowState::Implementation);
+        let mut state = minimal_state("implementation");
         state.current_feature.active_sessions.push(AgentSession {
             role: "implementer".to_string(),
             session_id: "session-1".to_string(),
@@ -766,15 +730,6 @@ mod tests {
         let session = &state.current_feature.active_sessions[0];
         assert_eq!(session.status, AgentSessionStatus::Completed);
         assert_eq!(session.terminal_outcome, Some(AgentTerminalOutcome::Ok));
-    }
-
-    #[test]
-    fn forward_facts_enables_all_linear_transitions() {
-        let facts = forward_facts();
-        assert!(facts.stage_complete);
-        assert!(facts.ready_for_review);
-        assert!(facts.feature_binding_complete);
-        assert!(!facts.aborted);
     }
 
     #[test]

@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::event_log::{self, EventKind};
+
 // ── Embedded HTML page ────────────────────────────────────────────────────────
 
 const INDEX_HTML: &str = include_str!("webview_index.html");
@@ -120,6 +122,10 @@ fn route(
             handle_cron_now(body, cwd);
             ("200 OK", "application/json", b"{\"ok\":true}".to_vec())
         }
+        ("GET", "/api/log") => {
+            let json = read_event_log_json(cwd);
+            ("200 OK", "application/json", json.into_bytes())
+        }
         _ => ("404 Not Found", "text/plain", b"Not found".to_vec()),
     }
 }
@@ -204,6 +210,9 @@ fn read_workflows_json() -> String {
 fn handle_trigger(body: &[u8], cwd: &Path) {
     let calypso_dir = cwd.join(".calypso");
     if let Ok(parsed) = serde_json::from_slice::<Value>(body) {
+        if let Some(name) = parsed.get("event").and_then(|v| v.as_str()) {
+            event_log::append(&calypso_dir, EventKind::Trigger, name);
+        }
         let out = serde_json::to_string_pretty(&parsed).unwrap_or_default();
         let _ = std::fs::write(calypso_dir.join("pending-event.json"), out);
     }
@@ -213,9 +222,19 @@ fn handle_trigger(body: &[u8], cwd: &Path) {
 fn handle_cron_now(body: &[u8], cwd: &Path) {
     let calypso_dir = cwd.join(".calypso");
     if let Ok(parsed) = serde_json::from_slice::<Value>(body) {
+        if let Some(name) = parsed.get("workflow").and_then(|v| v.as_str()) {
+            event_log::append(&calypso_dir, EventKind::Cron, name);
+        }
         let out = serde_json::to_string_pretty(&parsed).unwrap_or_default();
         let _ = std::fs::write(calypso_dir.join("pending-cron.json"), out);
     }
+}
+
+/// Return the event log as a JSON array.
+fn read_event_log_json(cwd: &Path) -> String {
+    let calypso_dir = cwd.join(".calypso");
+    let entries = event_log::read_log(&calypso_dir);
+    serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

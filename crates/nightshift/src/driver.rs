@@ -11,7 +11,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome, run_supervised_session};
-use crate::state::{RepositoryState, WorkflowState};
+use crate::state::RepositoryState;
 use crate::template::{StateDefinition, StepType, TemplateSet};
 
 // ── SessionExecutor trait ─────────────────────────────────────────────────────
@@ -55,7 +55,7 @@ pub enum DriverMode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DriverStepResult {
     /// Step executed successfully; advanced to this state.
-    Advanced(WorkflowState),
+    Advanced(String),
     /// Step executed but no transition was available (terminal state).
     Terminal,
     /// Function step succeeded but state did not change (unexpected).
@@ -86,7 +86,7 @@ impl StateMachineDriver {
             Err(e) => return DriverStepResult::Error(e.to_string()),
         };
 
-        let current = state.current_feature.workflow_state.as_str().to_string();
+        let current = state.current_feature.workflow_state.clone();
         let step_type = self.template.step_type_for_state(&current);
 
         match step_type {
@@ -102,7 +102,7 @@ impl StateMachineDriver {
             .unwrap_or_else(|| state_name.replace('-', "_"));
 
         match dispatch_function_step(&fn_name, &self.state_path) {
-            Ok(advanced_to) => match advanced_to {
+            Ok(next_opt) => match next_opt {
                 Some(next) => DriverStepResult::Advanced(next),
                 None => DriverStepResult::Terminal,
             },
@@ -134,14 +134,14 @@ impl StateMachineDriver {
             .cloned();
 
         // Resolve template-defined next states for the current state.
-        let allowed_next_states: Option<Vec<WorkflowState>> = {
-            let nexts: Vec<WorkflowState> = self
+        let allowed_next_states: Option<Vec<String>> = {
+            let nexts: Vec<String> = self
                 .template
                 .state_machine
                 .transitions
                 .iter()
                 .filter(|t| t.from == state_name)
-                .filter_map(|t| WorkflowState::from_template_state_name(&t.to).ok())
+                .map(|t| t.to.clone())
                 .collect();
             if nexts.is_empty() { None } else { Some(nexts) }
         };
@@ -205,10 +205,7 @@ impl StateMachineDriver {
 /// Dispatch a named function step. Returns `Ok(Some(next_state))` on advancement,
 /// `Ok(None)` when the step succeeds without a deterministic transition, or
 /// `Err(reason)` on failure.
-fn dispatch_function_step(
-    fn_name: &str,
-    state_path: &Path,
-) -> Result<Option<WorkflowState>, String> {
+fn dispatch_function_step(fn_name: &str, state_path: &Path) -> Result<Option<String>, String> {
     match fn_name {
         "git_init" => {
             let repo_path = state_path

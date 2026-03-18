@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus,
     PullRequestRef, RepositoryIdentity, RepositoryState, SchedulingMeta, SessionOutput,
-    SessionOutputStream, WorkflowState,
+    SessionOutputStream,
 };
 
 fn unique_id() -> u128 {
@@ -58,7 +58,7 @@ fn sample_state() -> RepositoryState {
             },
             github_snapshot: None,
             github_error: None,
-            workflow_state: WorkflowState::Implementation,
+            workflow_state: "implementation".to_string(),
             gate_groups: vec![GateGroup {
                 id: "validation".to_string(),
                 label: "Validation".to_string(),

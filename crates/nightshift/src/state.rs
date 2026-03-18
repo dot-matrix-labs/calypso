@@ -31,7 +31,7 @@ pub struct FeatureSummary {
     pub worktree_path: String,
     #[serde(default)]
     pub pr_number: Option<u64>,
-    pub state: WorkflowState,
+    pub state: String,
 }
 
 /// A summary of a known git worktree.
@@ -164,7 +164,7 @@ pub struct FeatureState {
     pub github_snapshot: Option<GithubPullRequestSnapshot>,
     #[serde(default)]
     pub github_error: Option<String>,
-    pub workflow_state: WorkflowState,
+    pub workflow_state: String,
     pub gate_groups: Vec<GateGroup>,
     pub active_sessions: Vec<AgentSession>,
     /// The type/category of this feature.
@@ -198,17 +198,15 @@ impl FeatureState {
         worktree_path: &str,
         pull_request: PullRequestRef,
         template: &TemplateSet,
-    ) -> Result<Self, GateInitializationError> {
-        Ok(Self {
+    ) -> Self {
+        Self {
             feature_id: feature_id.to_string(),
             branch: branch.to_string(),
             worktree_path: worktree_path.to_string(),
             pull_request,
             github_snapshot: None,
             github_error: None,
-            workflow_state: WorkflowState::from_template_state_name(
-                template.state_machine.initial_state.as_str(),
-            )?,
+            workflow_state: template.state_machine.initial_state.clone(),
             gate_groups: template
                 .state_machine
                 .gate_groups
@@ -235,7 +233,7 @@ impl FeatureState {
             artifact_refs: Vec::new(),
             transcript_refs: Vec::new(),
             clarification_history: Vec::new(),
-        })
+        }
     }
 
     pub fn evaluate_gates(
@@ -297,21 +295,6 @@ impl FeatureState {
             })
             .collect()
     }
-
-    pub fn available_transitions(&self, facts: &TransitionFacts) -> Vec<WorkflowState> {
-        self.workflow_state.available_transitions(facts)
-    }
-
-    pub fn transition_to(
-        &mut self,
-        target: WorkflowState,
-        facts: &TransitionFacts,
-    ) -> Result<(), TransitionError> {
-        self.workflow_state
-            .validate_transition(target.clone(), facts)?;
-        self.workflow_state = target;
-        Ok(())
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,359 +334,6 @@ pub enum GithubMergeability {
     Blocked,
     Unknown,
 }
-
-/// The 11-state feature lifecycle workflow state.
-///
-/// Serializes to kebab-case slugs. Old persisted values `waiting-for-human` and
-/// `ready-for-review` are accepted as deprecated aliases for backward compatibility.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum WorkflowState {
-    New,
-    PrdReview,
-    ArchitecturePlan,
-    ScaffoldTdd,
-    ArchitectureReview,
-    Implementation,
-    QaValidation,
-    ReleaseReady,
-    Done,
-    Blocked,
-    Aborted,
-    /// Deprecated alias — maps to `Implementation`. Accepted on deserialization only.
-    #[serde(alias = "waiting_for_human")]
-    #[serde(skip_serializing)]
-    WaitingForHuman,
-    /// Deprecated alias — maps to `ReleaseReady`. Accepted on deserialization only.
-    #[serde(alias = "ready_for_review")]
-    #[serde(skip_serializing)]
-    ReadyForReview,
-}
-
-impl WorkflowState {
-    pub fn from_template_state_name(name: &str) -> Result<Self, GateInitializationError> {
-        match name {
-            "new" => Ok(Self::New),
-            "prd-review" => Ok(Self::PrdReview),
-            "architecture-plan" => Ok(Self::ArchitecturePlan),
-            "scaffold-tdd" => Ok(Self::ScaffoldTdd),
-            "architecture-review" => Ok(Self::ArchitectureReview),
-            "implementation" => Ok(Self::Implementation),
-            "qa-validation" => Ok(Self::QaValidation),
-            "release-ready" => Ok(Self::ReleaseReady),
-            "done" => Ok(Self::Done),
-            "blocked" => Ok(Self::Blocked),
-            "aborted" => Ok(Self::Aborted),
-            // Deprecated aliases accepted for backward compatibility
-            "waiting-for-human" | "waiting_for_human" => Ok(Self::WaitingForHuman),
-            "ready-for-review" | "ready_for_review" => Ok(Self::ReadyForReview),
-            _ => Err(GateInitializationError::UnknownWorkflowState(
-                name.to_string(),
-            )),
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::New => "new",
-            Self::PrdReview => "prd-review",
-            Self::ArchitecturePlan => "architecture-plan",
-            Self::ScaffoldTdd => "scaffold-tdd",
-            Self::ArchitectureReview => "architecture-review",
-            Self::Implementation => "implementation",
-            Self::QaValidation => "qa-validation",
-            Self::ReleaseReady => "release-ready",
-            Self::Done => "done",
-            Self::Blocked => "blocked",
-            Self::Aborted => "aborted",
-            // Deprecated variants return their canonical slug
-            Self::WaitingForHuman => "implementation",
-            Self::ReadyForReview => "release-ready",
-        }
-    }
-
-    /// Returns true if this state is terminal (no outgoing transitions allowed).
-    pub fn is_terminal(&self) -> bool {
-        matches!(self, Self::Done | Self::Aborted)
-    }
-
-    /// All non-terminal active states (used for Blocked unblock transitions).
-    fn all_active_states() -> Vec<Self> {
-        vec![
-            Self::New,
-            Self::PrdReview,
-            Self::ArchitecturePlan,
-            Self::ScaffoldTdd,
-            Self::ArchitectureReview,
-            Self::Implementation,
-            Self::QaValidation,
-            Self::ReleaseReady,
-        ]
-    }
-
-    /// Returns the full set of states that are valid next states per the transition matrix.
-    pub fn valid_next_states(&self) -> Vec<Self> {
-        match self {
-            Self::New => vec![Self::PrdReview, Self::Blocked, Self::Aborted],
-            Self::PrdReview => vec![Self::ArchitecturePlan, Self::Blocked, Self::Aborted],
-            Self::ArchitecturePlan => vec![Self::ScaffoldTdd, Self::Blocked, Self::Aborted],
-            Self::ScaffoldTdd => vec![Self::ArchitectureReview, Self::Blocked, Self::Aborted],
-            Self::ArchitectureReview => vec![Self::Implementation, Self::Blocked, Self::Aborted],
-            Self::Implementation => vec![Self::QaValidation, Self::Blocked, Self::Aborted],
-            Self::QaValidation => vec![
-                Self::ReleaseReady,
-                Self::Implementation,
-                Self::Blocked,
-                Self::Aborted,
-            ],
-            Self::ReleaseReady => vec![Self::Done, Self::Blocked, Self::Aborted],
-            Self::Done | Self::Aborted => vec![],
-            Self::Blocked => Self::all_active_states(),
-            // Deprecated variants
-            Self::WaitingForHuman => vec![Self::QaValidation, Self::Blocked, Self::Aborted],
-            Self::ReadyForReview => vec![Self::Done, Self::Blocked, Self::Aborted],
-        }
-    }
-
-    pub fn available_transitions(&self, facts: &TransitionFacts) -> Vec<Self> {
-        let mut transitions = Vec::new();
-
-        match self {
-            Self::New => {
-                if facts.feature_binding_complete {
-                    transitions.push(Self::PrdReview);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::PrdReview => {
-                if facts.stage_complete {
-                    transitions.push(Self::ArchitecturePlan);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::ArchitecturePlan => {
-                if facts.stage_complete {
-                    transitions.push(Self::ScaffoldTdd);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::ScaffoldTdd => {
-                if facts.stage_complete {
-                    transitions.push(Self::ArchitectureReview);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::ArchitectureReview => {
-                if facts.stage_complete {
-                    transitions.push(Self::Implementation);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::Implementation => {
-                if facts.ready_for_review {
-                    transitions.push(Self::QaValidation);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::QaValidation => {
-                if facts.stage_complete {
-                    transitions.push(Self::ReleaseReady);
-                }
-                if facts.review_rework_required {
-                    transitions.push(Self::Implementation);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::ReleaseReady => {
-                if facts.stage_complete {
-                    transitions.push(Self::Done);
-                }
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.aborted {
-                    transitions.push(Self::Aborted);
-                }
-            }
-            Self::Done | Self::Aborted => {
-                // Terminal — no transitions
-            }
-            Self::Blocked => {
-                if facts.blocker_resolved {
-                    if let Some(ref target) = facts.target_unblock_state {
-                        if !target.is_terminal() {
-                            transitions.push(target.clone());
-                        }
-                    } else {
-                        transitions.extend(Self::all_active_states());
-                    }
-                }
-            }
-            // Deprecated variants — preserved for backward compat
-            Self::WaitingForHuman => {
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.human_response_ready {
-                    transitions.push(Self::Implementation);
-                }
-            }
-            Self::ReadyForReview => {
-                if facts.blocking_issue_present {
-                    transitions.push(Self::Blocked);
-                }
-                if facts.review_rework_required {
-                    transitions.push(Self::Implementation);
-                }
-            }
-        }
-
-        transitions
-    }
-
-    pub fn validate_transition(
-        &self,
-        target: Self,
-        facts: &TransitionFacts,
-    ) -> Result<(), TransitionError> {
-        if self.available_transitions(facts).contains(&target) {
-            return Ok(());
-        }
-
-        Err(TransitionError::Rejected {
-            from: self.clone(),
-            to: target.clone(),
-            reason: self.missing_transition_reason(&target).to_string(),
-        })
-    }
-
-    fn missing_transition_reason(&self, target: &Self) -> &'static str {
-        match (self, target) {
-            (Self::New, Self::PrdReview) => "feature binding is incomplete",
-            (Self::New, Self::Blocked) => "no blocking issue is present",
-            (Self::New, Self::Aborted) => "abort flag is not set",
-            (Self::PrdReview, Self::ArchitecturePlan) => "stage is not complete",
-            (Self::PrdReview, Self::Blocked) => "no blocking issue is present",
-            (Self::PrdReview, Self::Aborted) => "abort flag is not set",
-            (Self::ArchitecturePlan, Self::ScaffoldTdd) => "stage is not complete",
-            (Self::ArchitecturePlan, Self::Blocked) => "no blocking issue is present",
-            (Self::ArchitecturePlan, Self::Aborted) => "abort flag is not set",
-            (Self::ScaffoldTdd, Self::ArchitectureReview) => "stage is not complete",
-            (Self::ScaffoldTdd, Self::Blocked) => "no blocking issue is present",
-            (Self::ScaffoldTdd, Self::Aborted) => "abort flag is not set",
-            (Self::ArchitectureReview, Self::Implementation) => "stage is not complete",
-            (Self::ArchitectureReview, Self::Blocked) => "no blocking issue is present",
-            (Self::ArchitectureReview, Self::Aborted) => "abort flag is not set",
-            (Self::Implementation, Self::QaValidation) => "feature is not ready for review",
-            (Self::Implementation, Self::Blocked) => "no blocking issue is present",
-            (Self::Implementation, Self::Aborted) => "abort flag is not set",
-            (Self::QaValidation, Self::ReleaseReady) => "stage is not complete",
-            (Self::QaValidation, Self::Implementation) => {
-                "no follow-up implementation request is present"
-            }
-            (Self::QaValidation, Self::Blocked) => "no blocking issue is present",
-            (Self::QaValidation, Self::Aborted) => "abort flag is not set",
-            (Self::ReleaseReady, Self::Done) => "stage is not complete",
-            (Self::ReleaseReady, Self::Blocked) => "no blocking issue is present",
-            (Self::ReleaseReady, Self::Aborted) => "abort flag is not set",
-            (Self::Done, _) | (Self::Aborted, _) => "state is terminal — no transitions allowed",
-            (Self::Blocked, _) => "blocker is not yet resolved",
-            (Self::WaitingForHuman, Self::Implementation) => "no human response is available",
-            (Self::WaitingForHuman, Self::Blocked) => "no blocking issue is present",
-            (Self::ReadyForReview, Self::Implementation) => {
-                "no follow-up implementation request is present"
-            }
-            (Self::ReadyForReview, Self::Blocked) => "no blocking issue is present",
-            _ => "transition is not supported by the workflow",
-        }
-    }
-}
-
-impl fmt::Display for WorkflowState {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct TransitionFacts {
-    /// New -> PrdReview
-    pub feature_binding_complete: bool,
-    /// Any non-terminal -> Blocked
-    pub blocking_issue_present: bool,
-    /// Deprecated: used by WaitingForHuman compat
-    pub waiting_for_human_input: bool,
-    /// Deprecated: WaitingForHuman -> Implementation compat
-    pub human_response_ready: bool,
-    /// Implementation -> QaValidation
-    pub ready_for_review: bool,
-    /// QaValidation -> Implementation
-    pub review_rework_required: bool,
-    /// Blocked -> (active state)
-    pub blocker_resolved: bool,
-    /// When unblocking, the specific active state to unblock to (None = offer all)
-    pub target_unblock_state: Option<WorkflowState>,
-    /// Linear forward stage completion flag
-    pub stage_complete: bool,
-    /// Any non-terminal -> Aborted
-    pub aborted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TransitionError {
-    Rejected {
-        from: WorkflowState,
-        to: WorkflowState,
-        reason: String,
-    },
-}
-
-impl fmt::Display for TransitionError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Rejected { from, to, reason } => {
-                write!(f, "cannot transition from '{from}' to '{to}': {reason}")
-            }
-        }
-    }
-}
-
-impl std::error::Error for TransitionError {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GateGroup {
@@ -847,26 +477,6 @@ impl fmt::Display for StateError {
 }
 
 impl std::error::Error for StateError {}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GateInitializationError {
-    UnknownWorkflowState(String),
-}
-
-impl fmt::Display for GateInitializationError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            GateInitializationError::UnknownWorkflowState(state) => {
-                write!(
-                    f,
-                    "unknown workflow state '{state}' in methodology template"
-                )
-            }
-        }
-    }
-}
-
-impl std::error::Error for GateInitializationError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

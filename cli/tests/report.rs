@@ -11,7 +11,7 @@ use calypso_cli::doctor::{
 };
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
-    RepositoryState, SessionOutput, SessionOutputStream, WorkflowState,
+    RepositoryState, SessionOutput, SessionOutputStream,
 };
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ fn minimal_feature_state() -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![
             GateGroup {
                 id: "spec".to_string(),

@@ -722,7 +722,6 @@ mod tests {
             },
             &template,
         )
-        .expect("phony template should create feature state")
     }
 
     #[test]

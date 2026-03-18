@@ -10,9 +10,7 @@ use calypso_cli::runtime::{
     discover_current_repository_context, discover_repository_context,
     load_or_initialize_current_runtime, load_or_initialize_runtime,
 };
-use calypso_cli::state::{
-    GateInitializationError, PullRequestRef, RepositoryState, StateError, WorkflowState,
-};
+use calypso_cli::state::{PullRequestRef, RepositoryState, StateError};
 use calypso_cli::template::TemplateError;
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -339,14 +337,14 @@ fn load_or_initialize_runtime_resumes_existing_repository_state() {
 
     let mut runtime =
         load_or_initialize_runtime(&repo_root, &resolver).expect("runtime should initialize");
-    runtime.state.current_feature.workflow_state = WorkflowState::ReleaseReady;
+    runtime.state.current_feature.workflow_state = "release-ready".to_string();
     runtime.save().expect("runtime state should save");
 
     let resumed = load_or_initialize_runtime(&repo_root, &resolver).expect("runtime should resume");
 
     assert_eq!(
         resumed.state.current_feature.workflow_state,
-        WorkflowState::ReleaseReady
+        "release-ready"
     );
     assert_eq!(resumed.state_path, runtime.state_path);
 
@@ -445,15 +443,6 @@ fn runtime_error_display_covers_all_variants() {
         state_error
             .to_string()
             .contains("runtime state error: state I/O error")
-    );
-
-    let gate_error = RuntimeError::GateInitialization(
-        GateInitializationError::UnknownWorkflowState("made-up".to_string()),
-    );
-    assert!(
-        gate_error
-            .to_string()
-            .contains("runtime gate initialization error")
     );
 
     let command_error = RuntimeError::CommandFailed {

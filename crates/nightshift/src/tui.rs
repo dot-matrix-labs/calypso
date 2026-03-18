@@ -19,7 +19,7 @@ use crossterm::terminal::{
 
 use crate::state::{
     AgentSessionStatus, AgentTerminalOutcome, EvidenceStatus, FeatureState, GateGroupStatus,
-    GateStatus, GithubMergeability, GithubReviewStatus, RepositoryState, WorkflowState,
+    GateStatus, GithubMergeability, GithubReviewStatus, RepositoryState,
 };
 
 // TODO: browser view — serve operator surface as WASM inside the binary (no external bundle files).
@@ -91,7 +91,7 @@ impl OperatorSurface {
         Self {
             feature_id: feature.feature_id.clone(),
             branch: feature.branch.clone(),
-            workflow: workflow_label(feature.workflow_state.clone()),
+            workflow: workflow_label(&feature.workflow_state),
             pull_request_number: feature.pull_request.number,
             github: feature.github_snapshot.as_ref().map(|snapshot| GithubView {
                 pr_state: if snapshot.is_draft {
@@ -665,8 +665,8 @@ struct SessionView {
     output: Vec<String>,
 }
 
-fn workflow_label(state: WorkflowState) -> String {
-    state.as_str().to_string()
+fn workflow_label(state: &str) -> String {
+    state.to_string()
 }
 
 /// Render a one-line visual pipeline showing the current position in the workflow.
@@ -2654,39 +2654,21 @@ impl WorkflowGraphView {
     }
 }
 
-// ── State Machine TUI surface (legacy feature-state pipeline) ─────────────────
+// ── State Machine TUI surface ─────────────────────────────────────────────────
 
-/// The ordered feature lifecycle pipeline steps (excludes side states Blocked/Aborted).
-fn sm_pipeline() -> [WorkflowState; 9] {
-    [
-        WorkflowState::New,
-        WorkflowState::PrdReview,
-        WorkflowState::ArchitecturePlan,
-        WorkflowState::ScaffoldTdd,
-        WorkflowState::ArchitectureReview,
-        WorkflowState::Implementation,
-        WorkflowState::QaValidation,
-        WorkflowState::ReleaseReady,
-        WorkflowState::Done,
-    ]
-}
-
-fn sm_step_label(state: &WorkflowState) -> &'static str {
-    match state {
-        WorkflowState::New => "New",
-        WorkflowState::PrdReview => "PRD Review",
-        WorkflowState::ArchitecturePlan => "Architecture Plan",
-        WorkflowState::ScaffoldTdd => "Scaffold TDD",
-        WorkflowState::ArchitectureReview => "Architecture Review",
-        WorkflowState::Implementation => "Implementation",
-        WorkflowState::QaValidation => "QA Validation",
-        WorkflowState::ReleaseReady => "Release Ready",
-        WorkflowState::Done => "Done",
-        WorkflowState::Blocked => "Blocked",
-        WorkflowState::Aborted => "Aborted",
-        WorkflowState::WaitingForHuman => "Implementation",
-        WorkflowState::ReadyForReview => "Release Ready",
-    }
+/// Render a step label from a kebab-case state name: "my-state" → "My State".
+fn sm_step_label(state: &str) -> String {
+    state
+        .split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Status of a node in the state machine tree.
@@ -2773,7 +2755,9 @@ pub enum SmEvent {
 /// can in turn be expanded to show individual gates. Only one sub-state-machine may
 /// be open at a time at each nesting level; Esc collapses from the inside out.
 pub struct StateMachineSurface {
-    workflow_state: WorkflowState,
+    workflow_state: String,
+    /// Ordered state names from the YAML template (empty = no pipeline known).
+    pipeline: Vec<String>,
     gate_groups: Vec<SmGateGroup>,
     sessions: Vec<SmSessionSnap>,
     /// Which pipeline step index is currently expanded (one at a time).
@@ -2796,7 +2780,8 @@ impl StateMachineSurface {
     /// Create an empty surface (no feature loaded).
     pub fn new() -> Self {
         Self {
-            workflow_state: WorkflowState::New,
+            workflow_state: String::new(),
+            pipeline: Vec::new(),
             gate_groups: Vec::new(),
             sessions: Vec::new(),
             expanded_step: None,
@@ -2845,14 +2830,7 @@ impl StateMachineSurface {
             })
             .collect();
 
-        // Normalise deprecated variant aliases for pipeline position lookup.
-        let canonical = match &feature.workflow_state {
-            WorkflowState::WaitingForHuman => WorkflowState::Implementation,
-            WorkflowState::ReadyForReview => WorkflowState::ReleaseReady,
-            other => other.clone(),
-        };
-        let pipeline = sm_pipeline();
-        let current_step_idx = pipeline.iter().position(|s| *s == canonical);
+        let current_step_idx = None::<usize>; // pipeline not available without template
 
         // Auto-expand the active step when gate groups are present.
         let expanded_step = if feature.gate_groups.is_empty() {
@@ -2861,49 +2839,30 @@ impl StateMachineSurface {
             current_step_idx
         };
 
-        let mut surface = Self {
+        Self {
             workflow_state: feature.workflow_state.clone(),
+            pipeline: Vec::new(),
             gate_groups,
             sessions,
             expanded_step,
             expanded_gate_group: None,
             selected: 0,
             scroll: 0,
-        };
-
-        // Place cursor on the active pipeline step.
-        if let Some(idx) = current_step_idx {
-            let rows = surface.visible_rows();
-            surface.selected = rows
-                .iter()
-                .position(|r| r.node_id == SmNodeId::PipelineStep(idx))
-                .unwrap_or(0);
         }
-
-        surface
     }
 
     /// Build the flat visible row list, reflecting the current expand/collapse state.
     fn visible_rows(&self) -> Vec<SmRow> {
-        let pipeline = sm_pipeline();
-        let canonical = match &self.workflow_state {
-            WorkflowState::WaitingForHuman => WorkflowState::Implementation,
-            WorkflowState::ReadyForReview => WorkflowState::ReleaseReady,
-            other => other.clone(),
-        };
-        let is_side_state = matches!(
-            self.workflow_state,
-            WorkflowState::Blocked | WorkflowState::Aborted
-        );
+        let is_side_state = self.workflow_state == "blocked" || self.workflow_state == "aborted";
         let current_idx = if is_side_state {
             None
         } else {
-            pipeline.iter().position(|s| *s == canonical)
+            self.pipeline.iter().position(|s| s == &self.workflow_state)
         };
 
         let mut rows: Vec<SmRow> = Vec::new();
 
-        for (i, step) in pipeline.iter().enumerate() {
+        for (i, step) in self.pipeline.iter().enumerate() {
             let is_current = current_idx == Some(i);
             let is_before = current_idx.is_some_and(|pos| i < pos);
 
@@ -2927,7 +2886,7 @@ impl StateMachineSurface {
             rows.push(SmRow {
                 node_id: SmNodeId::PipelineStep(i),
                 depth: 0,
-                label: sm_step_label(step).to_string(),
+                label: sm_step_label(step),
                 status,
                 is_expandable: has_children,
                 is_expanded,
@@ -2970,10 +2929,58 @@ impl StateMachineSurface {
             }
         }
 
-        // Append side-state rows when the feature is blocked or aborted.
-        if matches!(self.workflow_state, WorkflowState::Blocked) {
+        // If pipeline is empty just show the current state as a single active node.
+        if self.pipeline.is_empty() && !is_side_state && !self.workflow_state.is_empty() {
+            let running: Vec<&SmSessionSnap> =
+                self.sessions.iter().filter(|s| s.is_running).collect();
             rows.push(SmRow {
-                node_id: SmNodeId::PipelineStep(pipeline.len()),
+                node_id: SmNodeId::PipelineStep(0),
+                depth: 0,
+                label: sm_step_label(&self.workflow_state),
+                status: SmStatus::Active,
+                is_expandable: !self.gate_groups.is_empty(),
+                is_expanded: self.expanded_step == Some(0),
+                activity_count: running.len(),
+                agent_session_id: running.first().map(|s| s.session_id.clone()),
+            });
+            if self.expanded_step == Some(0) {
+                for (gi, group) in self.gate_groups.iter().enumerate() {
+                    let group_expanded = self.expanded_gate_group == Some(gi);
+                    rows.push(SmRow {
+                        node_id: SmNodeId::GateGroup(gi),
+                        depth: 1,
+                        label: group.label.clone(),
+                        status: group.status,
+                        is_expandable: !group.gates.is_empty(),
+                        is_expanded: group_expanded,
+                        activity_count: group.pending_count,
+                        agent_session_id: None,
+                    });
+                    if group_expanded {
+                        for (ki, gate) in group.gates.iter().enumerate() {
+                            rows.push(SmRow {
+                                node_id: SmNodeId::Gate {
+                                    group: gi,
+                                    gate: ki,
+                                },
+                                depth: 2,
+                                label: gate.label.clone(),
+                                status: gate.status,
+                                is_expandable: false,
+                                is_expanded: false,
+                                activity_count: 0,
+                                agent_session_id: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // Append side-state rows when the feature is blocked or aborted.
+        if self.workflow_state == "blocked" {
+            rows.push(SmRow {
+                node_id: SmNodeId::PipelineStep(self.pipeline.len()),
                 depth: 0,
                 label: "Blocked".to_string(),
                 status: SmStatus::Blocked,
@@ -2983,9 +2990,9 @@ impl StateMachineSurface {
                 agent_session_id: None,
             });
         }
-        if matches!(self.workflow_state, WorkflowState::Aborted) {
+        if self.workflow_state == "aborted" {
             rows.push(SmRow {
-                node_id: SmNodeId::PipelineStep(pipeline.len() + 1),
+                node_id: SmNodeId::PipelineStep(self.pipeline.len() + 1),
                 depth: 0,
                 label: "Aborted".to_string(),
                 status: SmStatus::Failed,

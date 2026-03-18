@@ -5,7 +5,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use calypso_cli::state::{
     ArtifactRef, ClarificationEntry, FeatureState, FeatureType, Gate, GateGroup, GateStatus,
     PullRequestRef, RepositoryIdentity, RepositoryState, RoleSession, SchedulingMeta,
-    WorkflowState,
 };
 
 fn temp_path(suffix: &str) -> PathBuf {
@@ -27,7 +26,7 @@ fn minimal_feature_state(id: &str) -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![GateGroup {
             id: "validation".to_string(),
             label: "Validation".to_string(),

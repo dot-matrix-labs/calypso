@@ -51,12 +51,8 @@ fn driver_mode_auto_and_step_are_distinct() {
 
 #[test]
 fn driver_step_result_advanced_holds_workflow_state() {
-    use calypso_cli::state::WorkflowState;
-    let result = DriverStepResult::Advanced(WorkflowState::PrdReview);
-    assert!(matches!(
-        result,
-        DriverStepResult::Advanced(WorkflowState::PrdReview)
-    ));
+    let result = DriverStepResult::Advanced("prd-review".to_string());
+    assert!(matches!(result, DriverStepResult::Advanced(ref s) if s == "prd-review"));
 }
 
 #[test]

@@ -6,6 +6,7 @@ pub mod claude;
 pub mod doctor;
 pub mod driver;
 pub mod error;
+pub mod event_log;
 pub mod execution;
 pub mod feature_start;
 pub mod github;

@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, AgentTerminalOutcome, ClarificationEntry, FeatureState,
     FeatureType, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState, SchedulingMeta,
-    SessionOutput, SessionOutputStream, WorkflowState,
+    SessionOutput, SessionOutputStream,
 };
 use calypso_cli::tui::OperatorSurface;
 
@@ -95,7 +95,7 @@ fn feature_with_sessions(sessions: Vec<AgentSession>) -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![GateGroup {
             id: "ci".to_string(),
             label: "CI".to_string(),

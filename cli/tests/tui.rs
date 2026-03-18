@@ -4,7 +4,6 @@ use calypso_cli::state::{
     AgentSession, AgentSessionStatus, ClarificationEntry, EvidenceStatus, FeatureState,
     FeatureType, Gate, GateGroup, GateStatus, GithubMergeability, GithubPullRequestSnapshot,
     GithubReviewStatus, PullRequestRef, SchedulingMeta, SessionOutput, SessionOutputStream,
-    WorkflowState,
 };
 use calypso_cli::tui::{
     AppEvent, AppShell, InputBuffer, OperatorSurface, PanedLayout, SmEvent, StateMachineSurface,
@@ -23,7 +22,7 @@ fn sample_feature() -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![
             GateGroup {
                 id: "specification".to_string(),
@@ -256,7 +255,7 @@ fn operator_surface_renders_all_github_label_variants() {
 #[test]
 fn operator_surface_renders_empty_and_alternate_status_states() {
     let mut feature = sample_feature();
-    feature.workflow_state = WorkflowState::New;
+    feature.workflow_state = "new".to_string();
     feature.gate_groups[0].gates[0].status = GateStatus::Manual;
     feature.gate_groups[1].gates[0].status = GateStatus::Pending;
     feature.active_sessions[0].status = AgentSessionStatus::Completed;
@@ -270,13 +269,13 @@ fn operator_surface_renders_empty_and_alternate_status_states() {
     assert!(rendered.contains("engineer (session_01) [completed]"));
     assert!(rendered.contains("No streamed output yet."));
 
-    feature.workflow_state = WorkflowState::ReleaseReady;
+    feature.workflow_state = "release-ready".to_string();
     feature.active_sessions.clear();
     let rendered = OperatorSurface::from_feature_state(&feature).render();
     assert!(rendered.contains("●rel"));
     assert!(rendered.contains("No active sessions"));
 
-    feature.workflow_state = WorkflowState::Blocked;
+    feature.workflow_state = "blocked".to_string();
     let rendered = OperatorSurface::from_feature_state(&feature).render();
     assert!(rendered.contains("state: blocked"));
 
@@ -713,7 +712,7 @@ fn feature_with_pending_gates() -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![GateGroup {
             id: "ci".to_string(),
             label: "CI".to_string(),
@@ -759,10 +758,8 @@ fn sm_surface_empty_renders_pipeline_steps() {
     surface.render_paned(&mut out, &layout).unwrap();
     let rendered = String::from_utf8_lossy(&out);
 
+    // Empty surface (no workflow_state set) shows just the header.
     assert!(rendered.contains("State Machine"));
-    assert!(rendered.contains("New"));
-    assert!(rendered.contains("Implementation"));
-    assert!(rendered.contains("Done"));
 }
 
 #[test]
@@ -778,8 +775,7 @@ fn sm_surface_from_feature_shows_active_step_and_agent_indicator() {
     // Active step rendered with ● icon and agent indicator *
     assert!(rendered.contains("Implementation"));
     assert!(rendered.contains("*"));
-    // Gate group visible (step auto-expanded when gate groups present)
-    assert!(rendered.contains("CI"));
+    // Gate group is not shown until the step is manually expanded.
 }
 
 #[test]
@@ -821,12 +817,25 @@ fn sm_surface_esc_collapses_gate_group_then_step_then_quits() {
     let feature = feature_with_pending_gates();
     let mut surface = StateMachineSurface::from_feature_state(&feature);
 
-    // Step is auto-expanded; first Esc collapses it (Continue).
+    // Expand step and gate group manually before testing collapse sequence.
+    // Enter expands the step (single active node).
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Down navigates to the CI gate group row.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    // Enter expands the gate group.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    // First Esc collapses gate group (Continue).
     assert_eq!(
         surface.handle_key_event(KeyEvent::from(KeyCode::Esc)),
         SmEvent::Continue
     );
-    // Nothing expanded now; second Esc quits.
+    // Second Esc collapses step (Continue).
+    assert_eq!(
+        surface.handle_key_event(KeyEvent::from(KeyCode::Esc)),
+        SmEvent::Continue
+    );
+    // Third Esc quits (nothing open).
     assert_eq!(
         surface.handle_key_event(KeyEvent::from(KeyCode::Esc)),
         SmEvent::Quit
@@ -862,7 +871,7 @@ fn sm_surface_a_returns_jump_to_agents_without_session_on_empty_surface() {
 #[test]
 fn sm_surface_renders_blocked_state() {
     let mut feature = feature_with_pending_gates();
-    feature.workflow_state = WorkflowState::Blocked;
+    feature.workflow_state = "blocked".to_string();
     let surface = StateMachineSurface::from_feature_state(&feature);
     let layout = sm_layout();
     let mut out = Vec::new();
@@ -876,7 +885,7 @@ fn sm_surface_renders_blocked_state() {
 #[test]
 fn sm_surface_renders_aborted_state() {
     let mut feature = feature_with_pending_gates();
-    feature.workflow_state = WorkflowState::Aborted;
+    feature.workflow_state = "aborted".to_string();
     let surface = StateMachineSurface::from_feature_state(&feature);
     let layout = sm_layout();
     let mut out = Vec::new();
@@ -899,7 +908,7 @@ fn sm_surface_concurrent_activity_count_shown_for_multiple_pending_gates() {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::QaValidation,
+        workflow_state: "qa-validation".to_string(),
         gate_groups: vec![GateGroup {
             id: "ci".to_string(),
             label: "CI".to_string(),
@@ -939,7 +948,9 @@ fn sm_surface_concurrent_activity_count_shown_for_multiple_pending_gates() {
         clarification_history: Vec::new(),
     };
 
-    let surface = StateMachineSurface::from_feature_state(&feature);
+    let mut surface = StateMachineSurface::from_feature_state(&feature);
+    // Expand the active step so gate groups are visible.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let layout = sm_layout();
     let mut out = Vec::new();
 
@@ -954,7 +965,9 @@ fn sm_surface_concurrent_activity_count_shown_for_multiple_pending_gates() {
 fn sm_surface_gate_group_expands_on_enter_and_shows_gates() {
     let feature = feature_with_pending_gates();
     let mut surface = StateMachineSurface::from_feature_state(&feature);
-    // Step is auto-expanded; navigate to the CI gate group row (index 1 in visible list).
+    // Expand the active step (single node at index 0) to reveal the CI gate group.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Navigate to the CI gate group row (index 1 in visible list).
     surface.handle_key_event(KeyEvent::from(KeyCode::Down));
     // Expand the gate group.
     surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
@@ -973,7 +986,9 @@ fn sm_surface_esc_collapses_gate_group_before_step() {
     let feature = feature_with_pending_gates();
     let mut surface = StateMachineSurface::from_feature_state(&feature);
 
-    // Expand the gate group.
+    // Expand the step (single active node) first.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    // Navigate to the CI gate group and expand it.
     surface.handle_key_event(KeyEvent::from(KeyCode::Down));
     surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
@@ -1011,14 +1026,14 @@ fn sm_surface_down_at_bottom_is_noop() {
 #[test]
 fn sm_surface_deprecated_waiting_for_human_maps_to_implementation() {
     let mut feature = feature_with_pending_gates();
-    feature.workflow_state = WorkflowState::WaitingForHuman;
+    feature.workflow_state = "waiting-for-human".to_string();
     let surface = StateMachineSurface::from_feature_state(&feature);
     let layout = sm_layout();
     let mut out = Vec::new();
     surface.render_paned(&mut out, &layout).unwrap();
     let rendered = String::from_utf8_lossy(&out);
-    // Should render as active Implementation step.
-    assert!(rendered.contains("Implementation"));
+    // workflow_state is stored as a raw string; label is rendered directly.
+    assert!(rendered.contains("Waiting For Human"));
 }
 
 // ── Agent screen (OperatorSurface session selection) tests ────────────────────
@@ -1542,31 +1557,32 @@ fn sm_surface_default_trait_creates_empty_surface() {
 #[test]
 fn sm_surface_deprecated_waiting_for_human_maps_to_implementation_visible_rows() {
     let mut feature = feature_with_pending_gates();
-    feature.workflow_state = WorkflowState::WaitingForHuman;
+    feature.workflow_state = "waiting-for-human".to_string();
     let surface = StateMachineSurface::from_feature_state(&feature);
     let layout = sm_layout();
     let mut buf = Vec::new();
     surface.render_paned(&mut buf, &layout).unwrap();
     let output = String::from_utf8_lossy(&buf);
-    // The active marker should appear on the Implementation step.
+    // workflow_state is stored and rendered as a raw string label.
     assert!(
-        output.contains("Implementation"),
-        "WaitingForHuman should map to Implementation"
+        output.contains("Waiting For Human"),
+        "waiting-for-human should render as 'Waiting For Human', got: {output}"
     );
 }
 
 #[test]
 fn sm_surface_deprecated_ready_for_review_maps_to_release_ready() {
     let mut feature = feature_with_pending_gates();
-    feature.workflow_state = WorkflowState::ReadyForReview;
+    feature.workflow_state = "ready-for-review".to_string();
     let surface = StateMachineSurface::from_feature_state(&feature);
     let layout = sm_layout();
     let mut buf = Vec::new();
     surface.render_paned(&mut buf, &layout).unwrap();
     let output = String::from_utf8_lossy(&buf);
+    // workflow_state is stored and rendered as a raw string label.
     assert!(
-        output.contains("Release Ready"),
-        "ReadyForReview should map to Release Ready"
+        output.contains("Ready For Review"),
+        "ready-for-review should render as 'Ready For Review', got: {output}"
     );
 }
 
@@ -1574,7 +1590,11 @@ fn sm_surface_deprecated_ready_for_review_maps_to_release_ready() {
 fn sm_surface_manual_gate_shows_manual_icon() {
     let mut feature = feature_with_pending_gates();
     feature.gate_groups[0].gates[1].status = GateStatus::Manual;
-    let surface = StateMachineSurface::from_feature_state(&feature);
+    let mut surface = StateMachineSurface::from_feature_state(&feature);
+    // Expand step, then gate group to make gates visible.
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Down));
+    surface.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let layout = sm_layout();
     let mut buf = Vec::new();
     surface.render_paned(&mut buf, &layout).unwrap();
@@ -1945,16 +1965,13 @@ fn run_watch_with_valid_state_roundtrips() {
     state.save_to_path(&path).unwrap();
 
     let result = calypso_cli::tui::run_watch_with(path.to_str().unwrap(), |feature| {
-        feature.workflow_state = WorkflowState::QaValidation;
+        feature.workflow_state = "qa-validation".to_string();
         Ok(())
     });
     assert!(result.is_ok());
 
     let reloaded = RepositoryState::load_from_path(&path).unwrap();
-    assert_eq!(
-        reloaded.current_feature.workflow_state,
-        WorkflowState::QaValidation
-    );
+    assert_eq!(reloaded.current_feature.workflow_state, "qa-validation");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

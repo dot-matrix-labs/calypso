@@ -20,7 +20,7 @@ static PATH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
 use calypso_cli::state::{
     EvidenceStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus, GithubMergeability,
-    GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, SchedulingMeta, WorkflowState,
+    GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, SchedulingMeta,
 };
 
 fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
@@ -34,7 +34,7 @@ fn feature_with_gate_statuses(statuses: &[GateStatus]) -> FeatureState {
         },
         github_snapshot: None,
         github_error: None,
-        workflow_state: WorkflowState::Implementation,
+        workflow_state: "implementation".to_string(),
         gate_groups: vec![GateGroup {
             id: "validation".to_string(),
             label: "Validation".to_string(),

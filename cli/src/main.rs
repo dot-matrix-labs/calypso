@@ -726,7 +726,27 @@ where
 }
 
 fn run_claude_session(state_path: &str, role: &str) {
-    let config = ExecutionConfig::default();
+    // Derive the current workflow state and its YAML-defined forward transitions.
+    let allowed_next_states: Option<Vec<String>> = (|| {
+        let path = std::path::Path::new(state_path);
+        let repo_root = path.parent()?.parent()?;
+        let state = RepositoryState::load_from_path(path).ok()?;
+        let template = calypso_cli::template::resolve_template_set_for_path(repo_root).ok()?;
+        let current = &state.current_feature.workflow_state;
+        let nexts: Vec<String> = template
+            .state_machine
+            .transitions
+            .iter()
+            .filter(|t| &t.from == current)
+            .map(|t| t.to.clone())
+            .collect();
+        if nexts.is_empty() { None } else { Some(nexts) }
+    })();
+
+    let config = ExecutionConfig {
+        allowed_next_states,
+        ..ExecutionConfig::default()
+    };
 
     match run_supervised_session(std::path::Path::new(state_path), role, &config) {
         Err(err) => {
