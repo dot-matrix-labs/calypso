@@ -344,14 +344,17 @@
     }
 
     // ── Dependency check ───────────────────────────────────────────────────────
+    console.log('[calypso] script reached dependency check');
     var __missing = (window.__missingScripts || []).slice();
     if (typeof jsyaml  === 'undefined' && __missing.indexOf('js-yaml')  === -1) __missing.push('js-yaml (loaded silently without error but undefined)');
     if (typeof mermaid === 'undefined' && __missing.indexOf('mermaid')  === -1) __missing.push('mermaid (loaded silently without error but undefined)');
     if (typeof blok    === 'undefined' && __missing.indexOf('blokjs')   === -1) __missing.push('blokjs (loaded silently without error but undefined)');
+    console.log('[calypso] CDN scripts missing:', __missing.length ? __missing : 'none');
 
     if (__missing.length > 0) {
       renderStaticStartupError(__missing);
     } else {
+    console.log('[calypso] all CDN deps present, calling blok.mount');
 
     // ── Mermaid init ───────────────────────────────────────────────────────────
     mermaid.initialize({
@@ -625,7 +628,9 @@
 
       methods: {
         mount() {
+          console.log('[calypso] mount() lifecycle called');
           this.loadWorkflows().then(() => {
+            console.log('[calypso] loadWorkflows() resolved, startupErrorMsg:', this.startupErrorMsg || '(none)');
             if (!this.startupErrorMsg) this.pollState();
           });
           this._pollTimer = setInterval(() => this.pollState(), POLL_MS);
@@ -651,6 +656,7 @@
           const ts = logTs();
           const t0 = performance.now();
           const method = (opts && opts.method) || 'GET';
+          console.log('[calypso] fetch ->', method, url);
           try {
             const res = await fetch(url, opts);
             const elapsed = Math.round(performance.now() - t0) + 'ms';
@@ -665,10 +671,12 @@
               elapsed,
               body,
             });
+            console.log('[calypso] fetch <-', method, url, res.status, Math.round(performance.now() - t0) + 'ms');
             return res;
           } catch (e) {
             const elapsed = Math.round(performance.now() - t0) + 'ms';
             const msg = e instanceof Error ? e.message : String(e);
+            console.error('[calypso] fetch error', method, url, msg);
             this.addLog({
               ts,
               cssClass: 'debug-entry debug-entry--error',
@@ -684,6 +692,7 @@
         // ── Startup: load workflows ────────────────────────────────────────────
 
         async loadWorkflows() {
+          console.log('[calypso] loadWorkflows() start');
           this.startupErrorPhase = '';
           this.startupErrorMsg = '';
           this.startupErrorStatus = '';
