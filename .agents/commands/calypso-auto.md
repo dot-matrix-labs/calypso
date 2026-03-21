@@ -39,6 +39,9 @@ Preferred entrypoint:
 `run.sh` is the deterministic auto-loop tick. Re-run it after each merged issue until it
 returns `kind: "none"` or an external blocker remains.
 
+If deterministic reconstruction cannot prove a safe continue or stop action,
+`run.sh` must return a structured diagnosis instead of guessing.
+
 Priority rules:
 
 - Plan order is authoritative.
@@ -118,6 +121,8 @@ Do not stop merely because one pass finished. Stop only when:
 
 - there is no remaining eligible open issue in the Plan
 - or progress is blocked by an external constraint that cannot be resolved from the repo, GitHub context, plan, or blueprint
+
+When blocked or ambiguous, report the diagnosis from `run.sh` back to the user.
 
 ## Progress rules
 

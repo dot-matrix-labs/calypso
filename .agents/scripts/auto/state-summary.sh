@@ -57,5 +57,12 @@ jq '{
     total: .pr.issue.checklist.total,
     unchecked: .pr.issue.checklist.unchecked,
     complete: .pr.issue.checklist.complete
-  }
+  },
+  diagnosis: (
+    if (.diagnosis.reason_code // null) == null then null else {
+      reason_code: .diagnosis.reason_code,
+      recommended_action: .diagnosis.recommended_action,
+      observations: .diagnosis.observations
+    } end
+  )
 }' <<<"$run_json"

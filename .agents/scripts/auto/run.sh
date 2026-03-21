@@ -10,15 +10,37 @@ selection="$("$SCRIPT_DIR/select-next-work.sh")"
 kind="$(jq -r '.kind' <<<"$selection")"
 
 if [[ "$kind" == "none" ]]; then
-  jq -n \
+  payload="$(jq -n \
     --argjson cleanup "$cleanup" \
     --argjson selection "$selection" \
     '{
-      state: "idle",
-      next_action: "stop",
       cleanup: $cleanup,
       selection: $selection
-    }'
+    }')"
+  diagnosis="$(printf '%s\n' "$payload" | "$SCRIPT_DIR/diagnose-state.sh" || true)"
+  if [[ -n "$diagnosis" ]]; then
+    jq -n \
+      --argjson cleanup "$cleanup" \
+      --argjson selection "$selection" \
+      --argjson diagnosis "$diagnosis" \
+      '{
+        state: $diagnosis.state,
+        next_action: "diagnose",
+        cleanup: $cleanup,
+        selection: $selection,
+        diagnosis: $diagnosis
+      }'
+  else
+    jq -n \
+      --argjson cleanup "$cleanup" \
+      --argjson selection "$selection" \
+      '{
+        state: "idle",
+        next_action: "stop",
+        cleanup: $cleanup,
+        selection: $selection
+      }'
+  fi
   exit 0
 fi
 
@@ -26,15 +48,28 @@ issue_number="$(jq -r '.issue.number' <<<"$selection")"
 prep="$("$SCRIPT_DIR/verify-issue-prep.sh" "$issue_number")"
 
 if [[ "$(jq -r '.ok' <<<"$prep")" != "true" ]]; then
-  jq -n \
+  payload="$(jq -n \
     --argjson cleanup "$cleanup" \
     --argjson selection "$selection" \
     --argjson prep "$prep" \
     '{
-      state: "prep_failed",
       cleanup: $cleanup,
       selection: $selection,
       prep: $prep
+    }')"
+  diagnosis="$(printf '%s\n' "$payload" | "$SCRIPT_DIR/diagnose-state.sh" || true)"
+  jq -n \
+    --argjson cleanup "$cleanup" \
+    --argjson selection "$selection" \
+    --argjson prep "$prep" \
+    --argjson diagnosis "$diagnosis" \
+    '{
+      state: ($diagnosis.state // "blocked"),
+      next_action: "diagnose",
+      cleanup: $cleanup,
+      selection: $selection,
+      prep: $prep,
+      diagnosis: $diagnosis
     }'
   exit 2
 fi
@@ -57,6 +92,30 @@ elif [[ "$(jq -r '.needs_rebase' <<<"$rebase_status")" == "true" ]]; then
   next_action="rebase"
 fi
 
+payload="$(jq -n \
+  --argjson cleanup "$cleanup" \
+  --argjson selection "$selection" \
+  --argjson prep "$prep" \
+  --argjson pr "$pr_status" \
+  --argjson local "$local_state" \
+  --argjson rebase "$rebase_status" \
+  --argjson merge "$merge_status" \
+  '{
+    cleanup: $cleanup,
+    selection: $selection,
+    prep: $prep,
+    pr: $pr,
+    local: $local,
+    rebase: $rebase,
+    merge: $merge
+  }')"
+diagnosis="$(printf '%s\n' "$payload" | "$SCRIPT_DIR/diagnose-state.sh" || true)"
+
+if [[ -n "$diagnosis" ]]; then
+  state="$(jq -r '.state' <<<"$diagnosis")"
+  next_action="diagnose"
+fi
+
 jq -n \
   --arg state "$state" \
   --arg next_action "$next_action" \
@@ -67,6 +126,7 @@ jq -n \
   --argjson local "$local_state" \
   --argjson rebase "$rebase_status" \
   --argjson merge "$merge_status" \
+  --argjson diagnosis "${diagnosis:-null}" \
   '{
     state: $state,
     next_action: $next_action,
@@ -76,5 +136,6 @@ jq -n \
     pr: $pr,
     local: $local,
     rebase: $rebase,
-    merge: $merge
+    merge: $merge,
+    diagnosis: $diagnosis
   }'
