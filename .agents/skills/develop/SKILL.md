@@ -2,7 +2,6 @@
 name: develop
 description: Pick a task from the Plan tracking issue, create an isolated worktree and branch, implement the feature, then open a PR via /create-pr.
 user_invocable: true
-model: opus
 ---
 
 # Develop
@@ -95,7 +94,7 @@ Implements #{issue-number}.
 
 See #{issue-number} for acceptance criteria and test plan.
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Generated with an AI agent.
 EOF
 )"
 ```
@@ -128,7 +127,7 @@ Branch: {branch-name} (already pushed to remote with draft PR #{pr-number})
 
 ## Instructions
 
-1. Read CLAUDE.md and understand project conventions before writing code.
+1. Read AGENTS.md and understand project conventions before writing code.
 2. Implement the feature according to the Behaviour and Acceptance Criteria sections.
 3. Write tests according to the Test Plan section.
 4. Run type-check, lint, format, and tests before each commit.

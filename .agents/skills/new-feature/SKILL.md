@@ -2,7 +2,6 @@
 name: new-feature
 description: Walk through the calypso feature specification workflow — intake, architecture evaluation, GitHub issue creation, and product tracking issue update.
 user_invocable: true
-model: opus
 ---
 
 # Feature Specification Flow

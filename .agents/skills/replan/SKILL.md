@@ -2,7 +2,6 @@
 name: replan
 description: Read the Plan tracking issue and all open issues, build a dependency map, reprioritize by technical risk and unblocked status, tag work into parallel concurrency groups, and update each issue and the Plan with the results.
 user_invocable: true
-model: opus
 ---
 
 # Replan

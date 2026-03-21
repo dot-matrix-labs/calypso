@@ -2,7 +2,6 @@
 name: patch
 description: Extract off-topic changes from the current branch into their own issue, branch, worktree, and PR. No clarifications asked — all naming and scoping judgements are made autonomously.
 user_invocable: true
-model: opus
 ---
 
 # Patch
@@ -60,7 +59,7 @@ Use those paths exactly. Skip the analysis below.
 
 4. Identify files whose changes are unrelated to the branch's stated theme. Strong
    signals for "off-topic":
-   - Path is in a completely different subsystem (e.g. `.claude/skills/` on a `feat/` branch)
+   - Path is in a completely different subsystem (e.g. `.agents/skills/` on a `feat/` branch)
    - Change is tooling, config, or documentation while branch is a product feature
    - Change is a product feature while branch is tooling or config
    - File was not mentioned in the branch's linked issue (if one exists)
@@ -185,7 +184,7 @@ chore/{issue-number}-{short-slug}
 Create the branch and a linked worktree from main:
 
 ```bash
-git worktree add .claude/worktrees/chore-{issue-number}-{short-slug} \
+git worktree add .agents/worktrees/chore-{issue-number}-{short-slug} \
   -b chore/{issue-number}-{short-slug} \
   main
 ```
@@ -197,7 +196,7 @@ git worktree add .claude/worktrees/chore-{issue-number}-{short-slug} \
 Apply the saved patch in the new worktree:
 
 ```bash
-cd .claude/worktrees/chore-{issue-number}-{short-slug}
+cd .agents/worktrees/chore-{issue-number}-{short-slug}
 git apply /tmp/calypso-patch-extract.diff
 ```
 
@@ -252,6 +251,6 @@ Report to the user:
   create a separate issue and PR per distinct concern, each with its own worktree
 - **Current branch must be clean after extraction** — `git checkout main -- {files}`
   always runs, and a revert commit is added if needed
-- **Worktrees live in `.claude/worktrees/`** — follow the project convention
+- **Worktrees live in `.agents/worktrees/`**
 - **`gh` CLI only** for all GitHub operations
 - **1:1:1:1:1 invariant** — one issue, one branch, one PR, one worktree per extraction

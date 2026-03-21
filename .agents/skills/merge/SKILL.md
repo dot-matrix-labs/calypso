@@ -2,7 +2,6 @@
 name: merge
 description: Merge ready PRs in dependency order — verify CI gates, rebase if behind, merge, update tracking issue.
 user_invocable: true
-model: opus
 ---
 
 # Merge

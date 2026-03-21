@@ -2,7 +2,6 @@
 name: create-pr
 description: Create a pull request that delivers exactly one GitHub issue. Verifies all acceptance criteria are complete before creating.
 user_invocable: true
-model: opus
 ---
 
 # Create PR
@@ -83,7 +82,7 @@ Closes #{issue-number}
 
 {Copy from issue, with checkboxes checked for verified items}
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Generated with an AI agent.
 EOF
 )"
 
@@ -112,7 +111,7 @@ Closes #{issue-number}
 
 {Copy from issue, with checkboxes checked for verified items}
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
+Generated with an AI agent.
 EOF
 )"
 ```
