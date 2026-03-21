@@ -219,8 +219,6 @@ pub const WORKFLOW_RUST_COVERAGE: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/rust-coverage.yml");
 pub const WORKFLOW_RELEASE_CLI: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/release-cli.yml");
-pub const WORKFLOW_MERGE_QUEUE: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/merge-queue.yml");
 pub const WORKFLOW_PR_ISSUE_CHECKLIST: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/pr-issue-checklist.yml");
 pub const WORKFLOW_PR_CONFLICTS: &str =
@@ -1042,7 +1040,6 @@ pub fn refresh_workflows(
         ("rust-e2e.yml", WORKFLOW_RUST_E2E),
         ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
         ("release-cli.yml", WORKFLOW_RELEASE_CLI),
-        ("merge-queue.yml", WORKFLOW_MERGE_QUEUE),
     ];
 
     let mut refreshed = Vec::new();
@@ -1153,7 +1150,6 @@ pub fn scaffold_github_actions(
         ("rust-e2e.yml", WORKFLOW_RUST_E2E),
         ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
         ("release-cli.yml", WORKFLOW_RELEASE_CLI),
-        ("merge-queue.yml", WORKFLOW_MERGE_QUEUE),
     ];
 
     let mut scaffolded = Vec::new();

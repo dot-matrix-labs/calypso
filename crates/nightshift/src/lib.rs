@@ -47,7 +47,8 @@ pub fn render_help(info: BuildInfo<'_>) -> String {
 calypso-cli {}
 
 Usage:
-  calypso [OPTIONS] [path] [COMMAND]
+  calypso [OPTIONS] [COMMAND]
+  calypso [path]
 
 Options:
   -p, --path <dir>    Project directory (default: current working directory)
@@ -58,7 +59,7 @@ Options:
   --json              Emit JSON-lines instead of human-readable text (headless)
 
 Positional:
-  [path]              Project directory (alternative to --path); starts TUI
+  [path]              Project directory only when used alone; use --path with subcommands
 
 Commands:
   (none)              Drive the state machine for the project directory

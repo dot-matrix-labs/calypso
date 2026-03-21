@@ -1,7 +1,7 @@
 # Calypso default workflow state machine
 # Conforms to: PROCESS-D-003 (calypso-yaml-workflow-definition)
 #               PROCESS-D-004 (producer-validator-handoff)
-#               PROCESS-D-005 (merge-queue-ownership)
+#               PROCESS-D-005 (merge-ownership)
 #               PROCESS-D-006 (gate-groups-and-evidence)
 #               PROCESS-D-007 (task-catalog-backing-workflow)
 initial_state: new
@@ -358,7 +358,7 @@ gate_groups:
           - qa-validation
 
   # Release-ready gates — release-ready → done
-  # Merge-queue role evaluates these before executing the merge
+  # Merge role evaluates these before executing the merge
   - id: release-ready
     label: Release Ready
     gates:
@@ -375,7 +375,7 @@ gate_groups:
         applies_to:
           - release-ready
 
-  # Merge-readiness gates — gated by merge-queue role
+  # Merge-readiness gates — gated by merge role
   - id: merge-readiness
     label: Merge Readiness
     gates:

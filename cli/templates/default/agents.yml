@@ -1,6 +1,6 @@
 # Calypso default agent task catalog
 # Conforms to: PROCESS-D-004 (producer-validator-handoff)
-#               PROCESS-D-005 (merge-queue-ownership)
+#               PROCESS-D-005 (merge-ownership)
 #               PROCESS-D-007 (task-catalog-backing-workflow)
 #
 # Role taxonomy (PROCESS-D-004):
@@ -10,7 +10,7 @@
 #   human-or-architect — reviews and approves architecture
 #   engineer          — implements features, writes and fixes code
 #   validator         — reviews implementation against acceptance criteria
-#   merge-queue       — determines landing order, executes merges
+#   merge            — determines landing order, executes merges
 #   human             — any required human-in-the-loop approval
 #   github            — automated CI / GitHub Actions checks
 tasks:

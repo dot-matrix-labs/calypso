@@ -2,480 +2,352 @@
 
 ## Goal
 
-Build a motivating prototype of `calypso-cli` in Rust that proves the core product loop:
-
-- enforce the Calypso state machine locally
-- supervise agent execution through Codex CLI
-- inspect the GitHub status relevant to the current feature branch
-- present agents, sessions, and grouped content gates in a terminal UI
+Recover the core Nightshift workflow and prove one thing first:
+
+- headless mode can execute user-defined YAML state machines
+- the runtime can loop through project-task workflows without stopping
+- terminal logs clearly report states, transitions, steps, and failures
+- the system can resume the loop until the user exits the program
+
+This plan is now explicitly headless-first. Web interfaces, richer operator surfaces, and stricter end-state test philosophy are deferred until the basic state-machine runtime is real and stable.
+
+## Immediate priority
+
+We have been failing at the most basic requirement: creating a simple state machine that runs reliably.
+
+The current top priority is therefore:
+
+1. make Nightshift headless mode work with multiple user-authored YAML state machines
+2. create several happy-path tests using mocks/fakes at the runtime boundaries
+3. fuzz YAML inputs that could break parsing, validation, transition selection, or loop execution
+4. ship example state machines that repeatedly iterate project tasks until the user exits
+
+Everything else is secondary until this works.
+
+## In scope now
+
+- headless execution only
+- user-authored YAML state-machine loading and validation
+- deterministic step execution and transition resolution
+- loop-oriented workflows that restart after finishing a task cycle
+- terminal log reporting for:
+  - state entered
+  - step started
+  - step completed
+  - transition chosen
+  - loop restart
+  - terminal exit reason
+- happy-case tests with mocking/fakes for subprocess, GitHub, and other external boundaries
+- fuzzing and regression coverage for problematic YAML inputs
+
+## Explicitly deferred
+
+- web interfaces
+- browser operator surfaces
+- TUI-first workflow work
+- broader doctor/audit expansion
+- workspace refactor
+- nonessential GitHub workflow integrity work
+- broader release/deploy orchestration
+- “proper” full-behavior test expansion beyond the recovery slice
+
+## Reset phase model
+
+## Phase 0: Keep the usable foundation
+
+Completed or already-useful work should be preserved where it helps the headless runtime:
+
+- repository-local state persistence
+- template loading
+- runtime/domain code already extracted into `crates/nightshift`
+- existing signal, report, state, interpreter, and headless entry-point code
+- existing tests that still match the new priority
+
+Do not spend time expanding UI or architecture purity during this phase.
+
+## Phase 1: Headless state-machine recovery
+
+This is the only priority phase until complete.
+
+### Phase 1.1: YAML contract and loader recovery
+
+- define the minimum supported YAML state-machine schema for headless execution
+- support multiple user-authored YAML files, not just the embedded default
+- reject invalid or ambiguous configurations with precise errors
+- validate:
+  - missing states
+  - duplicate state names
+  - missing start state
+  - missing target states
+  - empty step lists where steps are required
+  - invalid loop targets
+  - unsupported action types
+- ensure load errors are surfaced clearly in terminal logs
+
+### Phase 1.2: Deterministic headless driver loop
+
+- start from a selected initial state
+- execute steps in order
+- evaluate transitions deterministically
+- move to the next state without TUI dependencies
+- continue looping until:
+  - the YAML reaches an explicit exit state
+  - the user interrupts the process
+  - a fatal validation/runtime error occurs
+- support a cycle model where “done for now” transitions back to the top-level planning/task-selection state
+
+### Phase 1.3: Terminal reporting and observability
+
+- emit clear logs for every state transition and step boundary
+- make headless logs readable in plain text first
+- include enough structured data to support later JSON output
+- log at minimum:
+  - current state
+  - current step
+  - selected transition
+  - iteration counter
+  - blocking error
+  - shutdown cause
+- ensure logs make it obvious that the agentic loop is still progressing and has not stalled
 
-This prototype is intentionally narrow. It does not attempt to implement the full product specification.
+### Phase 1.4: Happy-case tests with mocks/fakes
 
-The prototype should assume the canonical Calypso information architecture:
+For this recovery slice, mocking is allowed and required at unstable boundaries so we can prove the state-machine behavior quickly.
 
-- one orchestrator per repository
-- one feature equals one branch, one worktree, and one pull request
-- agent work is scheduled by the orchestrator against those feature units
+- create happy-case tests for:
+  - single-path YAML workflow
+  - branching YAML workflow
+  - looping workflow that restarts after a completed task cycle
+  - workflow that waits for a mocked external result and then proceeds
+  - workflow that exits cleanly on user interrupt
+- use mocks/fakes for:
+  - subprocess execution
+  - provider responses
+  - GitHub or external command boundaries
+  - clock/timing where needed
+- verify ordered log output and ordered state transitions
 
-## Prototype assumptions
+### Phase 1.5: YAML fuzzing and regression corpus
 
-- The implementation language is Rust.
-- The design should be as close to pure Rust as practical.
-- Dependencies should be minimized aggressively.
-- A stretch goal is to keep core domain logic compatible with `no_std` in v1, even if the executable itself is not `no_std`.
-- Codex CLI is the only assumed provider for the prototype.
-- Codex CLI is assumed to already be installed and authenticated.
-- The `gh` CLI is a hard dependency for GitHub-backed prototype workflows.
-- Users may authenticate `gh` however they prefer.
-- Calypso `doctor` is responsible for checking whether `gh` is installed and authenticated correctly.
-- The prototype does not implement broad convenience features such as key custody, Kubernetes setup, studio preview environments, release automation, or database digital twins.
+- fuzz YAML parsing and validation
+- fuzz transition graphs and malformed edge targets
+- fuzz pathological values:
+  - deeply nested mappings/sequences
+  - duplicate keys
+  - unknown fields
+  - huge scalar values
+  - invalid UTF-8/encoding edge cases where applicable
+  - recursive/alias-heavy YAML structures if the parser permits them
+- save minimized crashing or confusing inputs as named regression fixtures
+- ensure bad YAML never causes silent hangs or undefined loop behavior
 
-## Product slice in scope
+### Phase 1.6: Example looping state machines
 
-The prototype should implement only the minimum slice necessary to validate the product thesis:
+- add several example YAML workflows that demonstrate continuous operation until exit
+- examples should include:
+  - task intake -> choose task -> execute task -> report -> restart
+  - review queue -> process item -> mark result -> restart
+  - implementation loop -> inspect backlog -> do work -> summarize -> restart
+- examples must be simple enough for users to modify safely
+- examples must be covered by tests
 
-1. Repository-local orchestrator state.
-2. A shipped YAML methodology template set representing the default Calypso methodology.
-3. Feature-to-branch-to-worktree-to-PR mapping for the current branch.
-4. Relevant GitHub status inspection for the current feature branch or pull request.
-5. A narrow local setup and doctor flow for required dependencies and GitHub repository context.
-6. Agent session supervision through Codex CLI.
-7. A TUI showing:
-   - the current feature unit
-   - active agent sessions for that feature
-   - session identifiers
-   - streamed agent output
-   - a way for the user to add follow-up content or answers
-   - grouped content gates for the current feature branch
+## Phase 2: Headless runtime hardening
 
-## PR #19 Slice Status
+After Phase 1 works end-to-end:
 
-- [x] Detect the current Git repository root and current branch.
-- [x] Derive a bound feature unit for the current branch, including worktree path and pull request identity.
-- [x] Resolve methodology templates from repository-local YAML overrides or embedded defaults.
-- [x] Load an existing repository-local JSON orchestration state file or initialize a new one from the template set.
-- [x] Persist repository and feature state back to disk deterministically.
-- [x] Expose a reusable runtime API for repository discovery and state bootstrap.
-- [x] Cover repository discovery, load-or-initialize, resume, and corrupt-state behavior with tests.
+- persist loop state cleanly across restarts
+- improve signal handling and shutdown behavior
+- add resumable iteration metadata
+- separate user-facing errors from internal diagnostics
+- add text and JSON log formatting once the text output is proven useful
 
-## Explicitly out of scope for the prototype
+## Phase 3: Real integration behavior
 
-- Multi-provider support beyond Codex CLI.
-- HTTPS callback serving.
-- Browser operator surface.
-- Studio mode and embedded preview UI.
-- Kubernetes deployment, audit, or doctor workflows.
-- Database-state subcommands and digital-twin workflows.
-- Native secure-element key custody and broader key-management workflows.
-- Release and deploy automation beyond reading status relevant to the current feature branch.
+Only after the mocked happy paths are stable:
 
-## Engineering constraints
+- replace selected mocks with real integration coverage where it adds confidence
+- verify real subprocess/provider interactions
+- verify repository-local YAML overrides in realistic repos
+- verify headless mode under longer-running multi-iteration sessions
 
-### Rust-first architecture
+This is where “proper test behavior” starts to expand again, after the core loop is stable.
 
-- Prefer the standard library and direct Rust implementations over framework-heavy crates.
-- Introduce a library only when it removes substantial risk or complexity.
-- Separate the code into a small core domain layer and thin environment adapters.
-- Keep core state-machine logic, gate evaluation, and transcript/event models free of OS-specific assumptions where possible.
+## Phase 4: Operator surfaces after headless works
 
-### Minimal dependencies
+- restore or improve TUI work only if it helps supervise the already-working headless loop
+- keep UI thin and downstream of the runtime
+- no UI work should redefine state-machine semantics
 
-Prefer a short dependency list with clear justification:
+## Phase 5: Web interfaces
 
-- CLI argument parsing: minimal crate or hand-rolled parser
-- terminal I/O and event handling: `crossterm` by default
-- TUI rendering and layout: hand-rolled on top of `crossterm` unless complexity proves that a higher-level framework is justified
-- structured local serialization: use JSON for machine-written orchestration state and keep YAML for human-authored methodology templates
-- Process execution: std facilities unless a crate meaningfully improves streaming control
+- design and build web interfaces after the headless runtime is reliable
+- reuse the same runtime events and reporting model instead of inventing separate UI-only behavior
 
-Everything else should default to hand-written Rust unless there is a strong reason not to.
+## Phase 6: Deferred issue-linked work
 
-### `no_std` stretch goal
+Existing issue-shaped roadmap items are moved later behind the core recovery work.
 
-The executable will likely require `std`, but the following areas should be designed so they could move toward `no_std` compatibility later:
+- workspace refactor previously tracked as `#121`
+- prior headless-mode roadmap item previously tracked as `#122`
+- doctor state-machine audit previously tracked as `#123`
+- additional issue-backed roadmap items should remain deferred unless they directly unblock Phase 1
 
-- state-machine definitions
-- gate and status models
-- agent outcome models
-- repository and feature domain types
-- deterministic transition logic
+The point is to stop spending roadmap energy on peripheral issues before the basic state machine works.
 
-The prototype should not distort delivery speed just to force `no_std`, but it should avoid needless coupling between core logic and the host environment.
+## Issue-ready breakdown
 
-## Prototype behavior
+These should become the next detailed issues, in this order.
 
-### Provider model
+### Issue 1: Define the minimum supported headless YAML state-machine spec
 
-- Implement only a Codex CLI adapter.
-- Assume Codex CLI is present on `PATH`.
-- Assume Codex CLI auth is already valid.
-- Focus on launching a session, capturing streamed output, tracking session identity, and sending follow-up input.
+Problem:
+Current YAML/state-machine behavior is too unclear and too fragile to build against.
 
-### GitHub access model
+Deliverables:
 
-- Use `gh` as the required GitHub integration surface for the prototype.
-- Do not implement custom GitHub auth flows in the motivating prototype.
-- Help the user validate or establish the expected local repository remote configuration for GitHub-backed workflows.
-- GitHub status inspection only needs to cover what the feature state machine cares about for the current branch or PR.
+- one documented minimum schema
+- one validation pass with actionable errors
+- one small set of accepted built-in step/transition types
 
-### Local doctor scope
+Acceptance criteria:
 
-The motivating prototype should include a narrow `doctor` path that checks:
+- invalid YAML fails fast with a specific message
+- invalid graph structure never reaches execution
+- at least one user-authored YAML file outside the embedded defaults loads successfully
 
-- required executables for the prototype
-- repository context and Git remote assumptions
-- `gh` availability and authentication state
-- Codex CLI availability
+### Issue 2: Make the headless driver run a basic YAML state machine end-to-end
 
-The doctor output should be short, actionable, and suitable for first-run setup.
+Problem:
+Nightshift still fails at the core runtime loop.
 
-### State-machine scope
+Deliverables:
 
-Implement only the feature-branch workflow state needed for supervised development, for example:
+- initial-state selection
+- ordered step execution
+- deterministic transition choice
+- explicit loop behavior
+- explicit exit behavior
 
-- `new`
-- `implementation`
-- `waiting_for_human`
-- `ready_for_review`
-- `blocked`
+Acceptance criteria:
 
-The prototype does not need the full release or deployment model yet.
+- a simple two-state machine runs without UI dependencies
+- a looped workflow can iterate more than once
+- runtime exit reasons are visible in logs
 
-The prototype should model one active feature unit as:
+### Issue 3: Add terminal logs for state entry, step execution, and transitions
 
-- current feature
-- current branch
-- current worktree
-- current pull request
+Problem:
+When the runtime fails or stalls, operators cannot tell where it stopped.
 
-Those should be treated as one bound orchestration object rather than separate concerns.
+Deliverables:
 
-### Gate model
+- readable headless text logs
+- consistent event names
+- state/step/transition reporting at every boundary
 
-The prototype should execute a shipped default YAML methodology template set.
+Acceptance criteria:
 
-That template set should be separated into:
+- a human can follow one full loop from logs alone
+- a failing transition includes the state and step context that caused it
 
-- state-machine rules
-- agent/task definitions
-- prompt definitions
+### Issue 4: Create mocked happy-path coverage for core workflow shapes
 
-The state-machine rules should include grouped gates for the current feature branch, such as:
+Problem:
+We do not yet have stable tests proving that normal state-machine execution works.
 
-- specification gates
-- implementation gates
-- validation gates
-- merge-readiness gates
+Deliverables:
 
-Each gate must have a deterministic status source where possible, even if some statuses are initially manual.
+- mocked/fake happy-path tests for straight-line, branching, looping, and interrupted flows
+- assertions for transition order and log output
 
-The motivating prototype should start with a small but concrete default gate set rather than only abstract gate groups.
+Acceptance criteria:
 
-Template resolution should follow this rule:
+- the happy-path suite proves at least three distinct workflow shapes
+- tests run without requiring live external services
 
-- if methodology YAML exists in the repository root or current execution path, use it
-- otherwise, use the embedded default template set
+### Issue 5: Fuzz YAML inputs and capture regression fixtures
 
-Any repository-authored methodology YAML must be parsed and validated for coherence before it is accepted.
+Problem:
+Malformed YAML can still cause parser, validator, or runtime failures that are hard to predict.
 
-### Concurrency model
+Deliverables:
 
-The prototype should preserve the standard Calypso scheduling rules:
+- fuzz targets for parsing and graph validation
+- regression fixtures for minimized failures
+- guarantees against hangs on invalid input
 
-- one orchestrator per repository
-- one feature-oriented agent session per worktree is always safe
-- additional sessions for the same feature are allowed only for tasks that do not contend for the same mutable workspace area
+Acceptance criteria:
 
-The motivating prototype only needs to execute one provider-backed agent session at a time, but its domain model should leave room for safe parallel sessions later.
+- fuzzing produces no uncontrolled panics
+- known-bad YAML samples stay covered by fixtures
 
-### TUI scope
+### Issue 6: Ship example looping state machines users can copy
 
-The TUI is the main interface for the prototype. It should show:
+Problem:
+We still lack simple examples that demonstrate the intended “keep going until exit” model.
 
-- current repository and feature branch context
-- active agent sessions
-- provider session IDs
-- live streamed output per agent
-- an input path for the user to answer or add content
-- grouped gates and their current status
-- the currently blocking gate or issue, if any
+Deliverables:
 
-The TUI does not need advanced layout or styling. Clarity and reliability matter more than visual ambition.
+- multiple example YAML files
+- one documented project-task iteration loop
+- tests that execute the examples
 
-The TUI layer should remain a thin presentation boundary so the prototype can move to a richer framework later if `crossterm` proves insufficient.
+Acceptance criteria:
 
-## Proposed phases
+- examples are valid under the minimum schema
+- at least one example loops continuously until interrupted by the user
 
-## Phase 0: Reset and scaffold
+### Issue 7: Harden resume, shutdown, and iteration tracking
 
-- [x] Create a Rust crate layout for `calypso-cli`.
-- [x] Choose a minimal crate structure: executable plus small core library.
-- [x] Set up formatting, linting, and test commands.
-- [x] Define build-time version metadata injection for semantic version, 6-character Git hash, build time, and Git tag information.
-- [x] Define the baseline GitHub workflow set for the repository:
-  - Rust lint, format, and build
-  - unit, integration, and end-to-end tests
-  - code coverage reporting with a 99% or greater line-coverage target
-  - release and executable publishing
-- [ ] Add a short architecture note explaining why each dependency exists.
+Problem:
+A working loop is not enough if it loses context or exits unclearly.
 
-Completed scaffold notes:
+Deliverables:
 
-- Initial Cargo project exists with `build.rs`, library crate, and binary entrypoint.
-- Version and help output are implemented via test-first development.
-- Current verified behavior includes semantic version plus 6-character Git hash, build time, and Git tag output.
+- persisted iteration metadata
+- clean shutdown on interrupt
+- restart/resume behavior for headless sessions
 
-## Phase 1: Core domain model
+Acceptance criteria:
 
-- [ ] Define domain types for repository state, feature state, agent session, gate group, gate status, and agent outcome.
-- [ ] Define the canonical feature unit mapping: feature = branch = worktree = pull request.
-- [ ] Define a minimal YAML-backed feature workflow state machine model.
-- [ ] Define deterministic transition checks.
-- [ ] Define basic scheduling metadata for safe agent concurrency.
-- [ ] Add tests for state transitions and gate grouping logic.
+- interrupted runs persist enough state to explain what happened
+- resumed runs do not duplicate or skip transitions silently
 
-Next overall step outside PR #19:
+### Issue 8: Reintroduce broader surfaces and deferred roadmap items
 
-- Validate the expected local GitHub remote context for the repository before moving deeper into gate-evaluation runtime work.
+Problem:
+UI, audit, and refactor work should only proceed after the core loop is real.
 
-## Phase 1.5: YAML methodology template
+Deliverables:
 
-- [x] Define the YAML schema for state-machine rules, transitions, gate groups, gates, and approval rules.
-- [x] Define the YAML schema for agent/task definitions.
-- [x] Define the YAML schema for prompt definitions keyed by task name.
-- [x] Define the default shipped feature template set for the motivating prototype.
-- [x] Embed the default template set into the executable at build time.
-- [ ] Include hook rules, doctor checks, and workflow requirements in the state-machine rules model.
-- [x] Define reserved built-in evaluator keywords for deterministic Rust-backed checks.
-- [x] Validate template loading and schema errors clearly.
+- re-evaluated TUI scope
+- re-evaluated web UI scope
+- re-sequenced issue backlog
 
-## Phase 2: Local persistence
+Acceptance criteria:
 
-- [x] Implement repository-local state storage.
-- [x] Store orchestration state with the managed repository/project.
-- [x] Persist feature branch state, gate state, and tracked agent sessions.
-- [x] Store orchestration state as JSON and keep the serialization boundary localized.
-- [x] Keep file formats simple and stable.
-- [x] Add tests for load, save, resume, and corruption handling.
-
-## Phase 3: Git and branch context
-
-- [x] Detect current repository and current branch.
-- [x] Map the current branch to Calypso feature context and its bound worktree and pull request identity.
-- [x] Read enough Git information to support the prototype state machine.
-- [ ] Validate the expected local GitHub remote context for the repository.
-- [x] Add tests using fixture repositories where practical.
-
-## Phase 3.5: Gate evaluation runtime
-
-- [x] Implement a deterministic runtime that evaluates gate state from the YAML state-machine rules.
-- [x] Implement template resolution: repository-local YAML first, embedded default second.
-- [x] Reject repository-authored YAML that fails coherence validation.
-- [ ] Resolve task execution from the agent/task catalog and prompt definitions.
-- [ ] Map built-in evaluator keywords to deterministic Rust functions.
-- [ ] Map gate status sources to Git, `gh`, local documents, doctor checks, built-in evaluators, and agent outcomes.
-- [ ] Compute blocking gates and available transitions from evaluated evidence.
-- [x] Add tests for template-driven gate evaluation.
-
-## Phase 4: GitHub status inspection
-
-- [x] Implement the narrowest GitHub integration needed to inspect branch or PR status.
-- [x] Use `gh` for the required GitHub status and pull-request inspection paths.
-- [x] Surface only the statuses relevant to gates and merge readiness.
-
-## Phase 4.5: Local doctor
-
-- [x] Implement a narrow `doctor` command for prototype prerequisites.
-- [x] Check repository context, `gh` install/auth state, and Codex CLI availability.
-- [x] Check that required GitHub workflow files are present in the repository.
-- [x] Emit actionable fixes for missing or invalid local setup.
-
-## Phase 4.6: Doctor state machine audit (#123)
-
-Doctor should audit the state machine and blueprint workflows for correctness by cross-referencing all GHA workflow references against the actual `.github/workflows/` directory.
-
-### Phase 4.6.1: Reference integrity
-
-- [ ] Collect all `workflow:` paths from blueprint workflow checks, `ci_workflows`, `github_actions.current_required`, and policy gate `paths`.
-- [ ] Verify each referenced file exists on disk relative to repo root.
-- [ ] When a file is missing, scan `.github/workflows/` for the closest filename match and suggest it.
-
-### Phase 4.6.2: Workflow name and job graph validation
-
-- [ ] Parse referenced GHA YAML files to extract the `name:` field and `jobs:` keys.
-- [ ] Validate `workflow_name` matches the actual `name:` field in the GHA file.
-- [ ] Validate `check_names` job keys exist in the referenced GHA workflow's `jobs:` map.
-
-### Phase 4.6.3: Merged graph coherence
-
-- [ ] Verify every check referenced in state `checks:` lists exists in the checks map.
-- [ ] Detect orphan checks (defined but never referenced by any state).
-- [ ] Verify the combined state machine + inherited GHA jobs form a valid graph with no dangling references.
-
-### Phase 4.6.4: Drift detection
-
-- [ ] Compare last-modified timestamps of referenced GHA workflow files vs. blueprint workflow YAML.
-- [ ] Emit a non-blocking warning when GHA files are newer than the referencing blueprint YAML.
-
-### Phase 4.6.5: Integration
-
-- [ ] Add `StateMachineIntegrity` as a new check category in `doctor.rs`.
-- [ ] Include state machine audit results in `doctor --json` output.
-- [ ] Existing doctor checks unaffected.
-
-## Phase 4.75: Hook and checklist integration
-
-- [ ] Implement evaluation for hook-driven rules such as merge drift and PRD-to-implementation-plan reconciliation.
-- [ ] Map grouped gate state to PR checklist semantics for the motivating prototype.
-- [ ] Ensure tag-push exemption is represented in the hook model.
-
-## Phase 5: Codex CLI adapter
-
-- [x] Launch Codex CLI as a subprocess.
-- [x] Capture streamed output.
-- [x] Track session identifiers when available.
-- [x] Support follow-up user input into the active session.
-- [x] Normalize terminal outcomes into Calypso agent status.
-
-Completed Codex adapter notes:
-
-- `cli/src/codex.rs` now owns subprocess launch, stdout/stderr streaming, provider session-id extraction, follow-up stdin routing, and terminal-status normalization.
-- `cli/src/state.rs` persists provider session IDs, captured output, and normalized terminal outcomes on `AgentSession`.
-- Runtime coverage includes command construction for real Codex CLI execution, output buffering, waiting-for-human detection, persisted snapshot mapping, and failed or aborted subprocess handling.
-
-## Phase 6: TUI
-
-Current progress notes:
-
-- A testable operator-surface view module now renders feature context, grouped gates, blocking gates, active sessions, persisted session output, and follow-up input state from workflow data.
-- `calypso-cli status --state <path> --headless` renders the current surface snapshot without coupling tests to terminal control.
-- `calypso-cli status --state <path>` now runs an interactive `crossterm` surface with refresh, typing, submit, and quit handling.
-- Follow-up submission now queues onto the active session in persisted state so the runtime boundary can consume it later.
-- Local validation for this slice now passes with rustfmt, clippy, full test suite, and the enforced coverage gate. The coverage gate is driven through a small internal coverage runner so the binary entrypoint wiring does not distort the 99% line target for the implemented runtime logic.
-
-- [x] Build a terminal interface for agent supervision.
-- [x] Show the current feature unit and active sessions, including session IDs and streamed output.
-- [x] Show grouped gates for the current feature branch.
-- [x] Allow the user to add content or answer an active session.
-- [x] Show the current blocking gate or merge issue clearly.
-
-## Phase 7: End-to-end prototype loop
-
-- [ ] Start in a repository on a feature branch.
-- [ ] Load or initialize Calypso feature state.
-- [ ] Inspect relevant GitHub status.
-- [ ] Run one Codex-backed agent session.
-- [ ] Let the user respond through the TUI.
-- [ ] Update gate state and feature state deterministically.
-
-## Success criteria for the motivating prototype
-
-- [ ] Running `calypso-cli` in a feature branch loads or creates workflow state for the bound feature/branch/worktree/pull-request unit.
-- [x] The tool can display grouped gates for the branch and mark their status deterministically where possible.
-- [ ] The tool can launch Codex CLI, stream output, and display the provider session ID when available.
-- [ ] The user can enter follow-up content from the TUI.
-- [x] The tool can inspect the GitHub status relevant to the current branch or PR.
-- [x] The `doctor` command can report whether repository context, `gh`, Codex CLI, and required workflow files are ready for the prototype workflow.
-- [ ] The tool can clearly show whether the feature branch is blocked, waiting for human input, or ready for review.
-- [x] `-v` or `--version` prints semantic version, 6-character Git hash, build time, and available Git tag information.
-- [x] `-h` or `--help` exposes version information visibly.
-
-## Risks
-
-- Codex CLI session behavior may not expose stable identifiers in a way that is easy to normalize.
-- `gh` integration may expose output-shape and environment differences that require defensive handling.
-- TUI complexity can expand quickly if the first layout is too ambitious.
-
-## Current slice notes
-
-- `doctor` now runs against the host environment and reports `gh`, Codex, auth, GitHub remote, and required workflow-file evidence.
-- `doctor` now prints actionable remediation text for failing dependency, auth, remote, and workflow checks.
-- `status` now resolves the current repo/branch, queries the active PR through `gh` when available, merges doctor/GitHub evidence, and renders grouped gate state.
-- No remaining gaps are currently known in the doctor/GitHub runtime slice.
-
-## Phase 8: Workspace crate refactor (#121)
-
-Refactor the single `calypso-cli` crate into a Cargo workspace with the `nightshift` crate as the core orchestration runtime and separate crates for loosely-coupled subsystems.
-
-### Phase 8.1: Workspace scaffold
-
-- [ ] Convert the repository to a Cargo workspace with a root `Cargo.toml`.
-- [ ] Create the `nightshift` crate containing the core orchestration runtime:
-  - state machine driver (`driver.rs`, `state.rs`)
-  - init flow (`init.rs`)
-  - git and branch context (`feature_start.rs`, git-related logic)
-  - GitHub integration (`github.rs`)
-  - TUI operator surface (`tui.rs`)
-  - orchestrator loop and command dispatch (`main.rs`, `app.rs`)
-  - error types (`error.rs`)
-- [ ] All existing tests pass after restructuring.
-
-### Phase 8.2: Extract provider crate
-
-- [ ] Move provider adapters (`claude.rs`, `codex.rs`, `execution.rs`) into a `calypso-providers` crate.
-- [ ] Define a provider trait boundary between `nightshift` and `calypso-providers`.
-
-### Phase 8.3: Extract template and policy crate
-
-- [ ] Move template engine (`template.rs`, `blueprint_workflows.rs`, `workflows.rs`) into a `calypso-templates` crate.
-- [ ] Move policy and gate evaluation (`policy.rs`, `runtime.rs`, `pr_checklist.rs`) into a `calypso-policy` crate or keep with templates if tightly coupled.
-
-### Phase 8.4: Extract supporting crates
-
-- [ ] Move telemetry (`telemetry.rs`) into a `calypso-telemetry` crate.
-- [ ] Move doctor/diagnostics (`doctor.rs`) into a `calypso-doctor` crate.
-- [ ] Move report types (`report.rs`) into a shared `calypso-types` or keep with telemetry.
-
-## Phase 9: Headless mode (#122)
-
-Add `--headless` flag to run the orchestrator loop without the TUI, emitting structured logs instead.
-
-### Phase 9.1: Verbosity and log format flags
-
-- [ ] Add `-v` (info) and `-vv` (debug) flags to CLI argument parsing.
-- [ ] `-v`/`-vv` take precedence over `CALYPSO_LOG` env var when both present. When both are set, emit a benign info-level log at startup: `"verbosity flag overrides CALYPSO_LOG={value}; using {resolved level}"`.
-- [ ] Add `--log-format text|json` flag (default: `json` in headless).
-- [ ] Extend `LogEntry` in `telemetry.rs` with `component` and `event` fields.
-- [ ] Define component identifiers: `doctor`, `state-machine`, `gate`, `agent`, `github`, `git`, `init`.
-- [ ] Define event types: `state_transition`, `gate_evaluated`, `agent_started`, `agent_completed`, `doctor_check`, `doctor_failed`.
-
-### Phase 9.2: Headless orchestrator loop
-
-- [ ] Add `--headless` branch in `main.rs` command dispatch that skips TUI setup.
-- [ ] Startup sequence: parse args → run doctor → load state → enter driver loop.
-- [ ] Doctor failure exits with code 1 and structured error log.
-- [ ] State machine errors exit with code 2.
-- [ ] Agent failures exit with code 3.
-- [ ] No interactive prompts — all decision points resolve automatically or fail.
-
-### Phase 9.3: Human-readable text output
-
-- [ ] Implement `--log-format text` rendering: `timestamp level [component] message`.
-- [ ] ANSI color output when stderr is a TTY, plain text otherwise.
-
-### Phase 9.4: Signal handling
-
-- [ ] SIGINT/SIGTERM trigger graceful shutdown: persist state, log shutdown event, exit.
-- [ ] No interactive confirmation on signal — clean up and exit.
+- no deferred issue is brought forward unless the headless runtime is already stable
 
 ## Recommended build order
 
-1. Phase 0
-2. Phase 1
-3. Phase 1.5
-4. Phase 2
-5. Phase 3
-6. Phase 3.5
-7. Phase 4
-8. Phase 4.5
-9. Phase 4.6 (doctor state machine audit)
-10. Phase 4.75
-11. Phase 5
-12. Phase 6
-13. Phase 7
-14. Phase 9 (headless mode — enables testing the orchestrator loop without TUI)
-15. Phase 8 (workspace crate refactor)
+1. Issue 1
+2. Issue 2
+3. Issue 3
+4. Issue 4
+5. Issue 5
+6. Issue 6
+7. Issue 7
+8. Issue 8
 
-## Prototype note
+## Success criteria for the current plan
 
-This plan is intentionally narrower than the product specification. It exists to validate the core Calypso thesis before implementing broader capabilities.
+- Nightshift can run a user-authored YAML state machine in headless mode
+- at least one example workflow loops through project tasks and starts over
+- the loop continues until the user exits
+- terminal logs clearly show states, transitions, and steps
+- happy-case mocked tests cover the main workflow shapes
+- YAML fuzzing catches malformed inputs without hangs or uncontrolled panics
+
+## Current planning rule
+
+If a proposed task does not directly help Nightshift execute looping YAML state machines in headless mode, it belongs in a later phase.
