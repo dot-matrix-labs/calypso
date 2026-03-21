@@ -233,6 +233,26 @@ fn run_driver_loop(
         BTreeMap::new(),
     );
 
+    run_driver_loop_with_stepper(
+        logger,
+        state_path,
+        shutdown,
+        |state| driver.template.step_type_for_state(state),
+        || driver.step(),
+    )
+}
+
+fn run_driver_loop_with_stepper<S, F>(
+    logger: &Logger,
+    state_path: &Path,
+    shutdown: &crate::signal::ShutdownSignal,
+    step_type_for_state: S,
+    mut stepper: F,
+) -> i32
+where
+    S: Fn(&str) -> crate::template::StepType,
+    F: FnMut() -> DriverStepResult,
+{
     loop {
         // Check for shutdown before each step
         if let Some(signal) = shutdown.try_recv() {
@@ -251,7 +271,7 @@ fn run_driver_loop(
             .map(|s| s.current_feature.workflow_state.as_str().to_string())
             .unwrap_or_else(|_| "unknown".to_string());
 
-        let step_type = driver.template.step_type_for_state(&from_state);
+        let step_type = step_type_for_state(&from_state);
         logger
             .entry(
                 LogLevel::Debug,
@@ -263,7 +283,7 @@ fn run_driver_loop(
             .field("step_type", format!("{step_type:?}"))
             .emit();
 
-        let result = driver.step();
+        let result = stepper();
 
         match &result {
             DriverStepResult::Advanced(to_state) => {
@@ -523,7 +543,13 @@ fn evaluate_and_log_gates(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{
+        FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
+    };
+    use serde_json::Value;
+    use std::path::{Path, PathBuf};
     use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     /// A writer that captures output for test assertions.
     #[derive(Clone)]
@@ -558,6 +584,126 @@ mod tests {
     fn make_logger(writer: CaptureWriter) -> Logger {
         Logger::_with_level_and_writer(LogLevel::Debug, Box::new(writer))
             .with_format(LogFormat::Json)
+    }
+
+    fn parse_json_lines(output: &str) -> Vec<Value> {
+        output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| serde_json::from_str(line).expect("log line should be valid json"))
+            .collect()
+    }
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("calypso-headless-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
+        RepositoryState {
+            version: 1,
+            repo_id: "headless-test".to_string(),
+            schema_version: 2,
+            current_feature: FeatureState {
+                feature_id: "feature-189".to_string(),
+                branch: "feat/headless-shapes".to_string(),
+                worktree_path: "/tmp".to_string(),
+                pull_request: PullRequestRef {
+                    number: 189,
+                    url: "https://github.com/dot-matrix-labs/calypso/pull/189".to_string(),
+                },
+                github_snapshot: None,
+                github_error: None,
+                workflow_state,
+                gate_groups: vec![],
+                active_sessions: vec![],
+                feature_type: FeatureType::Feat,
+                roles: vec![],
+                scheduling: SchedulingMeta::default(),
+                artifact_refs: vec![],
+                transcript_refs: vec![],
+                clarification_history: vec![],
+            },
+            identity: Default::default(),
+            providers: vec![],
+            releases: vec![],
+            deployments: vec![],
+        }
+    }
+
+    fn write_state(path: &Path, workflow_state: WorkflowState) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create state dir");
+        }
+        minimal_state(workflow_state)
+            .save_to_path(path)
+            .expect("save state");
+    }
+
+    #[derive(Clone)]
+    struct MockStep {
+        persisted_next_state: Option<WorkflowState>,
+        result: DriverStepResult,
+    }
+
+    fn run_mock_driver_loop(
+        initial_state: WorkflowState,
+        steps: Vec<MockStep>,
+    ) -> (i32, Vec<Value>) {
+        run_mock_driver_loop_with_hook(initial_state, steps, |_| {})
+    }
+
+    fn run_mock_driver_loop_with_hook<H>(
+        initial_state: WorkflowState,
+        steps: Vec<MockStep>,
+        mut after_step: H,
+    ) -> (i32, Vec<Value>)
+    where
+        H: FnMut(usize),
+    {
+        let dir = temp_dir("mock-driver-loop");
+        let state_path = dir.join(".calypso").join("repository-state.json");
+        write_state(&state_path, initial_state);
+
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let mut index = 0usize;
+        let exit = run_driver_loop_with_stepper(
+            &logger,
+            &state_path,
+            &shutdown,
+            |_| crate::template::StepType::Agent,
+            || {
+                let step = steps
+                    .get(index)
+                    .cloned()
+                    .unwrap_or_else(|| panic!("missing mock step at index {index}"));
+                index += 1;
+                if let Some(next_state) = step.persisted_next_state.clone() {
+                    write_state(&state_path, next_state);
+                }
+                after_step(index);
+                step.result
+            },
+        );
+
+        let events = parse_json_lines(&writer.contents());
+        let _ = std::fs::remove_dir_all(&dir);
+        (exit, events)
+    }
+
+    fn state_transition_events(events: &[Value]) -> Vec<&Value> {
+        events
+            .iter()
+            .filter(|event| event["event"] == "state_transition")
+            .collect()
     }
 
     #[test]
@@ -885,6 +1031,237 @@ mod tests {
             output.contains("blocking_gates"),
             "expected blocking_gates field in output: {output}"
         );
+    }
+
+    #[test]
+    fn run_driver_loop_straight_line_happy_path_logs_ordered_transitions() {
+        let (exit, events) = run_mock_driver_loop(
+            WorkflowState::Implementation,
+            vec![
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::QaValidation),
+                    result: DriverStepResult::Advanced(WorkflowState::QaValidation),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::ReleaseReady),
+                    result: DriverStepResult::Advanced(WorkflowState::ReleaseReady),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::Done),
+                    result: DriverStepResult::Advanced(WorkflowState::Done),
+                },
+                MockStep {
+                    persisted_next_state: None,
+                    result: DriverStepResult::Terminal,
+                },
+            ],
+        );
+
+        assert_eq!(exit, 0);
+
+        let transitions = state_transition_events(&events);
+        let actual: Vec<(Option<&str>, Option<&str>, Option<&str>)> = transitions
+            .iter()
+            .map(|event| {
+                (
+                    event.get("message").and_then(Value::as_str),
+                    event.get("from_state").and_then(Value::as_str),
+                    event.get("to_state").and_then(Value::as_str),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            actual,
+            vec![
+                (Some("stepping implementation (Agent)"), None, None),
+                (
+                    Some("implementation → qa-validation"),
+                    Some("implementation"),
+                    Some("qa-validation")
+                ),
+                (Some("stepping qa-validation (Agent)"), None, None),
+                (
+                    Some("qa-validation → release-ready"),
+                    Some("qa-validation"),
+                    Some("release-ready")
+                ),
+                (Some("stepping release-ready (Agent)"), None, None),
+                (
+                    Some("release-ready → done"),
+                    Some("release-ready"),
+                    Some("done")
+                ),
+                (Some("stepping done (Agent)"), None, None),
+                (Some("done → terminal"), Some("done"), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_branching_happy_path_records_chosen_branch() {
+        let (exit, events) = run_mock_driver_loop(
+            WorkflowState::QaValidation,
+            vec![
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::ReleaseReady),
+                    result: DriverStepResult::Advanced(WorkflowState::ReleaseReady),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::Done),
+                    result: DriverStepResult::Advanced(WorkflowState::Done),
+                },
+                MockStep {
+                    persisted_next_state: None,
+                    result: DriverStepResult::Terminal,
+                },
+            ],
+        );
+
+        assert_eq!(exit, 0);
+
+        let transitions = state_transition_events(&events);
+        let advanced: Vec<(&str, &str)> = transitions
+            .iter()
+            .filter_map(|event| {
+                if event["outcome"] == "advanced" {
+                    Some((
+                        event["from_state"].as_str().expect("from_state"),
+                        event["to_state"].as_str().expect("to_state"),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            advanced,
+            vec![
+                ("qa-validation", "release-ready"),
+                ("release-ready", "done")
+            ]
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_looping_happy_path_returns_to_implementation_before_completing() {
+        let (exit, events) = run_mock_driver_loop(
+            WorkflowState::QaValidation,
+            vec![
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::Implementation),
+                    result: DriverStepResult::Advanced(WorkflowState::Implementation),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::QaValidation),
+                    result: DriverStepResult::Advanced(WorkflowState::QaValidation),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::ReleaseReady),
+                    result: DriverStepResult::Advanced(WorkflowState::ReleaseReady),
+                },
+                MockStep {
+                    persisted_next_state: Some(WorkflowState::Done),
+                    result: DriverStepResult::Advanced(WorkflowState::Done),
+                },
+                MockStep {
+                    persisted_next_state: None,
+                    result: DriverStepResult::Terminal,
+                },
+            ],
+        );
+
+        assert_eq!(exit, 0);
+
+        let transitions = state_transition_events(&events);
+        let advanced: Vec<(&str, &str)> = transitions
+            .iter()
+            .filter_map(|event| {
+                if event["outcome"] == "advanced" {
+                    Some((
+                        event["from_state"].as_str().expect("from_state"),
+                        event["to_state"].as_str().expect("to_state"),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        assert_eq!(
+            advanced,
+            vec![
+                ("qa-validation", "implementation"),
+                ("implementation", "qa-validation"),
+                ("qa-validation", "release-ready"),
+                ("release-ready", "done"),
+            ]
+        );
+    }
+
+    #[test]
+    fn run_driver_loop_interrupted_flow_logs_progress_before_shutdown() {
+        let dir = temp_dir("mock-driver-loop-interrupted");
+        let state_path = dir.join(".calypso").join("repository-state.json");
+        write_state(&state_path, WorkflowState::Implementation);
+
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, tx) = quiet_shutdown();
+
+        let mut index = 0usize;
+        let exit = run_driver_loop_with_stepper(
+            &logger,
+            &state_path,
+            &shutdown,
+            |_| crate::template::StepType::Agent,
+            || {
+                index += 1;
+                write_state(&state_path, WorkflowState::QaValidation);
+                tx.send(crate::signal::SignalKind::Interrupt)
+                    .expect("send interrupt");
+                DriverStepResult::Advanced(WorkflowState::QaValidation)
+            },
+        );
+
+        assert_eq!(index, 1);
+        assert_eq!(exit, 130);
+
+        let events = parse_json_lines(&writer.contents());
+        let transitions = state_transition_events(&events);
+        assert_eq!(transitions[0]["message"], "stepping implementation (Agent)");
+        assert_eq!(transitions[1]["message"], "implementation → qa-validation");
+        assert_eq!(
+            events.last().and_then(|event| event["event"].as_str()),
+            Some("shutdown")
+        );
+        assert_eq!(
+            events.last().and_then(|event| event["message"].as_str()),
+            Some("received SIGINT, shutting down")
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn run_driver_loop_clarification_interrupt_logs_agent_completion() {
+        let (exit, events) = run_mock_driver_loop(
+            WorkflowState::Implementation,
+            vec![MockStep {
+                persisted_next_state: None,
+                result: DriverStepResult::ClarificationRequired(
+                    "Need confirmation before proceeding".to_string(),
+                ),
+            }],
+        );
+
+        assert_eq!(exit, 3);
+        assert_eq!(events[0]["event"], "state_transition");
+        assert_eq!(events[1]["event"], "agent_completed");
+        assert_eq!(events[1]["outcome"], "clarification_required");
+        assert_eq!(events[1]["from_state"], "implementation");
+        assert_eq!(events[1]["question"], "Need confirmation before proceeding");
     }
 
     #[test]
