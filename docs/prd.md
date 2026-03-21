@@ -1,4 +1,4 @@
-# Calypso CLI Product Specification
+# Calypso Product Requirements Document
 
 ## 1. Overview
 

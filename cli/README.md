@@ -127,7 +127,7 @@ cargo run -- --help
 
 ## Architecture
 
-See [spec.md](./spec.md) for the full specification.
+See [../docs/prd.md](../docs/prd.md) for the full product requirements document.
 
 ## License
 
