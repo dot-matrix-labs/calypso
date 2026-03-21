@@ -86,25 +86,49 @@ impl StateMachineDriver {
             Err(e) => return DriverStepResult::Error(e.to_string()),
         };
 
+        if state.current_feature.workflow_state.is_terminal() {
+            return DriverStepResult::Terminal;
+        }
+
         let current = state.current_feature.workflow_state.as_str().to_string();
         let step_type = self.template.step_type_for_state(&current);
 
         match step_type {
-            StepType::Function => self.execute_function_step(&current),
+            StepType::Function => self.execute_function_step(state, &current),
             StepType::Agent => self.execute_agent_step(&current),
         }
     }
 
-    fn execute_function_step(&self, state_name: &str) -> DriverStepResult {
+    fn execute_function_step(
+        &self,
+        mut state: RepositoryState,
+        state_name: &str,
+    ) -> DriverStepResult {
         let fn_name = self
             .template
             .function_for_state(state_name)
             .unwrap_or_else(|| state_name.replace('-', "_"));
 
         match dispatch_function_step(&fn_name, &self.state_path) {
-            Ok(advanced_to) => match advanced_to {
-                Some(next) => DriverStepResult::Advanced(next),
-                None => DriverStepResult::Terminal,
+            Ok(Some(next)) => {
+                state.current_feature.workflow_state = next.clone();
+                match state.save_to_path(&self.state_path) {
+                    Ok(()) => DriverStepResult::Advanced(next),
+                    Err(e) => DriverStepResult::Error(e.to_string()),
+                }
+            }
+            Ok(None) => match self.next_template_transition(state_name) {
+                Some(next) => {
+                    state.current_feature.workflow_state = next.clone();
+                    match state.save_to_path(&self.state_path) {
+                        Ok(()) => DriverStepResult::Advanced(next),
+                        Err(e) => DriverStepResult::Error(e.to_string()),
+                    }
+                }
+                None if state.current_feature.workflow_state.is_terminal() => {
+                    DriverStepResult::Terminal
+                }
+                None => DriverStepResult::Unchanged,
             },
             Err(e) => DriverStepResult::Failed { reason: e },
         }
@@ -249,12 +273,113 @@ fn dispatch_function_step(
             Ok(None)
         }
     }
+
+    fn next_template_transition(&self, state_name: &str) -> Option<WorkflowState> {
+        self.template
+            .state_machine
+            .transitions
+            .iter()
+            .find(|transition| transition.from == state_name)
+            .and_then(|transition| WorkflowState::from_template_state_name(&transition.to).ok())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::load_embedded_template_set;
+    use crate::state::{
+        FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta,
+    };
+    use crate::template::{TemplateSet, load_embedded_template_set};
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let dir = std::env::temp_dir().join(format!("calypso-driver-{label}-{nanos}"));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
+        RepositoryState {
+            version: 1,
+            repo_id: "test-repo".to_string(),
+            schema_version: 2,
+            current_feature: FeatureState {
+                feature_id: "test-feature".to_string(),
+                branch: "feat/test".to_string(),
+                worktree_path: "/tmp".to_string(),
+                pull_request: PullRequestRef {
+                    number: 1,
+                    url: "https://github.com/example/repo/pull/1".to_string(),
+                },
+                github_snapshot: None,
+                github_error: None,
+                workflow_state,
+                gate_groups: vec![],
+                active_sessions: vec![],
+                feature_type: FeatureType::Feat,
+                roles: vec![],
+                scheduling: SchedulingMeta::default(),
+                artifact_refs: vec![],
+                transcript_refs: vec![],
+                clarification_history: vec![],
+            },
+            identity: Default::default(),
+            providers: vec![],
+            releases: vec![],
+            deployments: vec![],
+        }
+    }
+
+    fn write_state(dir: &Path, state: &RepositoryState) -> PathBuf {
+        let state_dir = dir.join(".calypso");
+        std::fs::create_dir_all(&state_dir).expect("create .calypso dir");
+        let path = state_dir.join("repository-state.json");
+        state.save_to_path(&path).expect("save state");
+        path
+    }
+
+    fn function_template() -> TemplateSet {
+        TemplateSet::from_yaml_strings(
+            r#"
+initial_state: new
+states:
+  - name: new
+    type: function
+    function: noop
+  - name: prd-review
+    type: function
+    function: noop
+  - done
+transitions:
+  - from: new
+    to: prd-review
+  - from: new
+    to: done
+  - from: prd-review
+    to: new
+gate_groups:
+  - id: runtime
+    label: Runtime
+    gates:
+      - id: runtime-gate
+        label: Runtime gate
+        task: runtime-human
+"#,
+            r#"
+tasks:
+  - name: runtime-human
+    kind: human
+"#,
+            "prompts: {}\n",
+        )
+        .expect("function template should parse")
+    }
 
     #[test]
     fn step_type_defaults_to_agent_for_simple_state_name() {
@@ -279,5 +404,71 @@ mod tests {
     #[test]
     fn driver_mode_variants_are_distinct() {
         assert_ne!(DriverMode::Auto, DriverMode::Step);
+    }
+
+    #[test]
+    fn terminal_state_returns_terminal_without_running_step() {
+        let dir = temp_dir("terminal");
+        let state_path = write_state(&dir, &minimal_state(WorkflowState::Done));
+        let driver = StateMachineDriver {
+            mode: DriverMode::Auto,
+            state_path,
+            template: function_template(),
+            config: ExecutionConfig::default(),
+            executor: None,
+        };
+
+        assert_eq!(driver.step(), DriverStepResult::Terminal);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn function_step_chooses_first_yaml_transition_and_persists_it() {
+        let dir = temp_dir("function-advance");
+        let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
+        let driver = StateMachineDriver {
+            mode: DriverMode::Auto,
+            state_path: state_path.clone(),
+            template: function_template(),
+            config: ExecutionConfig::default(),
+            executor: None,
+        };
+
+        assert_eq!(
+            driver.step(),
+            DriverStepResult::Advanced(WorkflowState::PrdReview)
+        );
+
+        let persisted = RepositoryState::load_from_path(&state_path).expect("load state");
+        assert_eq!(
+            persisted.current_feature.workflow_state,
+            WorkflowState::PrdReview
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn function_step_can_follow_explicit_loop_back_transition() {
+        let dir = temp_dir("function-loop");
+        let state_path = write_state(&dir, &minimal_state(WorkflowState::PrdReview));
+        let driver = StateMachineDriver {
+            mode: DriverMode::Auto,
+            state_path: state_path.clone(),
+            template: function_template(),
+            config: ExecutionConfig::default(),
+            executor: None,
+        };
+
+        assert_eq!(
+            driver.step(),
+            DriverStepResult::Advanced(WorkflowState::New)
+        );
+
+        let persisted = RepositoryState::load_from_path(&state_path).expect("load state");
+        assert_eq!(persisted.current_feature.workflow_state, WorkflowState::New);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

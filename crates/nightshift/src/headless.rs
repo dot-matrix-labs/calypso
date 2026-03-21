@@ -281,11 +281,12 @@ fn run_driver_loop(
             }
             DriverStepResult::Terminal => {
                 logger
-                    .entry(LogLevel::Debug, &format!("{from_state} → terminal"))
+                    .entry(LogLevel::Info, &format!("{from_state} → terminal"))
                     .component(Component::StateMachine)
                     .event(LogEvent::StateTransition)
                     .field("from_state", &from_state)
                     .field("outcome", "terminal")
+                    .field("exit_reason", "explicit_exit_state")
                     .emit();
                 return 0;
             }
@@ -295,9 +296,10 @@ fn run_driver_loop(
                     .component(Component::StateMachine)
                     .event(LogEvent::StateTransition)
                     .field("from_state", &from_state)
-                    .field("outcome", "unchanged")
+                    .field("outcome", "stalled")
+                    .field("exit_reason", "no_explicit_transition")
                     .emit();
-                return 0;
+                return 2;
             }
             DriverStepResult::ClarificationRequired(question) => {
                 logger
@@ -311,6 +313,7 @@ fn run_driver_loop(
                     .event(LogEvent::AgentCompleted)
                     .field("from_state", &from_state)
                     .field("outcome", "clarification_required")
+                    .field("exit_reason", "clarification_required")
                     .field("question", question)
                     .emit();
                 return 3;
@@ -325,6 +328,7 @@ fn run_driver_loop(
                     .event(LogEvent::AgentCompleted)
                     .field("from_state", &from_state)
                     .field("outcome", "failed")
+                    .field("exit_reason", "step_failed")
                     .field("reason", reason)
                     .emit();
                 return 3;
@@ -339,6 +343,7 @@ fn run_driver_loop(
                     .event(LogEvent::StateTransition)
                     .field("from_state", &from_state)
                     .field("outcome", "error")
+                    .field("exit_reason", "runtime_error")
                     .field("error", e)
                     .emit();
                 return 2;
@@ -978,5 +983,163 @@ mod tests {
             output.contains("\"outcome\""),
             "expected outcome field in output: {output}"
         );
+    }
+
+    #[test]
+    fn run_driver_loop_treats_non_terminal_unchanged_as_error() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let repo_root = std::env::temp_dir().join("calypso-headless-stalled");
+        let _ = std::fs::remove_dir_all(&repo_root);
+        std::fs::create_dir_all(repo_root.join(".calypso")).expect("create .calypso");
+
+        std::fs::write(
+            repo_root.join(".calypso/state-machine.yml"),
+            r#"
+initial_state: new
+states:
+  - name: new
+    type: function
+    function: noop
+gate_groups:
+  - id: runtime
+    label: Runtime
+    gates:
+      - id: runtime-gate
+        label: Runtime gate
+        task: runtime-human
+"#,
+        )
+        .expect("write state machine");
+        std::fs::write(
+            repo_root.join(".calypso/agents.yml"),
+            "tasks:\n  - name: runtime-human\n    kind: human\n",
+        )
+        .expect("write agents");
+        std::fs::write(repo_root.join(".calypso/prompts.yml"), "prompts: {}\n")
+            .expect("write prompts");
+
+        let state = RepositoryState {
+            version: 1,
+            repo_id: "test-repo".to_string(),
+            schema_version: 2,
+            current_feature: crate::state::FeatureState {
+                feature_id: "test-feature".to_string(),
+                branch: "feat/test".to_string(),
+                worktree_path: repo_root.display().to_string(),
+                pull_request: crate::state::PullRequestRef {
+                    number: 1,
+                    url: "https://github.com/example/repo/pull/1".to_string(),
+                },
+                github_snapshot: None,
+                github_error: None,
+                workflow_state: crate::state::WorkflowState::New,
+                gate_groups: vec![],
+                active_sessions: vec![],
+                feature_type: crate::state::FeatureType::Feat,
+                roles: vec![],
+                scheduling: crate::state::SchedulingMeta::default(),
+                artifact_refs: vec![],
+                transcript_refs: vec![],
+                clarification_history: vec![],
+            },
+            identity: Default::default(),
+            providers: vec![],
+            releases: vec![],
+            deployments: vec![],
+        };
+        let state_path = repo_root.join(".calypso/repository-state.json");
+        state.save_to_path(&state_path).expect("save state");
+
+        let exit = run_driver_loop(&logger, &repo_root, &state_path, &shutdown);
+        assert_eq!(exit, 2, "non-terminal unchanged should be a runtime error");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("no_explicit_transition"),
+            "expected explicit exit reason in output: {output}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo_root);
+    }
+
+    #[test]
+    fn run_driver_loop_logs_explicit_exit_state_for_terminal_state() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let repo_root = std::env::temp_dir().join("calypso-headless-terminal");
+        let _ = std::fs::remove_dir_all(&repo_root);
+        std::fs::create_dir_all(repo_root.join(".calypso")).expect("create .calypso");
+
+        std::fs::write(
+            repo_root.join(".calypso/state-machine.yml"),
+            r#"
+initial_state: done
+states:
+  - done
+gate_groups:
+  - id: runtime
+    label: Runtime
+    gates:
+      - id: runtime-gate
+        label: Runtime gate
+        task: runtime-human
+"#,
+        )
+        .expect("write state machine");
+        std::fs::write(
+            repo_root.join(".calypso/agents.yml"),
+            "tasks:\n  - name: runtime-human\n    kind: human\n",
+        )
+        .expect("write agents");
+        std::fs::write(repo_root.join(".calypso/prompts.yml"), "prompts: {}\n")
+            .expect("write prompts");
+
+        let state = RepositoryState {
+            version: 1,
+            repo_id: "test-repo".to_string(),
+            schema_version: 2,
+            current_feature: crate::state::FeatureState {
+                feature_id: "test-feature".to_string(),
+                branch: "feat/test".to_string(),
+                worktree_path: repo_root.display().to_string(),
+                pull_request: crate::state::PullRequestRef {
+                    number: 1,
+                    url: "https://github.com/example/repo/pull/1".to_string(),
+                },
+                github_snapshot: None,
+                github_error: None,
+                workflow_state: crate::state::WorkflowState::Done,
+                gate_groups: vec![],
+                active_sessions: vec![],
+                feature_type: crate::state::FeatureType::Feat,
+                roles: vec![],
+                scheduling: crate::state::SchedulingMeta::default(),
+                artifact_refs: vec![],
+                transcript_refs: vec![],
+                clarification_history: vec![],
+            },
+            identity: Default::default(),
+            providers: vec![],
+            releases: vec![],
+            deployments: vec![],
+        };
+        let state_path = repo_root.join(".calypso/repository-state.json");
+        state.save_to_path(&state_path).expect("save state");
+
+        let exit = run_driver_loop(&logger, &repo_root, &state_path, &shutdown);
+        assert_eq!(exit, 0, "terminal state should exit cleanly");
+
+        let output = writer.contents();
+        assert!(
+            output.contains("explicit_exit_state"),
+            "expected explicit exit reason in output: {output}"
+        );
+
+        let _ = std::fs::remove_dir_all(&repo_root);
     }
 }
