@@ -28,6 +28,7 @@ evaluation skill handles product, architecture, and dependency judgment.
 1. Validate and collect context:
 
 ```bash
+.agents/scripts/feature/normalize-feature-request.sh {feature-json-file}
 .agents/scripts/feature/validate-request.sh {feature-json-file}
 .agents/scripts/feature/collect-context.sh {feature-json-file}
 .agents/scripts/feature/check-duplicates.sh {feature-json-file}
@@ -45,5 +46,8 @@ evaluation skill handles product, architecture, and dependency judgment.
 
 ```bash
 .agents/scripts/feature/create-issue.sh {issue-json-file}
+.agents/scripts/feature/validate-created-issue.sh {created-issue-json-file}
+.agents/scripts/feature/render-plan-entry.sh {created-issue-json-file}
 .agents/scripts/feature/update-plan.sh {created-issue-json-file}
+.agents/scripts/feature/validate-plan-entry.sh {created-issue-json-file}
 ```

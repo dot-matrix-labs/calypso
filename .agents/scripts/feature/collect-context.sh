@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/common.sh"
 
 REQUEST_FILE="${1:-}"
 require_json_file "$REQUEST_FILE"
+normalized_request="$("$SCRIPT_DIR/normalize-feature-request.sh" "$REQUEST_FILE")"
 
 plan_json="$(find_plan_issue_json)"
 plan_body=""
@@ -17,7 +18,7 @@ fi
 duplicates="$("$SCRIPT_DIR/check-duplicates.sh" "$REQUEST_FILE")"
 
 jq -n \
-  --argjson request "$(jq -c . "$REQUEST_FILE")" \
+  --argjson request "$normalized_request" \
   --argjson plan "${plan_json:-null}" \
   --arg plan_body "$plan_body" \
   --argjson duplicates "$duplicates" \

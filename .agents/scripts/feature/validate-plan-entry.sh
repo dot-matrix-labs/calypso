@@ -21,18 +21,31 @@ plan_number="$(jq -r '.number' <<<"$plan_json")"
 plan_body="$(gh issue view "$plan_number" --repo "$(tasks_repo)" --json body -q .body)"
 issue_number="$(jq -r '.number' "$CREATED_FILE")"
 entry="$("$SCRIPT_DIR/render-plan-entry.sh" "$CREATED_FILE")"
+count="$(grep -cF "#$issue_number" <<<"$plan_body" || true)"
+reasons='[]'
 
-if ! grep -Fq "#$issue_number" <<<"$plan_body"; then
-  if [[ -n "$plan_body" ]]; then
-    plan_body="${plan_body}"$'\n'"$entry"
-  else
-    plan_body="Planned implementation order for all outstanding features. Work proceeds strictly one issue at a time."$'\n\n'"$entry"
-  fi
-  gh issue edit "$plan_number" --repo "$(tasks_repo)" --body "$plan_body" >/dev/null
+if [[ "$count" != "1" ]]; then
+  reasons="$(jq -c '. + ["plan-entry-count-not-one"]' <<<"$reasons")"
+fi
+if grep -Eq '^- \[[ xX]\]' <<<"$plan_body"; then
+  reasons="$(jq -c '. + ["plan-contains-checkboxes"]' <<<"$reasons")"
+fi
+if grep -Eiq '\b(phase|batch|step)[[:space:]]+[0-9]+' <<<"$plan_body"; then
+  reasons="$(jq -c '. + ["plan-contains-order-metadata"]' <<<"$reasons")"
+fi
+if ! grep -Fq "$entry" <<<"$plan_body"; then
+  reasons="$(jq -c '. + ["plan-entry-format-mismatch"]' <<<"$reasons")"
 fi
 
 jq -n \
   --argjson plan_issue_number "$plan_number" \
   --argjson issue_number "$issue_number" \
   --arg entry "$entry" \
-  '{ok: true, plan_issue_number: $plan_issue_number, issue_number: $issue_number, entry: $entry}'
+  --argjson reasons "$reasons" \
+  '{
+    ok: ($reasons | length == 0),
+    plan_issue_number: $plan_issue_number,
+    issue_number: $issue_number,
+    entry: $entry,
+    reasons: $reasons
+  }'

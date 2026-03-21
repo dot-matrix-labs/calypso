@@ -19,6 +19,7 @@ Preferred split:
 - Validate the request fields before any GitHub mutation.
 - Use deterministic feature scripts for duplicate checks, issue rendering, issue
   creation, and Plan updates.
+- Normalize requests and validate created issues and Plan entries with scripts.
 - Use the evaluator skill only for architecture fit, dependency, and scope
   judgment.
 - Keep the `Plan` issue as the only source of ordering metadata.
