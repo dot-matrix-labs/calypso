@@ -1,6 +1,6 @@
 ---
 name: replan
-description: Legacy wrapper for the replan command. Audit issue and PR compliance, then rewrite the Plan for strict sequential execution.
+description: Legacy wrapper for the replan command. Prefer deterministic replan scripts plus the replan-evaluate skill.
 user_invocable: true
 ---
 
@@ -11,6 +11,9 @@ This is a compatibility wrapper.
 Preferred split:
 
 - command: `replan`
+- command: `replan-audit`
+- command: `replan-apply`
+- skill: `replan-evaluate`
 
 ## Must do
 
@@ -20,6 +23,7 @@ Preferred split:
 - Replan for strict sequential execution only.
 - Keep ordering metadata in the `Plan` issue, not in individual issue titles or
   issue bodies.
+- Prefer deterministic scripts for audits, collection, and apply steps.
 
 ## Must not do
 
@@ -31,3 +35,4 @@ Preferred split:
 ## Preferred replacement
 
 - Command: `replan`
+- Skill: `replan-evaluate`

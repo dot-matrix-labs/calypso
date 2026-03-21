@@ -3,8 +3,9 @@
 Use this command to rewrite the `Plan` tracking issue for strict sequential
 execution.
 
-This is a command, not a free-form brainstorming prompt. It owns the ordering
-rules and the compliance checks that must run before replanning.
+This command owns orchestration. Deterministic scripts handle compliance,
+collection, and apply steps. The evaluator skill handles only dependency and risk
+judgment.
 
 ## Must do
 
@@ -48,21 +49,28 @@ PRs must follow repository PR rules:
 
 ## Command flow
 
-1. Find the open `Plan` tracking issue.
-2. Audit all open issues for template compliance and plan-metadata violations.
-3. Audit open PRs for one-PR-one-issue compliance and minimal-body compliance.
-   Fix straightforward PR body violations before continuing.
-4. Load every issue referenced by the Plan into context.
-5. Evaluate dependencies:
-   - explicit feature dependencies from issue `Dependencies`
-   - code and subsystem dependencies implied by the issue scope
-6. Rank issues:
-   - dependencies first
-   - then higher technical risk or unknowns first
-   - then the simplest deterministic tie-breaker
-7. Rewrite the `Plan` issue in strict sequential order with plain issue links.
-8. Update issue `Dependencies` and `Dependents` sections when the plan ordering
-   changes.
+1. Audit compliance:
+
+```bash
+.agents/scripts/replan/audit-issues.sh
+.agents/scripts/replan/audit-prs.sh
+```
+
+2. Collect structured input:
+
+```bash
+.agents/scripts/replan/collect-plan-issues.sh
+.agents/scripts/replan/collect-open-prs.sh
+.agents/scripts/replan/rank-input.sh
+```
+
+3. Use the `replan-evaluate` skill to produce structured sequential ordering.
+4. Apply the result:
+
+```bash
+.agents/scripts/replan/apply-plan.sh {plan-json-file}
+.agents/scripts/replan/sync-dependents.sh {plan-json-file}
+```
 
 ## Plan output rules
 
@@ -74,4 +82,7 @@ PRs must follow repository PR rules:
 ## Preferred implementation split
 
 - command: `replan`
+- command: `replan-audit`
+- command: `replan-apply`
+- skill: `replan-evaluate`
 - skill: `replan` only as a compatibility wrapper
