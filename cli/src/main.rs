@@ -6,15 +6,13 @@ use calypso_cli::app::{
 };
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
-use calypso_cli::headless::{HeadlessConfig, run_headless};
 use calypso_cli::init::{
     HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
     render_init_status, run_init_interactive, run_init_step,
 };
 use calypso_cli::state::RepositoryState;
-use calypso_cli::telemetry::{LogFormat, LogLevel};
 use calypso_cli::template::TemplateSet;
-use calypso_cli::tui::{OperatorSurface, run_doctor_surface, run_terminal_surface, run_watch};
+use calypso_cli::operator_surface::OperatorSurface;
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -42,15 +40,7 @@ fn main() {
     let cwd = path_override
         .unwrap_or_else(|| std::env::current_dir().expect("current directory should resolve"));
 
-    // Strip --headless and its associated flags before the main dispatch.
-    let (headless_flags, args) = extract_headless_flags(&args_after_path);
-
-    // If --headless was supplied, build HeadlessConfig and branch early.
-    if headless_flags.enabled {
-        let config = build_headless_config(&headless_flags);
-        let exit_code = run_headless(&cwd, &config);
-        std::process::exit(exit_code);
-    }
+    let args = args_after_path;
 
     match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
@@ -86,12 +76,12 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        [command, flag, path, headless]
-            if command == "status" && flag == "--state" && headless == "--headless" =>
+        [command, flag, path] if command == "status" && flag == "--state" => render_status(path),
+        [command, flag, path, _headless]
+            if command == "status" && flag == "--state" =>
         {
             render_status(path)
         }
-        [command, flag, path] if command == "status" && flag == "--state" => run_status_tui(path),
         // calypso dev-status [--json]
         [command] if command == "dev-status" => match run_dev_status(&cwd) {
             Ok(output) => println!("{output}"),
@@ -264,15 +254,6 @@ fn main() {
             let state_path = cwd.join(".calypso/repository-state.json");
             run_claude_session(&state_path.to_string_lossy(), role);
         }
-        // calypso watch — live TUI from project directory state file
-        [command] if command == "watch" => {
-            let state_path = cwd.join(".calypso").join("repository-state.json");
-            run_watch(&state_path.to_string_lossy());
-        }
-        // calypso watch --state <path>
-        [command, flag, path] if command == "watch" && flag == "--state" => {
-            run_watch(path);
-        }
         // calypso webview
         [command] if command == "webview" => {
             run_webview(&cwd, 7373);
@@ -316,7 +297,7 @@ fn main() {
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
             } else {
-                run_doctor_surface(project_dir).unwrap_or_else(|e| eprintln!("tui error: {e}"));
+                println!("{}", run_doctor(project_dir));
             }
         }
         // calypso --step — step mode: one step per Enter keypress
@@ -325,16 +306,16 @@ fn main() {
             if state_path.exists() {
                 run_state_machine_step(&state_path);
             } else {
-                run_doctor_surface(&cwd).unwrap_or_else(|e| eprintln!("tui error: {e}"));
+                println!("{}", run_doctor(&cwd));
             }
         }
-        // calypso — no args: drive state machine if initialized, else show doctor TUI
+        // calypso — no args: drive state machine if initialized, else show doctor output
         [] => {
             let state_path = cwd.join(".calypso").join("repository-state.json");
             if state_path.exists() {
                 run_state_machine_auto(&state_path);
             } else {
-                run_doctor_surface(&cwd).unwrap_or_else(|e| eprintln!("tui error: {e}"));
+                println!("{}", run_doctor(&cwd));
             }
         }
         _ => println!("{}", render_help(info)),
@@ -356,123 +337,6 @@ fn extract_path_flag(args: &[String]) -> (Option<std::path::PathBuf>, Vec<String
         }
     }
     (path, remaining)
-}
-
-// ---------------------------------------------------------------------------
-// Headless flag extraction
-// ---------------------------------------------------------------------------
-
-/// Raw flags parsed out of the arg list for headless mode.
-#[derive(Debug, Default)]
-struct HeadlessFlags {
-    enabled: bool,
-    verbosity_count: u8,
-    json: bool,
-}
-
-/// Extract `--headless`, `-v` (verbosity), `-vv`, and `--json` from `args`,
-/// returning the parsed flags and the remaining arg list.
-///
-/// `--headless` is only recognised as the top-level headless mode when it
-/// appears *before* any subcommand (i.e. as the first positional token, or
-/// interleaved only with other global flags like `-v`).  When it trails a
-/// subcommand such as `status --state <path> --headless` it is left in the
-/// remaining args so the existing dispatch handles it.
-///
-/// When `--headless` is **not** present the `-v` flags are left in the
-/// remaining args so the existing `--version` handling still works.
-fn extract_headless_flags(args: &[String]) -> (HeadlessFlags, Vec<String>) {
-    // Determine whether --headless appears in "command position": before the
-    // first non-flag token.  Flags start with `-`; everything else is a
-    // subcommand.
-    let headless_in_command_position = {
-        let mut found = false;
-        for arg in args {
-            if arg == "--headless" {
-                found = true;
-                break;
-            }
-            // Skip known global flags and their values.
-            if arg.starts_with('-') {
-                continue;
-            }
-            // A non-flag token means a subcommand was reached first.
-            break;
-        }
-        found
-    };
-
-    if !headless_in_command_position {
-        return (HeadlessFlags::default(), args.to_vec());
-    }
-
-    let mut flags = HeadlessFlags::default();
-    let mut remaining = Vec::new();
-    let mut i = 0;
-
-    while i < args.len() {
-        let arg = &args[i];
-
-        if arg == "--headless" {
-            flags.enabled = true;
-            i += 1;
-            continue;
-        }
-
-        if arg == "-vv" {
-            flags.verbosity_count = flags.verbosity_count.saturating_add(2);
-            i += 1;
-            continue;
-        }
-
-        if arg == "-v" {
-            flags.verbosity_count = flags.verbosity_count.saturating_add(1);
-            i += 1;
-            continue;
-        }
-
-        if arg == "--json" {
-            flags.json = true;
-            i += 1;
-            continue;
-        }
-
-        remaining.push(arg.clone());
-        i += 1;
-    }
-
-    (flags, remaining)
-}
-
-/// Build a [`HeadlessConfig`] from the raw parsed flags.
-fn build_headless_config(flags: &HeadlessFlags) -> HeadlessConfig {
-    // Resolve verbosity level from flag count.
-    // Default is Debug so that state transitions and step outcomes are visible.
-    let verbosity = match flags.verbosity_count {
-        0 => LogLevel::Debug,
-        1 => LogLevel::Info,
-        _ => LogLevel::Trace, // 2+
-    };
-
-    // Resolve log format — default to text, opt into json with --json.
-    let log_format = if flags.json {
-        LogFormat::Json
-    } else {
-        LogFormat::Text
-    };
-
-    // Detect conflict: both -v/-vv and CALYPSO_LOG set.
-    let env_log_override = if flags.verbosity_count > 0 {
-        std::env::var("CALYPSO_LOG").ok()
-    } else {
-        None
-    };
-
-    HeadlessConfig {
-        verbosity,
-        log_format,
-        env_log_override,
-    }
 }
 
 fn run_calypso_init(
@@ -709,22 +573,6 @@ fn render_status(path: &str) {
     println!("{}", surface.render());
 }
 
-fn run_status_tui(path: &str) {
-    run_status_tui_with(path, run_terminal_surface).expect("status tui should complete");
-}
-
-fn run_status_tui_with<Runner>(path: &str, runner: Runner) -> Result<(), String>
-where
-    Runner: FnOnce(&mut calypso_cli::state::FeatureState) -> std::io::Result<()>,
-{
-    let mut state = RepositoryState::load_from_path(std::path::Path::new(path))
-        .map_err(|error| error.to_string())?;
-    runner(&mut state.current_feature).map_err(|error| error.to_string())?;
-    state
-        .save_to_path(std::path::Path::new(path))
-        .map_err(|error| error.to_string())
-}
-
 fn run_claude_session(state_path: &str, role: &str) {
     let config = ExecutionConfig::default();
 
@@ -901,146 +749,7 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LogFormat, build_headless_config, extract_headless_flags, extract_path_flag,
-        looks_like_path,
-    };
-    use calypso_cli::telemetry::LogLevel;
-
-    // -- headless flag extraction tests --
-
-    #[test]
-    fn headless_flag_is_detected() {
-        let (flags, remaining) = extract_headless_flags(&s(&["--headless"]));
-        assert!(flags.enabled);
-        assert!(remaining.is_empty());
-    }
-
-    #[test]
-    fn headless_not_consumed_after_subcommand() {
-        // `status --state /tmp/s.json --headless` — --headless trails a subcommand
-        let args = s(&["status", "--state", "/tmp/s.json", "--headless"]);
-        let (flags, remaining) = extract_headless_flags(&args);
-        assert!(!flags.enabled);
-        assert_eq!(remaining, args);
-    }
-
-    #[test]
-    fn headless_with_single_v_sets_verbosity_1() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "-v"]));
-        assert!(flags.enabled);
-        assert_eq!(flags.verbosity_count, 1);
-    }
-
-    #[test]
-    fn headless_with_double_vv_sets_verbosity_2() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "-vv"]));
-        assert!(flags.enabled);
-        assert_eq!(flags.verbosity_count, 2);
-    }
-
-    #[test]
-    fn headless_with_two_v_flags_sets_verbosity_2() {
-        let (flags, _) = extract_headless_flags(&s(&["-v", "--headless", "-v"]));
-        assert!(flags.enabled);
-        assert_eq!(flags.verbosity_count, 2);
-    }
-
-    #[test]
-    fn headless_with_json_flag() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "--json"]));
-        assert!(flags.json);
-    }
-
-    #[test]
-    fn headless_without_json_flag() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless"]));
-        assert!(!flags.json);
-    }
-
-    #[test]
-    fn v_flag_without_headless_stays_in_remaining() {
-        let args = s(&["-v"]);
-        let (flags, remaining) = extract_headless_flags(&args);
-        assert!(!flags.enabled);
-        assert_eq!(remaining, args);
-    }
-
-    #[test]
-    fn headless_flags_empty_args() {
-        let (flags, remaining) = extract_headless_flags(&[]);
-        assert!(!flags.enabled);
-        assert!(remaining.is_empty());
-    }
-
-    // -- build_headless_config tests --
-
-    #[test]
-    fn config_default_verbosity_is_debug() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.verbosity, LogLevel::Debug);
-    }
-
-    #[test]
-    fn config_single_v_is_info() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "-v"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.verbosity, LogLevel::Info);
-    }
-
-    #[test]
-    fn config_double_vv_is_trace() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "-vv"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.verbosity, LogLevel::Trace);
-    }
-
-    #[test]
-    fn config_default_log_format_is_text() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.log_format, LogFormat::Text);
-    }
-
-    #[test]
-    fn config_json_flag_sets_json_format() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "--json"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.log_format, LogFormat::Json);
-    }
-
-    #[test]
-    fn config_env_log_override_none_when_no_verbosity() {
-        let (flags, _) = extract_headless_flags(&s(&["--headless"]));
-        let config = build_headless_config(&flags);
-        assert!(config.env_log_override.is_none());
-    }
-
-    #[test]
-    fn config_env_log_override_captured_when_both_set() {
-        // Set the env var for this test, then restore.
-        let prev = std::env::var("CALYPSO_LOG").ok();
-        // SAFETY: test is single-threaded for this env var; no other thread
-        // reads CALYPSO_LOG concurrently in this test binary.
-        unsafe {
-            std::env::set_var("CALYPSO_LOG", "error");
-        }
-
-        let (flags, _) = extract_headless_flags(&s(&["--headless", "-v"]));
-        let config = build_headless_config(&flags);
-        assert_eq!(config.env_log_override.as_deref(), Some("error"));
-
-        // Restore.
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("CALYPSO_LOG", v),
-                None => std::env::remove_var("CALYPSO_LOG"),
-            }
-        }
-    }
-
-    // -- existing tests --
+    use super::{extract_path_flag, looks_like_path};
 
     #[test]
     fn looks_like_path_recognises_dot_relative() {

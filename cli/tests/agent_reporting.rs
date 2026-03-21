@@ -12,7 +12,7 @@ use calypso_cli::state::{
     FeatureType, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState, SchedulingMeta,
     SessionOutput, SessionOutputStream, WorkflowState,
 };
-use calypso_cli::tui::OperatorSurface;
+use calypso_cli::operator_surface::OperatorSurface;
 
 // ── Session builder helpers ───────────────────────────────────────────────────
 
