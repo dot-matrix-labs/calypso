@@ -79,12 +79,18 @@ impl TemplateSet {
             ));
         }
 
-        if !self
-            .state_machine
-            .states
-            .iter()
-            .any(|state| state.name() == self.state_machine.initial_state)
-        {
+        let mut known_states = BTreeSet::new();
+        for state in &self.state_machine.states {
+            let inserted = known_states.insert(state.name());
+            if !inserted {
+                return Err(TemplateError::Validation(format!(
+                    "state machine defines duplicate state '{}'",
+                    state.name()
+                )));
+            }
+        }
+
+        if !known_states.contains(self.state_machine.initial_state.as_str()) {
             return Err(TemplateError::Validation(format!(
                 "initial state '{}' is not present in states",
                 self.state_machine.initial_state
@@ -205,6 +211,40 @@ impl TemplateSet {
                 return Err(TemplateError::Validation(format!(
                     "prompt '{prompt_name}' does not match any known task"
                 )));
+            }
+        }
+
+        let state_step_types: BTreeMap<&str, StepType> = self
+            .state_machine
+            .states
+            .iter()
+            .map(|state| (state.name(), state.step_type()))
+            .collect();
+        let mut outgoing_transitions = BTreeMap::<&str, usize>::new();
+        for transition in &self.state_machine.transitions {
+            if !known_states.contains(transition.from.as_str()) {
+                return Err(TemplateError::Validation(format!(
+                    "transition from '{}' references unknown state",
+                    transition.from
+                )));
+            }
+
+            if !known_states.contains(transition.to.as_str()) {
+                return Err(TemplateError::Validation(format!(
+                    "transition to '{}' references unknown state",
+                    transition.to
+                )));
+            }
+
+            if state_step_types.get(transition.from.as_str()) == Some(&StepType::Function) {
+                let count = outgoing_transitions.entry(transition.from.as_str()).or_default();
+                *count += 1;
+                if *count > 1 {
+                    return Err(TemplateError::Validation(format!(
+                        "function state '{}' has ambiguous transitions; the minimum headless schema supports only one outgoing transition per function state",
+                        transition.from
+                    )));
+                }
             }
         }
 

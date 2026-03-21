@@ -164,6 +164,30 @@ fn template_validation_requires_initial_state_to_exist() {
 }
 
 #[test]
+fn template_validation_rejects_duplicate_state_names() {
+    let invalid_state_machine = r#"
+initial_state: new
+states:
+  - new
+  - implementation
+  - new
+gate_groups:
+  - id: validation
+    label: Validation
+    gates:
+      - id: rust-quality-green
+        label: Rust quality green
+        task: rust-quality
+"#;
+
+    let error = TemplateSet::from_yaml_strings(invalid_state_machine, VALID_AGENTS, VALID_PROMPTS)
+        .expect_err("duplicate states should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("duplicate state"));
+}
+
+#[test]
 fn template_validation_requires_at_least_one_gate_group() {
     let invalid_state_machine = VALID_STATE_MACHINE.replace(
         "gate_groups:\n  - id: specification\n    label: Specification\n    gates:\n      - id: pr-canonicalized\n        label: PR canonicalized\n        task: pr-editor\n  - id: validation\n    label: Validation\n    gates:\n      - id: rust-quality-green\n        label: Rust quality green\n        task: rust-quality\n",
@@ -709,6 +733,89 @@ tasks:
 
     assert!(matches!(error, TemplateError::Validation(_)));
     assert!(error.to_string().contains("unsupported evaluator"));
+}
+
+#[test]
+fn template_validation_rejects_transition_from_unknown_state() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+  - implementation
+gate_groups:
+  - id: validation
+    label: Validation
+    gates:
+      - id: rust-quality-green
+        label: Rust quality green
+        task: rust-quality
+transitions:
+  - from: ghost
+    to: implementation
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, VALID_AGENTS, VALID_PROMPTS)
+        .expect_err("unknown transition source should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("transition from 'ghost'"));
+}
+
+#[test]
+fn template_validation_rejects_transition_to_unknown_state() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - new
+  - implementation
+gate_groups:
+  - id: validation
+    label: Validation
+    gates:
+      - id: rust-quality-green
+        label: Rust quality green
+        task: rust-quality
+transitions:
+  - from: new
+    to: ghost
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, VALID_AGENTS, VALID_PROMPTS)
+        .expect_err("unknown transition target should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("transition to 'ghost'"));
+}
+
+#[test]
+fn template_validation_rejects_ambiguous_outgoing_transitions() {
+    let state_machine = r#"
+initial_state: new
+states:
+  - name: new
+    type: function
+    function: noop
+  - implementation
+  - ready-for-review
+gate_groups:
+  - id: validation
+    label: Validation
+    gates:
+      - id: rust-quality-green
+        label: Rust quality green
+        task: rust-quality
+transitions:
+  - from: new
+    to: implementation
+  - from: new
+    to: ready-for-review
+"#;
+
+    let error = TemplateSet::from_yaml_strings(state_machine, VALID_AGENTS, VALID_PROMPTS)
+        .expect_err("multiple outgoing transitions should fail validation");
+
+    assert!(matches!(error, TemplateError::Validation(_)));
+    assert!(error.to_string().contains("ambiguous transitions"));
 }
 
 // ── New tests for configurable templates (issue #37) ─────────────────────────

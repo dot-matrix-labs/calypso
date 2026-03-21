@@ -207,26 +207,46 @@ impl InitProgress {
 // GitHub Actions workflow templates — from calypso-blueprint examples
 // ---------------------------------------------------------------------------
 
-pub const WORKFLOW_RUST_QUALITY: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-quality.yml");
-pub const WORKFLOW_RUST_UNIT: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-unit.yml");
-pub const WORKFLOW_RUST_INTEGRATION: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-integration.yml");
-pub const WORKFLOW_RUST_E2E: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-e2e.yml");
-pub const WORKFLOW_RUST_COVERAGE: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-coverage.yml");
-pub const WORKFLOW_RELEASE_CLI: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/release-cli.yml");
-pub const WORKFLOW_MERGE_QUEUE: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/merge-queue.yml");
-pub const WORKFLOW_PR_ISSUE_CHECKLIST: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-issue-checklist.yml");
-pub const WORKFLOW_PR_CONFLICTS: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-conflicts.yml");
-pub const WORKFLOW_PR_SINGLE_ISSUE: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/pr-single-issue.yml");
+pub const WORKFLOW_RUST_QUALITY: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/rust-quality.yml"
+));
+pub const WORKFLOW_RUST_UNIT: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/rust-unit.yml"
+));
+pub const WORKFLOW_RUST_INTEGRATION: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/rust-integration.yml"
+));
+pub const WORKFLOW_RUST_E2E: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/rust-e2e.yml"
+));
+pub const WORKFLOW_RUST_COVERAGE: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/rust-coverage.yml"
+));
+pub const WORKFLOW_RELEASE_CLI: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/release-cli.yml"
+));
+pub const WORKFLOW_MERGE_QUEUE: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/merge-queue.yml"
+));
+pub const WORKFLOW_PR_ISSUE_CHECKLIST: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/pr-issue-checklist.yml"
+));
+pub const WORKFLOW_PR_CONFLICTS: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/pr-conflicts.yml"
+));
+pub const WORKFLOW_PR_SINGLE_ISSUE: &str = include_str!(concat!(
+    env!("CALYPSO_BLUEPRINT_ROOT"),
+    "/examples/github-workflows/pr-single-issue.yml"
+));
 
 // ---------------------------------------------------------------------------
 // Hello World templates
