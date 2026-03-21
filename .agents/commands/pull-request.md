@@ -1,6 +1,6 @@
 # Pull Request
 
-Use the `create-pr` skill.
+Use the `pr-sync` skill.
 
 Before creating or updating the PR:
 

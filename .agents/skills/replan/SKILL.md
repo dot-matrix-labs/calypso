@@ -1,17 +1,17 @@
 ---
 name: replan
-description: Read the Plan tracking issue and all open issues, build a dependency map, reprioritize by technical risk and unblocked status, tag work into parallel concurrency groups, and update each issue and the Plan with the results.
+description: Read the Plan tracking issue and all open issues, build a dependency map, reprioritize by technical risk and unblocked status, and rewrite the Plan for confident sequential execution.
 user_invocable: true
 ---
 
 # Replan
 
 Read the current plan and all open issues, evaluate dependencies and technical risk,
-and rewrite the plan with work grouped into sequenced concurrency batches. Update
+and rewrite the plan with work grouped into sequenced batches for one-at-a-time execution. Update
 each issue's Dependencies section with accurate dependents.
 
 Prefer decisions that increase confidence for downstream sequential execution. When
-in doubt, reduce concurrency rather than expanding it.
+in doubt, keep execution sequential.
 
 ## Inputs
 
@@ -102,7 +102,7 @@ score from the issue content — do not invent risk.
 
 ---
 
-## Phase 4: Assign concurrency groups (batches)
+## Phase 4: Assign sequential batches
 
 Group issues into ordered **batches**. Each batch is a set of issues that:
 
@@ -120,9 +120,7 @@ Group issues into ordered **batches**. Each batch is a set of issues that:
    dependent work begins.
 3. **Unblocked issues first** — prefer issues with no dependencies (or all
    dependencies already closed) over issues that are still waiting.
-4. **Conservatism on concurrency** — concurrency is the exception, not the rule.
-   Two issues may be in the same batch only if you are confident they do not
-   interact. If uncertain, place them in separate sequential batches.
+4. **Conservatism on batching** — when in doubt, place issues in separate sequential batches.
 
 ### What counts as "touching the same subsystem"
 
@@ -144,9 +142,8 @@ Batch 2 — {one-line description of the theme}
   ...
 ```
 
-Issues in the same batch CAN be worked in parallel (they do not block each other and
-do not share a subsystem). Issues in different batches MUST be done sequentially
-(later batches depend on earlier ones completing).
+Issues in different batches MUST be done sequentially. Prefer separate batches
+unless there is a strong reason to keep adjacent issues grouped for planning clarity.
 
 ---
 
@@ -251,8 +248,7 @@ Rewrite the Plan tracking issue body with the new batch structure. The new forma
 
 ```
 Planned implementation order for all outstanding features. Batches are sequenced
-by dependency and technical risk. Issues within a batch can be worked in parallel
-if capacity allows, but sequential execution is the default assumption.
+by dependency and technical risk for sequential execution.
 
 > Last replanned: {date}
 
@@ -328,7 +324,7 @@ Top 3 highest-risk issues (address early):
 - **Replan owns titles and batch labels** — this skill is the only thing that should set `batch-*` labels and scope-prefix issue titles. Other skills must not modify these.
 - **Never invent dependencies** — only parse what is written in the issue body.
 - **Never invent risk** — justify every score from the issue content.
-- **Conservative concurrency** — when in doubt, sequential is correct.
+- **Conservative batching** — when in doubt, sequential is correct.
 - **User confirms before writes** — show diffs and ask before editing any issue or the Plan.
 - **Dependency cycles are fatal** — stop and report; do not attempt to replan a cyclic graph.
 - **Closed issues are ignored** — do not include closed issues in the new plan.

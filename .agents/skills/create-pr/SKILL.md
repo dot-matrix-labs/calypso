@@ -1,136 +1,31 @@
 ---
 name: create-pr
-description: Create a pull request that delivers exactly one GitHub issue. Verifies all acceptance criteria are complete before creating.
+description: Legacy PR helper. Prefer the pr-sync skill and deterministic PR scripts.
 user_invocable: true
 ---
 
 # Create PR
 
-Create a pull request for a completed feature. This skill verifies that acceptance
-criteria are met before creating the PR.
+This is a compatibility wrapper.
+
+Preferred split:
+
+- command: `pull-request`
+- skill: `pr-sync`
+- scripts: `pr-status.sh`, `merge-ready.sh`, `mark-pr-ready.sh`
 
 ## Inputs
 
 The user provides: $ARGUMENTS
 
-$ARGUMENTS should be the issue number. If empty, infer it from the current branch or existing PR when that inference is straightforward and low risk. Ask the user only if no single issue can be inferred confidently.
+If empty, infer the issue from the current branch or PR when that inference is straightforward.
 
----
+## Must do
 
-## Setup
+- Use repository-compliant PR rules.
+- Prefer deterministic PR scripts.
 
-Before running any `gh` issue commands, detect the tasks repository:
+## Must not do
 
-```bash
-TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name) + "-tasks"')
-```
-
----
-
-## Phase 1: Verify readiness
-
-1. Fetch the issue:
-   ```bash
-   gh issue view {issue-number} --repo {tasks-repo} --json title,body -q '.title,.body'
-   ```
-
-2. Parse the Acceptance Criteria and Test Plan sections.
-
-3. Check that the current branch has all the implementation committed:
-   ```bash
-   git status
-   git diff main...HEAD --stat
-   ```
-
-4. Run the verification suite:
-   ```bash
-   bunx tsc --noEmit
-   bun run lint
-   bun run format
-   bun --bun vitest run
-   ```
-
-5. If any check fails, fix the issue before proceeding.
-
----
-
-## Phase 2: Create or update PR
-
-If a draft PR already exists for this branch, update it instead of creating a new one.
-
-```bash
-gh pr list --head {branch-name} --json number,url
-```
-
-### If draft PR exists — update it
-
-```bash
-gh pr edit {pr-number} \
-  --title "{issue-title}" \
-  --body "$(cat <<'EOF'
-## Summary
-
-{1-3 bullet points describing what was implemented}
-
-Closes #{issue-number}
-
-## Acceptance criteria
-
-{Copy from issue, with checkboxes checked for completed items}
-
-## Test plan
-
-{Copy from issue, with checkboxes checked for verified items}
-
-Generated with an AI agent.
-EOF
-)"
-
-gh pr ready {pr-number}
-```
-
-### If no PR exists — create one
-
-```bash
-git push -u origin {branch-name}
-
-gh pr create \
-  --title "{issue-title}" \
-  --body "$(cat <<'EOF'
-## Summary
-
-{1-3 bullet points describing what was implemented}
-
-Closes #{issue-number}
-
-## Acceptance criteria
-
-{Copy from issue, with checkboxes checked for completed items}
-
-## Test plan
-
-{Copy from issue, with checkboxes checked for verified items}
-
-Generated with an AI agent.
-EOF
-)"
-```
-
----
-
-## Phase 3: Report
-
-Report to the user:
-- PR URL
-- CI status
-- Any acceptance criteria that are not yet met
-
----
-
-## Rules
-
-- The PR body MUST include `Closes #{issue-number}` so the issue auto-closes on merge
-- Every acceptance criterion must be verified before marking the PR ready
-- `gh` CLI is the only GitHub surface
-- One PR per issue (1:1:1:1:1 invariant)
-- Prefer self-service over clarification when one issue is clearly implied by the branch, PR, or local context
+- Do not generate a summary-heavy PR body if the repo requires a single closing reference.
+- Do not reintroduce obsolete PR-ready semantics here.
