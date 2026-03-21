@@ -24,6 +24,9 @@ Preferred split:
 - Keep ordering metadata in the `Plan` issue, not in individual issue titles or
   issue bodies.
 - Prefer deterministic scripts for audits, collection, and apply steps.
+- Use the normalizer scripts before evaluation when straightforward compliance
+  fixes are possible.
+- Validate evaluator output before applying it.
 
 ## Must not do
 

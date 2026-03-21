@@ -12,6 +12,7 @@ Use this command to apply a structured sequential plan after evaluation is done.
 ## Deterministic flow
 
 ```bash
+.agents/scripts/replan/validate-plan-json.sh {plan-json-file}
 .agents/scripts/replan/apply-plan.sh {plan-json-file}
 .agents/scripts/replan/sync-dependents.sh {plan-json-file}
 ```

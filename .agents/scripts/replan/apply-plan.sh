@@ -11,6 +11,8 @@ if [[ -z "$PLAN_FILE" ]]; then
   exit 1
 fi
 
+"$SCRIPT_DIR/validate-plan-json.sh" "$PLAN_FILE" >/dev/null
+
 plan_issue_number="$(jq -r '.plan_issue_number' "$PLAN_FILE")"
 body="$(jq -r '
   [

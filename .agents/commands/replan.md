@@ -54,6 +54,8 @@ PRs must follow repository PR rules:
 ```bash
 .agents/scripts/replan/audit-issues.sh
 .agents/scripts/replan/audit-prs.sh
+.agents/scripts/replan/normalize-issue-template.sh
+.agents/scripts/replan/normalize-pr-body.sh
 ```
 
 2. Collect structured input:
@@ -68,6 +70,7 @@ PRs must follow repository PR rules:
 4. Apply the result:
 
 ```bash
+.agents/scripts/replan/validate-plan-json.sh {plan-json-file}
 .agents/scripts/replan/apply-plan.sh {plan-json-file}
 .agents/scripts/replan/sync-dependents.sh {plan-json-file}
 ```

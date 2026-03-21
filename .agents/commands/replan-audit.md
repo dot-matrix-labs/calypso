@@ -15,6 +15,8 @@ Use this command to run deterministic compliance checks before any replanning.
 ```bash
 .agents/scripts/replan/audit-issues.sh
 .agents/scripts/replan/audit-prs.sh
+.agents/scripts/replan/normalize-issue-template.sh
+.agents/scripts/replan/normalize-pr-body.sh
 ```
 
 Do not continue into ranking or plan rewriting until these audits are clean or
