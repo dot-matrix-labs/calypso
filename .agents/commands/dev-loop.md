@@ -10,6 +10,7 @@ These scripts should be treated as the source of truth for:
 - whether a linked issue checklist is complete
 - which plan issue should be selected next
 - whether prep is complete for branch, worktree, remote, and PR
+- whether a selected issue has resumable or risky local worktree state
 
 This command is intentionally conservative:
 
@@ -31,6 +32,7 @@ Preferred entrypoint:
 
 ```bash
 .agents/scripts/dev-loop/run.sh
+.agents/scripts/dev-loop/state-summary.sh
 ```
 
 `run.sh` is the deterministic loop tick. Re-run it after each merged issue until it
@@ -73,6 +75,8 @@ For the selected issue or its PR:
    - `.agents/scripts/dev-loop/pr-status.sh`
    - `.agents/scripts/dev-loop/issue-status.sh`
    - `.agents/scripts/dev-loop/remote-branch-status.sh`
+   - `.agents/scripts/dev-loop/worktree-status.sh`
+   - `.agents/scripts/dev-loop/reconcile-local-state.sh`
    - `.agents/scripts/dev-loop/needs-rebase.sh`
    - `.agents/scripts/dev-loop/merge-ready.sh`
 4. Use the `develop` skill to execute the selected issue in its dedicated worktree.
@@ -83,6 +87,8 @@ For the selected issue or its PR:
    - the PR is marked ready
    - the PR is merged
 6. Take the smallest valid next step that moves it forward:
+   - resume a selected issue if the worktree is missing, detached, or on the wrong branch
+   - continue dirty-but-resumable work already present in the issue worktree
    - fix failing tests or CI
    - complete remaining acceptance criteria
    - update issue checklist and stage when work is complete

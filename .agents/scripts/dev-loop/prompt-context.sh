@@ -9,7 +9,7 @@ if [[ ! "$prompt" =~ (^|[[:space:]/-])dev-loop($|[[:space:]]) ]]; then
   exit 0
 fi
 
-selection="$("$SCRIPT_DIR/run.sh")"
+selection="$("$SCRIPT_DIR/state-summary.sh")"
 
 printf 'Deterministic dev-loop state from shared repo scripts:\n'
 printf '%s\n' "$selection" | jq .

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-selection="$("$SCRIPT_DIR/run.sh")"
+selection="$("$SCRIPT_DIR/state-summary.sh")"
 
 cat <<EOF
 Shared deterministic dev-loop scripts are available under .agents/scripts/dev-loop.

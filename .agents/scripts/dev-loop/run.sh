@@ -30,13 +30,17 @@ fi
 
 pr_number="$(jq -r '.prep.pr.number' <<<"$prep")"
 pr_status="$("$SCRIPT_DIR/pr-status.sh" "$pr_number")"
+local_state="$("$SCRIPT_DIR/reconcile-local-state.sh" "$issue_number")"
 rebase_status="$("$SCRIPT_DIR/needs-rebase.sh" "$pr_number")"
 merge_status="$("$SCRIPT_DIR/merge-ready.sh" "$pr_number")"
 
 next_action="develop"
 state="active"
 
-if [[ "$(jq -r '.ready' <<<"$merge_status")" == "true" ]]; then
+if [[ "$(jq -r '.state' <<<"$local_state")" != "clean" ]]; then
+  next_action="$(jq -r '.next_action' <<<"$local_state")"
+  state="local_state_needs_attention"
+elif [[ "$(jq -r '.ready' <<<"$merge_status")" == "true" ]]; then
   next_action="merge"
 elif [[ "$(jq -r '.needs_rebase' <<<"$rebase_status")" == "true" ]]; then
   next_action="rebase"
@@ -48,6 +52,7 @@ jq -n \
   --argjson selection "$selection" \
   --argjson prep "$prep" \
   --argjson pr "$pr_status" \
+  --argjson local "$local_state" \
   --argjson rebase "$rebase_status" \
   --argjson merge "$merge_status" \
   '{
@@ -56,6 +61,7 @@ jq -n \
     selection: $selection,
     prep: $prep,
     pr: $pr,
+    local: $local,
     rebase: $rebase,
     merge: $merge
   }'
