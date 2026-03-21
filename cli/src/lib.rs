@@ -1,9 +1,9 @@
-//! Thin re-export layer — all library code lives in the `nightshift` crate.
+//! Thin re-export layer — all library code lives in the `nightshift-core` crate.
 //!
-//! This module re-exports everything from `nightshift` so that existing
+//! This module re-exports everything from `nightshift_core` so that existing
 //! `use calypso_cli::*` paths continue to work unchanged.
 
-pub use nightshift::*;
+pub use nightshift_core::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {

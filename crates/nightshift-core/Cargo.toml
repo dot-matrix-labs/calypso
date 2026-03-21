@@ -1,5 +1,5 @@
 [package]
-name = "nightshift"
+name = "nightshift-core"
 version = "0.1.0"
 edition = "2024"
 build = "build.rs"
@@ -14,5 +14,9 @@ chrono = "0.4"
 cron = "0.12"
 
 [lib]
-name = "nightshift"
+name = "nightshift_core"
 path = "src/lib.rs"
+
+[[bin]]
+name = "nightshift"
+path = "src/main.rs"
