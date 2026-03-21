@@ -13,6 +13,7 @@ Input should come from the deterministic feature scripts:
 ```bash
 .agents/scripts/feature/normalize-feature-request.sh
 .agents/scripts/feature/validate-request.sh
+.agents/scripts/feature/validate-feature-context.sh
 .agents/scripts/feature/collect-context.sh
 .agents/scripts/feature/check-duplicates.sh
 ```
@@ -20,11 +21,17 @@ Input should come from the deterministic feature scripts:
 ## Must do
 
 - Evaluate PRD alignment, blueprint fit, and Plan coherence.
+- Respect `context_validation`; if deterministic context is not valid, do not
+  proceed as if the repo state were trustworthy.
 - Infer explicit dependencies needed before the feature can be implemented.
 - Emit a structured issue payload suitable for deterministic validation and
   creation.
 - Prefer the smallest clear scope that fits the request.
 - Distinguish exact duplicates from likely follow-up or improvement candidates.
+- Distinguish:
+  - exact duplicate
+  - likely overlap
+  - improvement/follow-up to a prior closed issue
 
 ## Must not do
 

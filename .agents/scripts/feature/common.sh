@@ -20,3 +20,12 @@ require_json_file() {
 find_plan_issue_json() {
   gh issue list --repo "$(tasks_repo)" --state open --json number,title,url --jq 'map(select(.title == "Plan")) | .[0]'
 }
+
+canonicalize_title() {
+  local value="$1"
+  printf '%s' "$value" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[a-z]+:[[:space:]]*//' \
+    | sed -E 's/[^a-z0-9]+/ /g' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g'
+}
