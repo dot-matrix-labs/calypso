@@ -1,10 +1,18 @@
 # Feature
 
-Use the `new-feature` skill.
+Use the `new-feature` command flow.
 
-Apply the shared decision policy from `AGENTS.md`:
+Preferred deterministic flow:
 
-- proceed without clarification when the path is straightforward and low risk
-- if confidence is low, situate the request in the Plan first
-- if still uncertain, read the relevant parts of `calypso-blueprint/`
-- only then ask the human
+```bash
+.agents/scripts/feature/validate-request.sh {feature-json-file}
+.agents/scripts/feature/collect-context.sh {feature-json-file}
+.agents/scripts/feature/check-duplicates.sh {feature-json-file}
+.agents/scripts/feature/validate-issue-json.sh {issue-json-file}
+.agents/scripts/feature/render-issue-body.sh {issue-json-file}
+.agents/scripts/feature/create-issue.sh {issue-json-file}
+.agents/scripts/feature/update-plan.sh {created-issue-json-file}
+```
+
+Use the `feature-evaluate` skill only for architecture fit, Plan coherence,
+dependencies, and issue scope judgment.

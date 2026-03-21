@@ -29,7 +29,7 @@ vendor-only copies of shared logic.
 - Use `dev-loop` for continuous Plan execution.
 - Use `develop` to carry one selected Plan issue from verified prep through merge.
 - Use `merge` only for deterministic merge actions on the current selected PR.
-- Use `feature` or `new-feature` only when a human is defining new planned work.
+- Use `feature` or `new-feature` as the command flow for new planned work.
 - Use `replan` as the command for compliance auditing plus Plan rewriting.
 
 ## Must Do
@@ -42,6 +42,7 @@ vendor-only copies of shared logic.
 - Keep issue checklists, PR body, and issue stage aligned with repository rules.
 - Keep PR bodies to a single issue-closing reference only.
 - Keep ordering metadata only in the `Plan` issue.
+- Use deterministic feature scripts for new issue creation and Plan updates.
 
 ## Must Not Do
 

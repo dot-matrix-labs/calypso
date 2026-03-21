@@ -12,6 +12,11 @@
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/dev-loop/session-context.sh",
             "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/feature/session-context.sh",
+            "timeout": 20
           }
         ]
       }
@@ -22,6 +27,11 @@
           {
             "type": "command",
             "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/dev-loop/prompt-context.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/feature/prompt-context.sh",
             "timeout": 20
           }
         ]

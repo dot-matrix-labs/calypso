@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=.agents/scripts/dev-loop/common.sh
+source "$SCRIPT_DIR/../dev-loop/common.sh"
+
+feature_request_file_usage() {
+  printf 'expected a JSON file with keys: name, motivation, intended_experience, constraints\n' >&2
+}
+
+require_json_file() {
+  local path="$1"
+  if [[ -z "$path" || ! -f "$path" ]]; then
+    feature_request_file_usage
+    exit 1
+  fi
+}
+
+find_plan_issue_json() {
+  gh issue list --repo "$(tasks_repo)" --state open --json number,title,url --jq 'map(select(.title == "Plan")) | .[0]'
+}
