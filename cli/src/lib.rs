@@ -32,12 +32,11 @@ Options:
   -p, --path <dir>    Project directory (default: current working directory)
   -h, --help          Show this help output
   -v, --version       Show build version information
-  --headless          Run the orchestrator without the TUI (CI / daemon mode)
-  -v, -vv             Verbosity in headless mode: -v = info, -vv = debug
-  --json              Emit JSON-lines instead of human-readable text (headless)
+  -v, -vv             Verbosity: -v = info, -vv = debug (default: debug)
+  --json              Emit JSON-lines instead of human-readable text
 
 Positional:
-  [path]              Project directory (alternative to --path); starts TUI
+  [path]              Project directory (alternative to --path)
 
 Commands:
   (none)              Drive the state machine for the project directory
@@ -55,7 +54,6 @@ Commands:
   state show          Print the current state file as raw JSON
   agents              Show active agent sessions
   agents --json       Output agent sessions as JSON
-  watch               Open the interactive operator surface (live TUI)
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
   init --json         Initialise and output results as JSON
@@ -123,10 +121,9 @@ mod tests {
     }
 
     #[test]
-    fn help_output_documents_headless_mode() {
+    fn help_output_documents_json_flag() {
         let output = render_help(sample_info());
 
-        assert!(output.contains("--headless"), "missing --headless flag");
         assert!(output.contains("--json"), "missing --json flag");
     }
 }

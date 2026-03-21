@@ -7,12 +7,12 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use calypso_cli::operator_surface::OperatorSurface;
 use calypso_cli::state::{
     AgentSession, AgentSessionStatus, AgentTerminalOutcome, ClarificationEntry, FeatureState,
     FeatureType, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState, SchedulingMeta,
     SessionOutput, SessionOutputStream, WorkflowState,
 };
-use calypso_cli::tui::OperatorSurface;
 
 // ── Session builder helpers ───────────────────────────────────────────────────
 

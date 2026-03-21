@@ -12,6 +12,7 @@ pub mod github;
 pub mod headless;
 pub mod init;
 pub mod interpreter;
+pub mod operator_surface;
 pub mod pinned_prompt;
 pub mod policy;
 pub mod pr_checklist;
@@ -22,7 +23,6 @@ pub mod sm_audit;
 pub mod state;
 pub mod telemetry;
 pub mod template;
-pub mod tui;
 pub mod webview;
 pub mod workflows;
 
@@ -53,12 +53,11 @@ Options:
   -p, --path <dir>    Project directory (default: current working directory)
   -h, --help          Show this help output
   -v, --version       Show build version information
-  --headless          Run the orchestrator without the TUI (CI / daemon mode)
-  -v, -vv             Verbosity in headless mode (default: debug): -v = info, -vv = trace
-  --json              Emit JSON-lines instead of human-readable text (headless)
+  -v, -vv             Verbosity: -v = info, -vv = trace (default: debug)
+  --json              Emit JSON-lines instead of human-readable text
 
 Positional:
-  [path]              Project directory (alternative to --path); starts TUI
+  [path]              Project directory (alternative to --path)
 
 Commands:
   (none)              Drive the state machine for the project directory
@@ -74,7 +73,6 @@ Commands:
   state show          Print the current state file as raw JSON
   agents              Show active agent sessions
   agents --json       Output agent sessions as JSON
-  watch               Open the interactive operator surface (live TUI)
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
   init --json         Initialise and output results as JSON
@@ -141,10 +139,9 @@ mod tests {
     }
 
     #[test]
-    fn help_output_documents_headless_mode() {
+    fn help_output_documents_json_flag() {
         let output = render_help(sample_info());
 
-        assert!(output.contains("--headless"), "missing --headless flag");
         assert!(output.contains("--json"), "missing --json flag");
     }
 }

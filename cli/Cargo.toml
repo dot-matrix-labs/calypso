@@ -27,7 +27,6 @@ path = "src/bin/coverage_driver.rs"
 required-features = ["__dev_only"]
 
 [dev-dependencies]
-crossterm = "0.26.1"
 expectrl = "0.7"
 
 [features]

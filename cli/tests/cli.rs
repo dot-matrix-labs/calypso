@@ -191,7 +191,7 @@ fn status_command_renders_operator_surface_from_state_file() {
 
 #[cfg(coverage)]
 #[test]
-fn interactive_status_command_persists_state_file_updates() {
+fn status_command_renders_text_from_state_file() {
     let path = temp_state_path();
     sample_state()
         .save_to_path(&path)
@@ -201,15 +201,11 @@ fn interactive_status_command_persists_state_file_updates() {
         .args(["status", "--state"])
         .arg(&path)
         .output()
-        .expect("failed to run interactive calypso-cli status");
+        .expect("failed to run calypso-cli status");
 
     assert!(output.status.success());
-
-    let restored = RepositoryState::load_from_path(&path).expect("state should reload");
-    assert_eq!(
-        restored.current_feature.active_sessions[0].pending_follow_ups,
-        vec!["a".to_string()]
-    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(!stdout.is_empty(), "status should produce output");
 
     std::fs::remove_file(path).expect("temp state file should be removed");
 }
