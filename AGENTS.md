@@ -30,7 +30,7 @@ vendor-only copies of shared logic.
 - Use `develop` to carry one selected Plan issue from verified prep through merge.
 - Use `merge` only for deterministic merge actions on the current selected PR.
 - Use `feature` or `new-feature` only when a human is defining new planned work.
-- Use `replan` only when a human explicitly wants the Plan rewritten.
+- Use `replan` as the command for compliance auditing plus Plan rewriting.
 
 ## Must Do
 
@@ -40,6 +40,8 @@ vendor-only copies of shared logic.
 - Push regularly so CI reflects the current state of work.
 - Use deterministic readiness checks before marking ready or merging.
 - Keep issue checklists, PR body, and issue stage aligned with repository rules.
+- Keep PR bodies to a single issue-closing reference only.
+- Keep ordering metadata only in the `Plan` issue.
 
 ## Must Not Do
 
@@ -50,6 +52,8 @@ vendor-only copies of shared logic.
   issue, or blueprint context.
 - Do not treat open PRs outside the selected Plan issue as the next source of
   truth.
+- Do not put phase, step, or batch metadata into issue titles or issue bodies.
+- Do not plan or imply parallel execution.
 
 ## Decision Policy
 

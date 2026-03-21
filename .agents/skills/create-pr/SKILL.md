@@ -24,6 +24,7 @@ If empty, infer the issue from the current branch or PR when that inference is s
 
 - Use repository-compliant PR rules.
 - Prefer deterministic PR scripts.
+- Keep the PR body to the single issue closing reference and nothing else.
 
 ## Must not do
 

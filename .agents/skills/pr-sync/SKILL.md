@@ -12,12 +12,14 @@ repository rules.
 ## Must do
 
 - Verify the PR closes exactly one issue.
+- Keep the PR body to the single closing reference only.
 - Verify the linked issue checklist is complete before marking ready.
 - Use deterministic scripts for readiness checks.
 
 ## Must not do
 
 - Do not invent extra PR body structure if the repo rule requires a single closing reference.
+- Do not add progress notes, summaries, or duplicated issue text to the PR body.
 - Do not mark ready or merge while checks are pending or failing.
 
 ## Deterministic helpers
