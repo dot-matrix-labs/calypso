@@ -6,9 +6,10 @@ user_invocable: true
 
 # Develop
 
-Pick a task from the Plan tracking issue, implement it in an isolated worktree, and
-deliver it as a PR. This skill enforces the 1:1:1:1:1 invariant (1 issue : 1 branch :
-1 PR : 1 subagent : 1 worktree).
+Pick the selected issue, prepare its dedicated branch/worktree/PR deterministically,
+implement it in that isolated worktree, and stay on that issue until the PR is merged.
+This skill enforces the 1:1:1:1:1 invariant (1 issue : 1 branch : 1 PR : 1 subagent :
+1 worktree).
 
 ## Inputs
 
@@ -23,6 +24,9 @@ Prefer the deterministic selector first:
 ```bash
 .agents/scripts/dev-loop/plan-next-issue.sh
 ```
+
+If the caller already selected an issue from the Plan, continue with that issue even
+if other lower-priority PRs are already open.
 
 ```bash
 gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
@@ -58,49 +62,31 @@ TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name
 
 ---
 
-## Phase 2: Create branch, push to remote, and open draft PR
+## Phase 2: Deterministic prep before development
 
-**CRITICAL: The branch MUST be on remote with a draft PR before any implementation
-begins. This ensures CI runs on every subsequent push.**
-
-### Step 1: Derive the branch name
-
-Use the pattern: `feat/{issue-number}-{short-kebab-description}`
-
-Example: `feat/12-staff-permissions`
-
-### Step 2: Create the branch from main
+Before research or coding begins, prepare and verify the issue with:
 
 ```bash
-git checkout main
-git pull origin main
-git checkout -b {branch-name}
+.agents/scripts/dev-loop/ensure-issue-worktree.sh {issue-number}
+.agents/scripts/dev-loop/verify-issue-prep.sh {issue-number}
 ```
 
-### Step 3: Push the branch to remote
+Preparation is not optional. Do not begin implementation until verification says:
 
-```bash
-git push -u origin {branch-name}
-```
+- the issue has a dedicated worktree
+- the issue has a dedicated branch with issue-aligned semantics
+- the branch exists on remote and tracks it
+- the PR exists
+- newly created issue branches were based on the latest `origin/main`
 
-### Step 4: Create a draft PR
-
-Create a draft PR immediately so CI is wired up:
-
-```bash
-gh pr create \
-  --draft \
-  --title "{issue-title}" \
-  --body "Closes #{issue-number}"
-```
-
-Report the PR URL to the user before continuing.
+Use the returned worktree path and branch as the only execution target for the issue.
 
 ---
 
 ## Phase 3: Implement in isolated worktree
 
-Launch a subagent with `isolation: "worktree"` to do the actual implementation.
+Launch a subagent with `isolation: "worktree"` to do the actual implementation in
+the verified worktree.
 
 The subagent prompt MUST include:
 - The full issue body (behaviour, acceptance criteria, test plan)
@@ -114,7 +100,8 @@ The subagent prompt MUST include:
 ```
 You are implementing GitHub issue #{issue-number}: {issue-title}
 
-Branch: {branch-name} (already pushed to remote with draft PR #{pr-number})
+Branch: {branch-name} (already pushed to remote with PR #{pr-number})
+Worktree: {worktree-path}
 
 ## Issue specification
 
@@ -127,7 +114,9 @@ Branch: {branch-name} (already pushed to remote with draft PR #{pr-number})
 3. Write tests according to the Test Plan section.
 4. Run type-check, lint, format, and tests before each commit.
 5. Commit and push regularly — CI runs on every push.
-6. When done, push final changes. Do NOT mark the PR as ready — that happens in review.
+6. Use deterministic scripts to check remote branch and PR status instead of inferring them.
+7. Fix CI and mergeability issues as they appear.
+8. Keep working until the issue is complete, the PR is ready, and the PR can be merged without human help.
 
 ## Conventions
 - Use bun, never npm/npx/yarn
@@ -139,31 +128,25 @@ Branch: {branch-name} (already pushed to remote with draft PR #{pr-number})
 
 ## Phase 4: Verify and finalize
 
-After the subagent completes:
+The development thread owns the issue through merge.
 
-1. Check CI status on the PR:
-   ```bash
-   gh pr checks {pr-number} --repo {tasks-repo}
-   ```
+Use deterministic status scripts throughout:
 
-2. If CI fails, investigate and fix (or report to user).
+```bash
+.agents/scripts/dev-loop/pr-status.sh {pr-number}
+.agents/scripts/dev-loop/issue-status.sh {issue-number}
+.agents/scripts/dev-loop/remote-branch-status.sh {branch-name}
+.agents/scripts/dev-loop/merge-ready.sh {pr-number}
+```
 
-3. Update the PR description with a proper summary of what was implemented.
+Responsibilities:
 
-4. Update the PR from draft to ready:
-   ```bash
-   gh pr ready {pr-number}
-   ```
-
-5. Update the issue stage to "In Review":
-   ```bash
-   # Fetch current body, replace Stage line, update
-   ```
-
-6. Report to the user:
-   - PR URL and status
-   - CI status
-   - Any items from the acceptance criteria that could not be completed
+1. Push small increments continuously.
+2. Resolve CI failures as they appear.
+3. Update issue checklist items and stage when implementation evidence supports it.
+4. Mark the PR ready when repository gates allow it.
+5. Merge the PR when `merge-ready.sh` reports ready and repository policy allows it.
+6. Confirm the linked issue closes after merge.
 
 ---
 
@@ -171,15 +154,15 @@ After the subagent completes:
 
 **CRITICAL: Do NOT start the next feature until this one is fully merged.**
 
-After Phase 4 completes successfully:
+The skill is complete only when:
 
-1. Verify ALL acceptance criteria checkboxes are checked on the issue.
-2. Verify ALL CI jobs are green on the PR.
-3. Run the `merge` skill or the shared merge command to merge the PR.
-4. Confirm the issue is closed.
-5. Only THEN may you pick the next task from the Plan.
+1. The issue checklist is complete.
+2. The PR checks are green.
+3. The PR is ready.
+4. The PR is merged.
+5. The issue is closed.
 
-If any step fails, fix it before proceeding. Do NOT skip ahead to another feature.
+If any step fails, fix it before proceeding. Do not hand off a half-finished PR to the human.
 
 ---
 
@@ -187,10 +170,12 @@ If any step fails, fix it before proceeding. Do NOT skip ahead to another featur
 
 - **Sequential development only** — finish one feature completely (CI green, acceptance criteria done, merged) before starting the next. NEVER develop features in parallel.
 - **1:1:1:1:1 invariant** — one issue, one branch, one PR, one subagent, one worktree
-- **Branch on remote before coding** — draft PR exists before implementation starts, so CI runs on every push
+- **Deterministic prep before coding** — branch, worktree, remote, and PR must be verified before implementation starts
+- **New branches start from latest main** — when a new issue branch is created it must be based on current `origin/main`
 - **Dependencies must be closed** — do not start work on an issue with open dependencies
 - **Subagent isolation** — implementation happens in a worktree, never the main checkout
 - **Regular pushes** — the subagent commits and pushes frequently for CI feedback
 - **`gh` CLI only** — all GitHub operations use the gh CLI
 - **Self-service first** — read docs and codebase to answer your own questions. Only escalate to the user if you cannot find the answer after thorough research.
 - **Low-risk autonomy first** — if the next issue or next step is obvious from the Plan, PR, and dependency state, proceed without clarification
+- **Own the issue through merge** — the development thread does not stop at “ready for review”; it merges when the repository gates allow it

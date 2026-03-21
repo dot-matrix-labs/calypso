@@ -13,9 +13,15 @@ require_cmd gh
 require_cmd jq
 require_cmd awk
 require_cmd grep
+require_cmd git
+require_cmd sed
 
 canonical_repo() {
   gh repo view --json nameWithOwner -q .nameWithOwner
+}
+
+repo_root() {
+  dirname "$(git rev-parse --path-format=absolute --git-common-dir)"
 }
 
 tasks_repo() {
@@ -64,4 +70,36 @@ count_checkboxes() {
 json_file() {
   local path="$1"
   jq -c . "$path"
+}
+
+sanitize_slug() {
+  tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/^[[:space:]]+|[[:space:]]+$//g' \
+    | sed -E 's/^[a-z]+:[[:space:]]*//' \
+    | sed -E 's/[^a-z0-9]+/-/g' \
+    | sed -E 's/^-+|-+$//g' \
+    | cut -c1-48
+}
+
+issue_branch_name() {
+  local issue_number="$1"
+  local issue_title="$2"
+  local prefix slug
+
+  prefix="$(sed -E 's/^([a-z]+):.*/\1/;t;d' <<<"$issue_title" || true)"
+  if [[ -z "$prefix" ]]; then
+    prefix="feat"
+  fi
+
+  slug="$(printf '%s' "$issue_title" | sanitize_slug)"
+  if [[ -z "$slug" ]]; then
+    slug="issue"
+  fi
+
+  printf '%s/%s-%s\n' "$prefix" "$issue_number" "$slug"
+}
+
+issue_worktree_path() {
+  local branch_name="$1"
+  printf '%s/.agents/worktrees/%s\n' "$(repo_root)" "${branch_name//\//-}"
 }
