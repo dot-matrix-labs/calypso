@@ -105,6 +105,9 @@ Report your evaluation to the user with one of three outcomes:
 - **Clarification needed** — list exactly what is missing and ask the user
 - **Architecture conflict** — explain the conflict and ask the user how to resolve it
 
+When the request is already specific enough and aligned with the current Plan, do
+not ask extra clarification questions just to confirm obvious details.
+
 ---
 
 ## Phase 3: Create GitHub issue

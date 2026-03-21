@@ -254,3 +254,4 @@ Report to the user:
 - **Worktrees live in `.agents/worktrees/`**
 - **`gh` CLI only** for all GitHub operations
 - **1:1:1:1:1 invariant** — one issue, one branch, one PR, one worktree per extraction
+- **Low-risk autonomy first** — choose the straightforward path without asking when the extraction boundary is obvious from the diff

@@ -13,7 +13,7 @@ criteria are met before creating the PR.
 
 The user provides: $ARGUMENTS
 
-$ARGUMENTS should be the issue number. If empty, ask the user which issue this PR delivers.
+$ARGUMENTS should be the issue number. If empty, infer it from the current branch or existing PR when that inference is straightforward and low risk. Ask the user only if no single issue can be inferred confidently.
 
 ---
 
@@ -133,3 +133,4 @@ Report to the user:
 - Every acceptance criterion must be verified before marking the PR ready
 - `gh` CLI is the only GitHub surface
 - One PR per issue (1:1:1:1:1 invariant)
+- Prefer self-service over clarification when one issue is clearly implied by the branch, PR, or local context

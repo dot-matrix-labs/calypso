@@ -38,7 +38,18 @@ Read the selected workflow document. Follow it as your primary instruction set.
 
 ---
 
-## Phase 4: CLI Mode
+## Phase 4: Shared Agent Assets
+
+The vendor-agnostic source of truth for reusable agent assets is:
+
+- `.agents/skills/` for skills
+- `.agents/commands/` for commands
+
+Vendor-specific entrypoints may symlink to those directories, but the content lives under `.agents/`.
+
+---
+
+## Phase 5: CLI Mode
 
 When the work is about the CLI, load the shared agent skills from `.agents/skills/` before writing code.
 
@@ -56,11 +67,24 @@ For CLI work:
 - Push changes and wait for CI jobs to run before treating the work as complete.
 - Read only the skill or skills relevant to the task. Do not bulk-load every skill spec.
 
-The vendor-agnostic source of truth for reusable skills is `.agents/skills/`. Vendor-specific entrypoints may symlink to that directory, but the content lives there.
+---
+
+## Phase 6: Decision Policy
+
+Proceed without asking the human when the next step is straightforward, low risk, and consistent with the current issue, PR, and plan.
+
+If confidence is not high enough:
+
+1. Situate the work against the Plan tracking issue and the issue dependency order.
+2. Prefer the simplest path that keeps the current PR or selected issue aligned with the next planned work.
+3. If still uncertain, read the relevant parts of `calypso-blueprint/`.
+4. Only ask the human after those steps fail to produce a confident next action.
+
+The default bias is forward progress, not clarification.
 
 ---
 
-## Phase 5: Deepen Context (Only When Needed)
+## Phase 7: Deepen Context (Only When Needed)
 
 If at any point during implementation you encounter uncertainty, do not ask the human immediately. Escalate context in this order:
 
@@ -103,6 +127,7 @@ Read `agent-context/development/git-standards.md` before your first commit. Key 
 ## Rules
 
 - Autonomy first. Do not ask the human for help unless you have exhausted the context escalation loop.
+- Prefer a low-risk forward step over a clarification question when the likely answer is obvious from local context.
 - Minimal context loading. Do not read documents speculatively.
 - Implementation docs before blueprints. Blueprints explain why; implementation docs tell you what to build.
 - One workflow per session. Pick one workflow document and follow it to completion.

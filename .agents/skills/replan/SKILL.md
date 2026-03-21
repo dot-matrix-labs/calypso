@@ -10,6 +10,9 @@ Read the current plan and all open issues, evaluate dependencies and technical r
 and rewrite the plan with work grouped into sequenced concurrency batches. Update
 each issue's Dependencies section with accurate dependents.
 
+Prefer decisions that increase confidence for downstream sequential execution. When
+in doubt, reduce concurrency rather than expanding it.
+
 ## Inputs
 
 The user provides: $ARGUMENTS

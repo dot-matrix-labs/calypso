@@ -14,8 +14,9 @@ deliver it as a PR. This skill enforces the 1:1:1:1:1 invariant (1 issue : 1 bra
 
 The user provides: $ARGUMENTS
 
-If $ARGUMENTS is empty, fetch the Plan tracking issue and show the user the next
-unstarted task. Ask which task to work on.
+If $ARGUMENTS is empty, fetch the Plan tracking issue and select the next eligible
+issue from the earliest open batch. Do not ask the user when the next issue is
+straightforward from the plan and dependency state.
 
 ```bash
 gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
@@ -42,9 +43,12 @@ TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name
    gh issue view {issue-number} --repo {tasks-repo} --json title,body,state -q '.title,.body'
    ```
 3. Verify all dependencies (issues listed in the Dependencies section) are closed.
-   If any dependency is open, tell the user and stop.
+   If any dependency is open, return to the Plan and choose the next eligible issue
+   instead of stopping, unless the caller explicitly pinned this exact issue.
 4. Read the issue's Behaviour, Acceptance Criteria, and Test Plan sections carefully.
    These define "done".
+5. If the next step is still unclear, situate the issue in the Plan first and read
+   the relevant parts of `calypso-blueprint/` before asking the user.
 
 ---
 
@@ -81,22 +85,7 @@ Create a draft PR immediately so CI is wired up:
 gh pr create \
   --draft \
   --title "{issue-title}" \
-  --body "$(cat <<'EOF'
-## Summary
-
-Implements #{issue-number}.
-
-## Status
-
-🚧 Work in progress
-
-## Test plan
-
-See #{issue-number} for acceptance criteria and test plan.
-
-Generated with an AI agent.
-EOF
-)"
+  --body "Closes #{issue-number}"
 ```
 
 Report the PR URL to the user before continuing.
@@ -180,7 +169,7 @@ After Phase 4 completes successfully:
 
 1. Verify ALL acceptance criteria checkboxes are checked on the issue.
 2. Verify ALL CI jobs are green on the PR.
-3. Run `/merge-queue` to merge the PR.
+3. Run the `merge` skill or the shared merge command to merge the PR.
 4. Confirm the issue is closed.
 5. Only THEN may you pick the next task from the Plan.
 
@@ -198,3 +187,4 @@ If any step fails, fix it before proceeding. Do NOT skip ahead to another featur
 - **Regular pushes** — the subagent commits and pushes frequently for CI feedback
 - **`gh` CLI only** — all GitHub operations use the gh CLI
 - **Self-service first** — read docs and codebase to answer your own questions. Only escalate to the user if you cannot find the answer after thorough research.
+- **Low-risk autonomy first** — if the next issue or next step is obvious from the Plan, PR, and dependency state, proceed without clarification

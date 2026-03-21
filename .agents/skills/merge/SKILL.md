@@ -72,7 +72,7 @@ Merge commits only — no squash, no rebase-merge.
 ### 3d. Post-merge
 
 1. Confirm issue auto-closed: `gh issue view {issue} --repo $REPO --json state`
-2. Update Plan tracking issue: change `- [ ] #{issue}` → `- [x] #{issue}` in its body.
+2. Confirm the Plan still reflects valid dependency order. Do not introduce checkboxes into the Plan.
 3. Check remaining queued PRs for new conflicts; rebase if needed.
 4. Move to next PR.
 
@@ -80,7 +80,7 @@ Merge commits only — no squash, no rebase-merge.
 
 - PRs merged (issue numbers and URLs)
 - PRs skipped and why
-- Plan tracking issue updated
+- Plan consistency checked
 
 ## Hard rules
 
@@ -90,3 +90,4 @@ Merge commits only — no squash, no rebase-merge.
 - Never force-push without `--force-with-lease`
 - Never close issues manually — `Closes #N` handles it
 - 1 issue : 1 branch : 1 PR — if broken, stop and report
+- Proceed without clarification when the next merge or unblocker is obvious from CI, dependencies, and mergeability
