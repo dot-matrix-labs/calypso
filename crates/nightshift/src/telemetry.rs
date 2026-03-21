@@ -103,7 +103,10 @@ impl fmt::Display for Component {
 /// A structured event tag that can be attached to a log entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogEvent {
+    StateEntered,
     StateTransition,
+    StepExecution,
+    TransitionSelected,
     GateEvaluated,
     AgentStarted,
     AgentCompleted,
@@ -116,7 +119,10 @@ pub enum LogEvent {
 impl LogEvent {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::StateEntered => "state_entered",
             Self::StateTransition => "state_transition",
+            Self::StepExecution => "step_execution",
+            Self::TransitionSelected => "transition_selected",
             Self::GateEvaluated => "gate_evaluated",
             Self::AgentStarted => "agent_started",
             Self::AgentCompleted => "agent_completed",
@@ -448,11 +454,22 @@ impl Logger {
                 let use_color = is_tty();
                 let (pre, suf) = ansi_level_prefix(level, use_color);
                 let level_upper = level.as_str().to_ascii_uppercase();
-
                 let comp_display = if component.is_empty() { "-" } else { component };
+                let event_display = event
+                    .map(|value| format!(" event={value}"))
+                    .unwrap_or_default();
+                let fields_display = if fields.is_empty() {
+                    String::new()
+                } else {
+                    fields
+                        .iter()
+                        .map(|(key, value)| format!(" {key}={}", render_text_field_value(value)))
+                        .collect::<String>()
+                };
 
-                let line =
-                    format!("{timestamp} {pre}{level_upper}{suf} [{comp_display}] {message}\n",);
+                let line = format!(
+                    "{timestamp} {pre}{level_upper}{suf} [{comp_display}]{event_display} {message}{fields_display}\n",
+                );
 
                 if let Ok(mut w) = self.writer.lock() {
                     let _ = w.write_all(line.as_bytes());
@@ -527,6 +544,13 @@ impl Logger {
             context: CorrelationContext::default(),
             writer: Arc::new(Mutex::new(writer)),
         }
+    }
+}
+
+fn render_text_field_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => serde_json::to_string(text).unwrap_or_default(),
+        _ => value.to_string(),
     }
 }
 
@@ -854,8 +878,40 @@ mod tests {
             "expected [doctor] in: {output}"
         );
         assert!(
+            output.contains("event=doctor_check"),
+            "expected event tag in: {output}"
+        );
+        assert!(
             output.contains("checking prerequisites"),
             "expected message in: {output}"
+        );
+    }
+
+    #[test]
+    fn text_format_renders_structured_fields() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone(), LogFormat::Text);
+
+        logger
+            .entry(LogLevel::Info, "loop progress")
+            .component(Component::StateMachine)
+            .event(LogEvent::StepExecution)
+            .field("current_state", "implementation")
+            .field_json("iteration", serde_json::json!(3))
+            .emit();
+
+        let output = writer.contents();
+        assert!(
+            output.contains("event=step_execution"),
+            "expected event in: {output}"
+        );
+        assert!(
+            output.contains("current_state=\"implementation\""),
+            "expected string field in: {output}"
+        );
+        assert!(
+            output.contains("iteration=3"),
+            "expected numeric field in: {output}"
         );
     }
 
@@ -1048,8 +1104,14 @@ mod tests {
 
     #[test]
     fn log_event_display_and_serialize() {
+        assert_eq!(format!("{}", LogEvent::StateEntered), "state_entered");
         assert_eq!(format!("{}", LogEvent::AgentStarted), "agent_started");
         assert_eq!(format!("{}", LogEvent::AgentCompleted), "agent_completed");
+        assert_eq!(format!("{}", LogEvent::StepExecution), "step_execution");
+        assert_eq!(
+            format!("{}", LogEvent::TransitionSelected),
+            "transition_selected"
+        );
         assert_eq!(format!("{}", LogEvent::Shutdown), "shutdown");
         assert_eq!(format!("{}", LogEvent::Startup), "startup");
 

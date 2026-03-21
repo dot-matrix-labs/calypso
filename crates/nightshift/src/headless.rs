@@ -16,7 +16,7 @@ use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
 use crate::state::RepositoryState;
 use crate::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
-use crate::template::load_project_template_set;
+use crate::template::{StepType, TemplateSet, load_project_template_set};
 
 /// Configuration resolved from CLI flags when `--headless` is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +74,12 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
                 "not inside a git repository",
                 BTreeMap::new(),
             );
+            log_shutdown(
+                logger,
+                LogLevel::Error,
+                "headless run stopped",
+                "not_in_git_repo",
+            );
             return 1;
         }
     };
@@ -98,18 +104,19 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             "prerequisite checks failed",
             BTreeMap::new(),
         );
+        log_shutdown(
+            logger,
+            LogLevel::Error,
+            "headless run stopped",
+            "doctor_failed",
+        );
         return doctor_exit;
     }
 
     // Check for shutdown between phases
     if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
+        let signal_name = signal.to_string();
+        log_signal_shutdown(logger, &signal_name, None, None, None);
         return signal.exit_code();
     }
 
@@ -135,19 +142,20 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
                 .component(Component::StateMachine)
                 .field("error", e.to_string())
                 .emit();
+            log_shutdown(
+                logger,
+                LogLevel::Error,
+                "headless run stopped",
+                "state_load_failed",
+            );
             return 1;
         }
     };
 
     // Check for shutdown between phases
     if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
+        let signal_name = signal.to_string();
+        log_signal_shutdown(logger, &signal_name, None, None, None);
         return signal.exit_code();
     }
 
@@ -155,34 +163,24 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     let gate_exit = evaluate_gates_headless(logger, &repo_root, &state);
 
     if gate_exit != 0 {
+        log_shutdown(
+            logger,
+            LogLevel::Error,
+            "headless run stopped",
+            "gate_evaluation_failed",
+        );
         return gate_exit;
     }
 
     // Check for shutdown between phases
     if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
+        let signal_name = signal.to_string();
+        log_signal_shutdown(logger, &signal_name, None, None, None);
         return signal.exit_code();
     }
 
     // 8. Enter orchestrator loop (state machine driver)
-    let exit_code = run_driver_loop(logger, &repo_root, &state_path, &shutdown);
-
-    // 9. Log completion
-    logger.log_event(
-        LogLevel::Info,
-        Component::Cli,
-        LogEvent::Shutdown,
-        "headless run complete",
-        BTreeMap::new(),
-    );
-
-    exit_code
+    run_driver_loop(logger, &repo_root, &state_path, &shutdown)
 }
 
 /// Run the state machine driver in auto mode, logging each step result.
@@ -233,16 +231,12 @@ fn run_driver_loop(
         BTreeMap::new(),
     );
 
+    let mut iteration = 1_u64;
     loop {
         // Check for shutdown before each step
         if let Some(signal) = shutdown.try_recv() {
-            logger.log_event(
-                LogLevel::Warn,
-                Component::Cli,
-                LogEvent::Shutdown,
-                &format!("received {signal}, shutting down"),
-                BTreeMap::new(),
-            );
+            let signal_name = signal.to_string();
+            log_signal_shutdown(logger, &signal_name, Some(iteration), None, None);
             return signal.exit_code();
         }
 
@@ -252,15 +246,26 @@ fn run_driver_loop(
             .unwrap_or_else(|_| "unknown".to_string());
 
         let step_type = driver.template.step_type_for_state(&from_state);
+        let current_step = step_name_for_state(&driver.template, &from_state, &step_type);
+
         logger
-            .entry(
-                LogLevel::Debug,
-                &format!("stepping {from_state} ({step_type:?})"),
-            )
+            .entry(LogLevel::Info, &format!("entered state {from_state}"))
             .component(Component::StateMachine)
-            .event(LogEvent::StateTransition)
-            .field("state", &from_state)
-            .field("step_type", format!("{step_type:?}"))
+            .event(LogEvent::StateEntered)
+            .field("current_state", &from_state)
+            .field("current_step", &current_step)
+            .field("step_type", step_type_label(&step_type))
+            .field_json("iteration", serde_json::json!(iteration))
+            .emit();
+
+        logger
+            .entry(LogLevel::Info, &format!("executing step {current_step}"))
+            .component(Component::StateMachine)
+            .event(LogEvent::StepExecution)
+            .field("current_state", &from_state)
+            .field("current_step", &current_step)
+            .field("step_type", step_type_label(&step_type))
+            .field_json("iteration", serde_json::json!(iteration))
             .emit();
 
         let result = driver.step();
@@ -269,34 +274,56 @@ fn run_driver_loop(
             DriverStepResult::Advanced(to_state) => {
                 logger
                     .entry(
-                        LogLevel::Debug,
-                        &format!("{from_state} → {}", to_state.as_str()),
+                        LogLevel::Info,
+                        &format!("{from_state} -> {}", to_state.as_str()),
                     )
                     .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
-                    .field("to_state", to_state.as_str())
+                    .event(LogEvent::TransitionSelected)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
+                    .field("selected_transition", to_state.as_str())
                     .field("outcome", "advanced")
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                iteration += 1;
             }
             DriverStepResult::Terminal => {
                 logger
-                    .entry(LogLevel::Debug, &format!("{from_state} → terminal"))
+                    .entry(
+                        LogLevel::Info,
+                        &format!("{from_state} reached terminal state"),
+                    )
                     .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
+                    .event(LogEvent::StepExecution)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
                     .field("outcome", "terminal")
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                log_shutdown(
+                    logger,
+                    LogLevel::Info,
+                    "headless loop finished",
+                    "terminal_state",
+                );
                 return 0;
             }
             DriverStepResult::Unchanged => {
                 logger
-                    .entry(LogLevel::Debug, &format!("{from_state} → unchanged"))
+                    .entry(LogLevel::Warn, &format!("{from_state} made no progress"))
                     .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
+                    .event(LogEvent::StepExecution)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
                     .field("outcome", "unchanged")
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                log_shutdown(
+                    logger,
+                    LogLevel::Warn,
+                    "headless loop stopped without progress",
+                    "stalled",
+                );
                 return 0;
             }
             DriverStepResult::ClarificationRequired(question) => {
@@ -308,11 +335,19 @@ fn run_driver_loop(
                         ),
                     )
                     .component(Component::Agent)
-                    .event(LogEvent::AgentCompleted)
-                    .field("from_state", &from_state)
+                    .event(LogEvent::StepExecution)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
                     .field("outcome", "clarification_required")
-                    .field("question", question)
+                    .field("blocking_error", question)
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                log_shutdown(
+                    logger,
+                    LogLevel::Error,
+                    "headless loop blocked on clarification",
+                    "clarification_required",
+                );
                 return 3;
             }
             DriverStepResult::Failed { reason } => {
@@ -322,11 +357,19 @@ fn run_driver_loop(
                         &format!("{from_state}: step failed — {reason}"),
                     )
                     .component(Component::Agent)
-                    .event(LogEvent::AgentCompleted)
-                    .field("from_state", &from_state)
+                    .event(LogEvent::StepExecution)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
                     .field("outcome", "failed")
-                    .field("reason", reason)
+                    .field("blocking_error", reason)
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                log_shutdown(
+                    logger,
+                    LogLevel::Error,
+                    "headless loop failed",
+                    "step_failed",
+                );
                 return 3;
             }
             DriverStepResult::Error(e) => {
@@ -336,15 +379,84 @@ fn run_driver_loop(
                         &format!("{from_state}: driver error — {e}"),
                     )
                     .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
+                    .event(LogEvent::StepExecution)
+                    .field("current_state", &from_state)
+                    .field("current_step", &current_step)
                     .field("outcome", "error")
-                    .field("error", e)
+                    .field("blocking_error", e)
+                    .field_json("iteration", serde_json::json!(iteration))
                     .emit();
+                log_shutdown(
+                    logger,
+                    LogLevel::Error,
+                    "headless loop failed",
+                    "driver_error",
+                );
                 return 2;
             }
         }
     }
+}
+
+fn step_name_for_state(template: &TemplateSet, state_name: &str, step_type: &StepType) -> String {
+    match step_type {
+        StepType::Function => template
+            .function_for_state(state_name)
+            .unwrap_or_else(|| state_name.replace('-', "_")),
+        StepType::Agent => template
+            .state_machine
+            .states
+            .iter()
+            .find(|state| state.name() == state_name)
+            .and_then(|state| match state {
+                crate::template::StateDefinition::Detailed(config) => config.role.clone(),
+                crate::template::StateDefinition::Simple(_) => None,
+            })
+            .unwrap_or_else(|| state_name.to_string()),
+    }
+}
+
+fn step_type_label(step_type: &StepType) -> &'static str {
+    match step_type {
+        StepType::Agent => "agent",
+        StepType::Function => "function",
+    }
+}
+
+fn log_shutdown(logger: &Logger, level: LogLevel, message: &str, shutdown_cause: &str) {
+    logger
+        .entry(level, message)
+        .component(Component::Cli)
+        .event(LogEvent::Shutdown)
+        .field("shutdown_cause", shutdown_cause)
+        .emit();
+}
+
+fn log_signal_shutdown(
+    logger: &Logger,
+    signal: &str,
+    iteration: Option<u64>,
+    current_state: Option<&str>,
+    current_step: Option<&str>,
+) {
+    let mut entry = logger
+        .entry(LogLevel::Warn, &format!("received {signal}, shutting down"))
+        .component(Component::Cli)
+        .event(LogEvent::Shutdown)
+        .field("shutdown_cause", "signal")
+        .field("signal", signal);
+
+    if let Some(iteration) = iteration {
+        entry = entry.field_json("iteration", serde_json::json!(iteration));
+    }
+    if let Some(current_state) = current_state {
+        entry = entry.field("current_state", current_state);
+    }
+    if let Some(current_step) = current_step {
+        entry = entry.field("current_step", current_step);
+    }
+
+    entry.emit();
 }
 
 /// Log each doctor check result. Returns 0 if all pass, 1 if any fail.
@@ -952,6 +1064,10 @@ mod tests {
             output.contains("shutting down"),
             "expected shutdown message in output: {output}"
         );
+        assert!(
+            output.contains("\"shutdown_cause\":\"signal\""),
+            "expected shutdown cause in output: {output}"
+        );
     }
 
     #[test]
@@ -964,19 +1080,25 @@ mod tests {
         let _exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
 
         let output = writer.contents();
-        // Should log a stepping event (with "unknown" since state can't be read)
-        // followed by the driver error.
         assert!(
-            output.contains("stepping"),
-            "expected stepping log before error: {output}"
+            output.contains("\"event\":\"state_entered\""),
+            "expected state_entered log before error: {output}"
         );
         assert!(
-            output.contains("\"from_state\""),
-            "expected from_state field in error output: {output}"
+            output.contains("\"current_state\":\"unknown\""),
+            "expected current_state field in error output: {output}"
         );
         assert!(
-            output.contains("\"outcome\""),
-            "expected outcome field in output: {output}"
+            output.contains("\"current_step\":\"unknown\""),
+            "expected current_step field in output: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\":1"),
+            "expected iteration field in output: {output}"
+        );
+        assert!(
+            output.contains("\"shutdown_cause\":\"driver_error\""),
+            "expected shutdown cause in output: {output}"
         );
     }
 }
