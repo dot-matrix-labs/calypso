@@ -237,7 +237,9 @@ impl TemplateSet {
             }
 
             if state_step_types.get(transition.from.as_str()) == Some(&StepType::Function) {
-                let count = outgoing_transitions.entry(transition.from.as_str()).or_default();
+                let count = outgoing_transitions
+                    .entry(transition.from.as_str())
+                    .or_default();
                 *count += 1;
                 if *count > 1 {
                     return Err(TemplateError::Validation(format!(
