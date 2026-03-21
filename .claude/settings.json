@@ -3,5 +3,39 @@
   "attribution": {
     "pr": "none",
     "commit": "none"
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/auto/session-context.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/feature/session-context.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/auto/prompt-context.sh",
+            "timeout": 20
+          },
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.agents/scripts/feature/prompt-context.sh",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
   }
 }
