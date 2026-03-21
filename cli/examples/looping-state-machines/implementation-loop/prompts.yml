@@ -1,0 +1,7 @@
+prompts:
+  inspect-backlog: |
+    Inspect the backlog and select the next implementation task for this pass.
+  do-work: |
+    Implement the selected task and stop when the next summary is possible.
+  summarize: |
+    Summarize the implementation pass and identify the next backlog check.

@@ -1,0 +1,27 @@
+initial_state: inspect-backlog
+states:
+  - inspect-backlog
+  - do-work
+  - summarize
+  - restart
+transitions:
+  - from: inspect-backlog
+    to: do-work
+  - from: do-work
+    to: summarize
+  - from: summarize
+    to: restart
+  - from: restart
+    to: inspect-backlog
+gate_groups:
+  - id: implementation-control
+    label: Implementation Control
+    gates:
+      - id: operator-can-stop-implementation-loop
+        label: Operator can stop the implementation loop between passes
+        task: operator-control
+        applies_to:
+          - inspect-backlog
+          - do-work
+          - summarize
+          - restart

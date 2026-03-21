@@ -1,0 +1,5 @@
+prompts:
+  process-item: |
+    Review the next queued item and produce the smallest useful outcome.
+  mark-result: |
+    Record the result for the processed item before the loop restarts.

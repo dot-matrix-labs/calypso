@@ -1,0 +1,7 @@
+prompts:
+  choose-task: |
+    Choose the next project task for this pass through the loop.
+  execute-task: |
+    Execute the selected project task and keep changes scoped to that task.
+  report: |
+    Summarize what was completed, what remains, and whether another pass should begin.

@@ -1,0 +1,12 @@
+tasks:
+  - name: operator-control
+    kind: human
+  - name: inspect-backlog
+    kind: agent
+    role: planner
+  - name: do-work
+    kind: agent
+    role: engineer
+  - name: summarize
+    kind: agent
+    role: reporter

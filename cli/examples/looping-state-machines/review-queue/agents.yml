@@ -1,0 +1,9 @@
+tasks:
+  - name: operator-control
+    kind: human
+  - name: process-item
+    kind: agent
+    role: reviewer
+  - name: mark-result
+    kind: agent
+    role: reporter

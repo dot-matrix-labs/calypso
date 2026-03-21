@@ -1,0 +1,31 @@
+initial_state: task-intake
+states:
+  - task-intake
+  - choose-task
+  - execute-task
+  - report
+  - restart
+transitions:
+  - from: task-intake
+    to: choose-task
+  - from: choose-task
+    to: execute-task
+  - from: execute-task
+    to: report
+  - from: report
+    to: restart
+  - from: restart
+    to: task-intake
+gate_groups:
+  - id: loop-control
+    label: Loop Control
+    gates:
+      - id: operator-can-interrupt
+        label: Operator can interrupt between passes
+        task: operator-control
+        applies_to:
+          - task-intake
+          - choose-task
+          - execute-task
+          - report
+          - restart

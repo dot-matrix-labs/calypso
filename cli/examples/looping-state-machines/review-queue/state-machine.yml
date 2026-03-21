@@ -1,0 +1,27 @@
+initial_state: review-queue
+states:
+  - review-queue
+  - process-item
+  - mark-result
+  - restart
+transitions:
+  - from: review-queue
+    to: process-item
+  - from: process-item
+    to: mark-result
+  - from: mark-result
+    to: restart
+  - from: restart
+    to: review-queue
+gate_groups:
+  - id: queue-control
+    label: Queue Control
+    gates:
+      - id: operator-can-pause-queue
+        label: Operator can pause the queue between items
+        task: operator-control
+        applies_to:
+          - review-queue
+          - process-item
+          - mark-result
+          - restart

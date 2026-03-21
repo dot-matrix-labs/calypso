@@ -1,0 +1,12 @@
+tasks:
+  - name: operator-control
+    kind: human
+  - name: choose-task
+    kind: agent
+    role: planner
+  - name: execute-task
+    kind: agent
+    role: engineer
+  - name: report
+    kind: agent
+    role: reporter
