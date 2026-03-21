@@ -127,12 +127,31 @@ pub struct RoleSession {
 
 /// Scheduling and timing metadata for a feature.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct HeadlessRunMeta {
+    #[serde(default)]
+    pub run_count: u64,
+    #[serde(default)]
+    pub iteration_count: u64,
+    #[serde(default)]
+    pub last_phase: Option<String>,
+    #[serde(default)]
+    pub last_workflow_state: Option<String>,
+    #[serde(default)]
+    pub last_shutdown_reason: Option<String>,
+    #[serde(default)]
+    pub last_message: Option<String>,
+}
+
+/// Scheduling and timing metadata for a feature.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct SchedulingMeta {
     pub created_at: String,
     #[serde(default)]
     pub last_advanced_at: Option<String>,
     #[serde(default)]
     pub last_agent_run_at: Option<String>,
+    #[serde(default)]
+    pub headless: HeadlessRunMeta,
 }
 
 /// A reference to an artifact produced during feature work.

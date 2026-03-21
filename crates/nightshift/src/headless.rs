@@ -116,7 +116,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     // 6. Load or initialise state
     let state_path = repo_root.join(".calypso").join("repository-state.json");
 
-    let state = match RepositoryState::load_from_path(&state_path) {
+    let mut state = match RepositoryState::load_from_path(&state_path) {
         Ok(state) => {
             logger
                 .entry(LogLevel::Info, "state loaded")
@@ -139,15 +139,19 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         }
     };
 
+    log_resume_notice(logger, &state);
+    if persist_run_start(&state_path, &mut state).is_err() {
+        logger
+            .entry(LogLevel::Error, "failed to persist headless run metadata")
+            .component(Component::StateMachine)
+            .field("phase", "startup")
+            .emit();
+        return 1;
+    }
+
     // Check for shutdown between phases
     if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
+        log_and_persist_shutdown(logger, &state_path, signal, "after-state-load");
         return signal.exit_code();
     }
 
@@ -155,18 +159,17 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     let gate_exit = evaluate_gates_headless(logger, &repo_root, &state);
 
     if gate_exit != 0 {
+        let _ = persist_completion(
+            &state_path,
+            "gate-evaluation-failed",
+            "headless run stopped after gate evaluation failure",
+        );
         return gate_exit;
     }
 
     // Check for shutdown between phases
     if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
+        log_and_persist_shutdown(logger, &state_path, signal, "after-gate-evaluation");
         return signal.exit_code();
     }
 
@@ -181,6 +184,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         "headless run complete",
         BTreeMap::new(),
     );
+    let _ = persist_completion(&state_path, "completed", "headless run complete");
 
     exit_code
 }
@@ -236,20 +240,23 @@ fn run_driver_loop(
     loop {
         // Check for shutdown before each step
         if let Some(signal) = shutdown.try_recv() {
-            logger.log_event(
-                LogLevel::Warn,
-                Component::Cli,
-                LogEvent::Shutdown,
-                &format!("received {signal}, shutting down"),
-                BTreeMap::new(),
-            );
+            log_and_persist_shutdown(logger, state_path, signal, "driver-loop");
             return signal.exit_code();
         }
 
         // Read current state before stepping so we can log the transition.
-        let from_state = RepositoryState::load_from_path(state_path)
-            .map(|s| s.current_feature.workflow_state.as_str().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+        let from_state = match persist_iteration_start(state_path, "driver-loop") {
+            Ok(state) => state,
+            Err(error) => {
+                logger
+                    .entry(LogLevel::Error, "failed to persist iteration metadata")
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("error", error.to_string())
+                    .emit();
+                return 2;
+            }
+        };
 
         let step_type = driver.template.step_type_for_state(&from_state);
         logger
@@ -287,6 +294,11 @@ fn run_driver_loop(
                     .field("from_state", &from_state)
                     .field("outcome", "terminal")
                     .emit();
+                let _ = persist_completion(
+                    state_path,
+                    "terminal",
+                    "headless run reached a terminal workflow state",
+                );
                 return 0;
             }
             DriverStepResult::Unchanged => {
@@ -297,6 +309,11 @@ fn run_driver_loop(
                     .field("from_state", &from_state)
                     .field("outcome", "unchanged")
                     .emit();
+                let _ = persist_completion(
+                    state_path,
+                    "unchanged",
+                    "headless run stopped because no transition was available",
+                );
                 return 0;
             }
             DriverStepResult::ClarificationRequired(question) => {
@@ -313,6 +330,11 @@ fn run_driver_loop(
                     .field("outcome", "clarification_required")
                     .field("question", question)
                     .emit();
+                let _ = persist_completion(
+                    state_path,
+                    "clarification-required",
+                    "headless run stopped because operator clarification is required",
+                );
                 return 3;
             }
             DriverStepResult::Failed { reason } => {
@@ -327,6 +349,11 @@ fn run_driver_loop(
                     .field("outcome", "failed")
                     .field("reason", reason)
                     .emit();
+                let _ = persist_completion(
+                    state_path,
+                    "failed",
+                    &format!("headless run failed: {reason}"),
+                );
                 return 3;
             }
             DriverStepResult::Error(e) => {
@@ -341,10 +368,127 @@ fn run_driver_loop(
                     .field("outcome", "error")
                     .field("error", e)
                     .emit();
+                let _ = persist_completion(
+                    state_path,
+                    "error",
+                    &format!("headless run hit a driver error: {e}"),
+                );
                 return 2;
             }
         }
     }
+}
+
+fn log_resume_notice(logger: &Logger, state: &RepositoryState) {
+    let headless = &state.current_feature.scheduling.headless;
+    let Some(reason) = headless.last_shutdown_reason.as_deref() else {
+        return;
+    };
+
+    if matches!(reason, "completed" | "terminal" | "unchanged") {
+        return;
+    }
+
+    let mut message = format!("resuming headless run after {reason}");
+    if let Some(iteration) = (headless.iteration_count > 0).then_some(headless.iteration_count) {
+        message.push_str(&format!(" at iteration {iteration}"));
+    }
+    if let Some(state_name) = &headless.last_workflow_state {
+        message.push_str(&format!(" in state {state_name}"));
+    }
+
+    logger
+        .entry(LogLevel::Warn, &message)
+        .component(Component::Cli)
+        .event(LogEvent::Startup)
+        .field("resume_reason", reason)
+        .emit();
+
+    if let Some(previous_message) = &headless.last_message {
+        logger
+            .entry(LogLevel::Info, previous_message)
+            .component(Component::Cli)
+            .event(LogEvent::Startup)
+            .field("resume_detail", previous_message)
+            .emit();
+    }
+}
+
+fn persist_run_start(state_path: &Path, state: &mut RepositoryState) -> Result<(), crate::state::StateError> {
+    let headless = &mut state.current_feature.scheduling.headless;
+    headless.run_count += 1;
+    headless.last_phase = Some("startup".to_string());
+    headless.last_workflow_state = Some(state.current_feature.workflow_state.as_str().to_string());
+    headless.last_shutdown_reason = Some("running".to_string());
+    headless.last_message = Some("headless run started".to_string());
+    state.save_to_path(state_path)
+}
+
+fn persist_iteration_start(
+    state_path: &Path,
+    phase: &str,
+) -> Result<String, crate::state::StateError> {
+    let mut state = RepositoryState::load_from_path(state_path)?;
+    let workflow_state = state.current_feature.workflow_state.as_str().to_string();
+    let headless = &mut state.current_feature.scheduling.headless;
+    headless.iteration_count += 1;
+    headless.last_phase = Some(phase.to_string());
+    headless.last_workflow_state = Some(workflow_state.clone());
+    headless.last_shutdown_reason = Some("running".to_string());
+    headless.last_message = Some(format!(
+        "headless iteration {} started in state {}",
+        headless.iteration_count, workflow_state
+    ));
+    state.save_to_path(state_path)?;
+    Ok(workflow_state)
+}
+
+fn persist_completion(
+    state_path: &Path,
+    reason: &str,
+    message: &str,
+) -> Result<(), crate::state::StateError> {
+    let mut state = RepositoryState::load_from_path(state_path)?;
+    let workflow_state = state.current_feature.workflow_state.as_str().to_string();
+    let headless = &mut state.current_feature.scheduling.headless;
+    headless.last_phase = Some("complete".to_string());
+    headless.last_workflow_state = Some(workflow_state);
+    headless.last_shutdown_reason = Some(reason.to_string());
+    headless.last_message = Some(message.to_string());
+    state.save_to_path(state_path)
+}
+
+fn persist_signal_shutdown(
+    state_path: &Path,
+    signal: crate::signal::SignalKind,
+    phase: &str,
+) -> Result<(), crate::state::StateError> {
+    let mut state = RepositoryState::load_from_path(state_path)?;
+    let workflow_state = state.current_feature.workflow_state.as_str().to_string();
+    let headless = &mut state.current_feature.scheduling.headless;
+    headless.last_phase = Some(phase.to_string());
+    headless.last_workflow_state = Some(workflow_state);
+    headless.last_shutdown_reason = Some(signal.to_string());
+    headless.last_message = Some(format!(
+        "headless run interrupted by {signal}; state was persisted for resume"
+    ));
+    state.save_to_path(state_path)
+}
+
+fn log_and_persist_shutdown(
+    logger: &Logger,
+    state_path: &Path,
+    signal: crate::signal::SignalKind,
+    phase: &str,
+) {
+    let _ = persist_signal_shutdown(state_path, signal, phase);
+    logger.log_event(
+        LogLevel::Warn,
+        Component::Cli,
+        LogEvent::Shutdown,
+        &format!("received {signal}, shutting down"),
+        BTreeMap::new(),
+    );
 }
 
 /// Log each doctor check result. Returns 0 if all pass, 1 if any fail.
