@@ -18,6 +18,12 @@ If $ARGUMENTS is empty, fetch the Plan tracking issue and select the next eligib
 issue from the earliest open batch. Do not ask the user when the next issue is
 straightforward from the plan and dependency state.
 
+Prefer the deterministic selector first:
+
+```bash
+.agents/scripts/dev-loop/plan-next-issue.sh
+```
+
 ```bash
 gh issue list --repo {tasks-repo} --search "Plan" --state open --json number,title
 gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body

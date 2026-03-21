@@ -2,6 +2,14 @@
 
 Run a continuous sequential development loop until there is no remaining planned work.
 
+Use the deterministic repo scripts under `.agents/scripts/dev-loop/` before reasoning about GitHub state.
+These scripts should be treated as the source of truth for:
+
+- whether a PR is open or merged
+- whether required checks are green
+- whether a linked issue checklist is complete
+- which PR or issue should be selected next
+
 This command is intentionally conservative:
 
 - only one development task may be active at a time
@@ -16,6 +24,12 @@ Repeat this loop:
 1. Inspect open pull requests in the repository.
 2. If any open PR exists, pick the highest-priority PR to advance.
 3. Only if there are no open PRs, select the next eligible issue from the Plan tracking issue.
+
+Preferred entrypoint:
+
+```bash
+.agents/scripts/dev-loop/select-next-work.sh
+```
 
 Priority rules:
 
@@ -34,6 +48,9 @@ For the selected PR:
 
 1. Read the linked issue and current PR state.
 2. Inspect CI, mergeability, outstanding checklist items, and recent comments.
+   Use:
+   - `.agents/scripts/dev-loop/pr-status.sh`
+   - `.agents/scripts/dev-loop/issue-status.sh`
 3. Take the smallest valid next step that moves it forward:
    - fix failing tests or CI
    - complete remaining acceptance criteria
@@ -51,6 +68,8 @@ If there are no open PRs:
 
 1. Read the Plan tracking issue.
 2. Select the next unblocked issue from the earliest open batch.
+   Use:
+   - `.agents/scripts/dev-loop/plan-next-issue.sh`
 3. Use the `develop` skill to execute that issue.
 4. Remain sequential. Do not invoke `develop` more than once at a time.
 
