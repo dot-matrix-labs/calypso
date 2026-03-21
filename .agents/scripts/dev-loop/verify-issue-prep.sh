@@ -43,6 +43,11 @@ if [[ -z "$PR_NUMBER" || "$PR_NUMBER" == "null" ]]; then
   reasons="$(jq -c '. + ["pr-missing"]' <<<"$reasons")"
 fi
 
+if [[ "$MAIN_FRESH" != "true" ]]; then
+  ok=false
+  reasons="$(jq -c '. + ["branch-not-based-on-latest-main"]' <<<"$reasons")"
+fi
+
 if [[ "$(git -C "$WORKTREE_PATH" branch --show-current)" != "$BRANCH_NAME" ]]; then
   ok=false
   reasons="$(jq -c '. + ["worktree-on-wrong-branch"]' <<<"$reasons")"

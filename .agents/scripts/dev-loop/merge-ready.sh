@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/common.sh"
 
 TARGET="${1:-}"
 PR_JSON="$("$SCRIPT_DIR/pr-status.sh" "$TARGET")"
+REBASE_JSON="$("$SCRIPT_DIR/needs-rebase.sh" "$TARGET")"
 
 reasons='[]'
 ready=true
@@ -31,12 +32,19 @@ if [[ "$(jq -r '.mergeable' <<<"$PR_JSON")" != "MERGEABLE" ]]; then
   reasons="$(jq -c '. + ["pr-not-mergeable"]' <<<"$reasons")"
 fi
 
+if [[ "$(jq -r '.needs_rebase' <<<"$REBASE_JSON")" == "true" ]]; then
+  ready=false
+  reasons="$(jq -c '. + ["branch-behind-origin-main"]' <<<"$reasons")"
+fi
+
 jq -n \
   --argjson pr "$PR_JSON" \
+  --argjson rebase "$REBASE_JSON" \
   --argjson ready "$ready" \
   --argjson reasons "$reasons" \
   '{
     ready: $ready,
     reasons: $reasons,
-    pr: $pr
+    pr: $pr,
+    rebase: $rebase
   }'

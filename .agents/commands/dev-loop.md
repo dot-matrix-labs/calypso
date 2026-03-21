@@ -30,8 +30,11 @@ Repeat this loop:
 Preferred entrypoint:
 
 ```bash
-.agents/scripts/dev-loop/select-next-work.sh
+.agents/scripts/dev-loop/run.sh
 ```
+
+`run.sh` is the deterministic loop tick. Re-run it after each merged issue until it
+returns `kind: "none"` or an external blocker remains.
 
 Priority rules:
 
@@ -54,6 +57,7 @@ Preparation must prove all of the following:
 - the branch exists on the remote
 - the branch tracks the remote
 - a PR exists for the issue
+- if needed, prep may create an empty bootstrap commit so the PR can exist before implementation begins
 - new issue branches are created from the latest `origin/main`
 
 If preparation verification fails, fix preparation first. Do not begin implementation until prep is valid.
@@ -69,6 +73,7 @@ For the selected issue or its PR:
    - `.agents/scripts/dev-loop/pr-status.sh`
    - `.agents/scripts/dev-loop/issue-status.sh`
    - `.agents/scripts/dev-loop/remote-branch-status.sh`
+   - `.agents/scripts/dev-loop/needs-rebase.sh`
    - `.agents/scripts/dev-loop/merge-ready.sh`
 4. Use the `develop` skill to execute the selected issue in its dedicated worktree.
 5. Keep the development thread on that issue until:
@@ -81,7 +86,7 @@ For the selected issue or its PR:
    - fix failing tests or CI
    - complete remaining acceptance criteria
    - update issue checklist and stage when work is complete
-   - rebase or resolve conflicts if needed
+   - rebase onto the latest `origin/main` if deterministic checks require it
    - mark the PR ready when repository gates allow it
    - merge when repository gates allow it
 7. Re-check status after each increment.
@@ -114,5 +119,6 @@ Do not stop merely because one pass finished. Stop only when:
 - If a selected issue has no branch/worktree/PR yet, create them deterministically before research begins.
 - If a PR is ready to merge, merge it before starting the next issue.
 - Development always starts from the latest `main` when a new issue branch is created.
+- Rebase when deterministic branch-state checks say the selected branch is behind `origin/main`.
 - If a selected issue is blocked by dependencies, choose the next eligible issue from the Plan order.
 - Keep issue checklists, PR bodies, and stage fields consistent with repository rules as you go.

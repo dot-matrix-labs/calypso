@@ -24,6 +24,7 @@ repository rules.
 
 ```bash
 .agents/scripts/dev-loop/pr-status.sh {pr-number}
+.agents/scripts/dev-loop/needs-rebase.sh {pr-number}
 .agents/scripts/dev-loop/merge-ready.sh {pr-number}
 .agents/scripts/dev-loop/mark-pr-ready.sh {pr-number}
 ```

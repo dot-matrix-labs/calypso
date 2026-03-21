@@ -2,134 +2,98 @@
 
 <!-- last-edited: 2026-03-21 -->
 
-You are an autonomous agent. Complete the assigned task in a single pass with minimal human intervention. Follow the curriculum below in order. Load only what the current phase requires.
+This repository uses a Plan-driven agent workflow. Shared agent assets live under
+`.agents/` and are the single source of truth for both Claude and Codex.
 
----
+## Shared Assets
 
-## Phase 1: Orient
+- `.agents/commands/` contains command entrypoints and orchestration guidance.
+- `.agents/skills/` contains focused LLM workflows.
+- `.agents/scripts/dev-loop/` contains deterministic helpers for selection, git,
+  issue, PR, CI, and merge state.
 
-1. Read `agent-context/index.md`. This is the full document graph and keyword index.
-2. Check the GitHub issues tracker for the current task. The Plan tracking issue lists work in batch order. Pick the next unstarted issue in the earliest open batch.
-3. If no task is assigned: ask the human what to build. This is the one acceptable reason to ask.
+Vendor-specific paths may symlink to those directories. Do not create divergent
+vendor-only copies of shared logic.
 
----
+## Operating Model
 
-## Phase 2: Select a Workflow
+- Work only on issues listed in the open `Plan` tracking issue.
+- Execute one Plan issue at a time.
+- Finish the selected issue through merge before starting the next issue.
+- Treat the Plan ordering as authoritative, even if lower-priority PRs already
+  exist.
+- Use deterministic repo scripts before reasoning about GitHub or git state.
 
-Based on the task, pick exactly one development workflow from `agent-context/development/`:
+## Default Entry Points
 
-| Task type | Workflow document |
-| --- | --- |
-| New feature or module | `development/development-standards.md` |
-| Hardening / security / resilience | `development/hardening.md` |
-| Writing documentation | `development/documentation-standard.md` |
-| Requirements gathering | `development/product-owner-interview.md` |
-| Project scaffold from zero | `init/scaffold-task.md` |
+- Use `dev-loop` for continuous Plan execution.
+- Use `develop` to carry one selected Plan issue from verified prep through merge.
+- Use `merge` only for deterministic merge actions on the current selected PR.
+- Use `feature` or `new-feature` only when a human is defining new planned work.
+- Use `replan` only when a human explicitly wants the Plan rewritten.
 
-Read the selected workflow document. Follow it as your primary instruction set.
+## Must Do
 
----
+- Select work from the Plan and nowhere else.
+- Verify branch, worktree, remote branch, and PR state before coding.
+- Create new issue branches from the latest `origin/main`.
+- Push regularly so CI reflects the current state of work.
+- Use deterministic readiness checks before marking ready or merging.
+- Keep issue checklists, PR body, and issue stage aligned with repository rules.
 
-## Phase 3: Load Implementation Context
+## Must Not Do
 
-1. Read the implementation document for the domain you are working in. Use the Task Routing table in `agent-context/index.md`.
-2. The implementation document contains the stack spec, package inventory, module structure, interfaces, patterns, and checklists.
-3. This is sufficient to write correct code. Stop here and begin work.
+- Do not start a second issue while one selected issue is active.
+- Do not begin implementation before deterministic prep passes.
+- Do not leave a selected issue half-finished for a human to close out.
+- Do not ask the human when the next step is obvious from the Plan, repo, CI,
+  issue, or blueprint context.
+- Do not treat open PRs outside the selected Plan issue as the next source of
+  truth.
 
----
+## Decision Policy
 
-## Phase 4: Shared Agent Assets
-
-The vendor-agnostic source of truth for reusable agent assets is:
-
-- `.agents/skills/` for skills
-- `.agents/commands/` for commands
-
-Vendor-specific entrypoints may symlink to those directories, but the content lives under `.agents/`.
-
----
-
-## Phase 5: CLI Mode
-
-When the work is about the CLI, load the shared agent skills from `.agents/skills/` before writing code.
-
-Treat the work as CLI-related if any of these are true:
-
-- The agent starts in `./cli`.
-- The request mentions `cli/` paths or files under `cli/`.
-- The request is explicitly about the Calypso CLI.
-
-For CLI work:
-
-- Use TDD. Write the test first.
-- Then write the minimal stub needed for the test to compile or run.
-- Then implement the behavior.
-- Push changes and wait for CI jobs to run before treating the work as complete.
-- Read only the skill or skills relevant to the task. Do not bulk-load every skill spec.
-
----
-
-## Phase 6: Decision Policy
-
-Proceed without asking the human when the next step is straightforward, low risk, and consistent with the current issue, PR, and plan.
+Proceed without asking clarifying questions when the next step is low risk and
+obvious from local context.
 
 If confidence is not high enough:
 
-1. Situate the work against the Plan tracking issue and the issue dependency order.
-2. Prefer the simplest path that keeps the current PR or selected issue aligned with the next planned work.
-3. If still uncertain, read the relevant parts of `calypso-blueprint/`.
-4. Only ask the human after those steps fail to produce a confident next action.
+1. Re-situate the work against the current Plan ordering and dependency state.
+2. Use deterministic scripts to inspect the selected issue, branch, PR, CI, and
+   merge state.
+3. Search the codebase for an analogous implementation.
+4. Read the relevant part of `calypso-blueprint/`.
+5. Ask the human only if the decision is still materially ambiguous.
 
-The default bias is forward progress, not clarification.
+The bias is toward forward progress.
 
----
+## CLI Mode
 
-## Phase 7: Deepen Context (Only When Needed)
+Treat work as CLI-related if any of these are true:
 
-If at any point during implementation you encounter uncertainty, do not ask the human immediately. Escalate context in this order:
+- the current working directory is `./cli`
+- the task mentions `cli/` paths
+- the task is explicitly about the Calypso CLI
 
-```text
-CONFIDENCE CHECK
-  Can I resolve this from the implementation document?
-    YES -> continue working.
-    NO  -> proceed to step 1 below.
+For CLI work:
 
-1. Read the keyword index in agent-context/index.md.
-2. Identify the blueprint(s) whose keywords match your uncertainty.
-3. Read the relevant blueprint section, not the full document.
-4. Apply what you learned. Return to implementation.
-
-Still uncertain after reading the blueprint?
-5. Read agent-communication.md section "Document Precedence Rules".
-6. Search the codebase for analogous existing implementations.
-7. Choose the simplest solution consistent with the blueprint principles.
-
-Still blocked?
-8. Only now ask the human. State what you tried, what you found, and the specific decision you need made.
-```
-
-This is a context escalation loop, not a one-time decision. Most tasks should complete after loading implementation context.
-
----
+- use TDD
+- write the smallest viable increment
+- push and inspect CI before calling the work complete
+- load only the relevant shared skill or command, not every skill spec
 
 ## Commit Standards
 
-Read `agent-context/development/git-standards.md` before your first commit. Key rules:
+- Use conventional commits: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`,
+  or `security`.
+- Stage files explicitly by name. Never use `git add .`.
+- Never use `--no-verify`.
+- Run the relevant tests before committing.
 
-- Conventional commit format: `type: imperative summary`
-- Valid types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `security`
-- Stage files explicitly by name. Never run `git add .`
-- Never use `--no-verify`
-- All tests must pass before committing
+## Completion
 
----
+For Plan execution, stop only when one of these is true:
 
-## Rules
-
-- Autonomy first. Do not ask the human for help unless you have exhausted the context escalation loop.
-- Prefer a low-risk forward step over a clarification question when the likely answer is obvious from local context.
-- Minimal context loading. Do not read documents speculatively.
-- Implementation docs before blueprints. Blueprints explain why; implementation docs tell you what to build.
-- One workflow per session. Pick one workflow document and follow it to completion.
-- Follow documented patterns exactly. Do not invent alternatives when an implementation document already provides one.
-- Update docs you contradict. If implementation must deviate from a documented pattern, update the document before committing.
+- there is no remaining eligible open issue in the Plan
+- progress is blocked by an external constraint that cannot be resolved from the
+  repo, GitHub state, Plan, or blueprint context

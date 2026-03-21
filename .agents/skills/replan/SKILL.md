@@ -1,14 +1,14 @@
 ---
 name: replan
-description: Read the Plan tracking issue and all open issues, build a dependency map, reprioritize by technical risk and unblocked status, and rewrite the Plan for confident sequential execution.
+description: Read the Plan tracking issue and all planned issues, build a dependency map, reprioritize for sequential execution, and rewrite the Plan without human confirmation loops.
 user_invocable: true
 ---
 
 # Replan
 
-Read the current plan and all open issues, evaluate dependencies and technical risk,
-and rewrite the plan with work grouped into sequenced batches for one-at-a-time execution. Update
-each issue's Dependencies section with accurate dependents.
+Read the current Plan and the issues referenced by it, evaluate dependencies and
+technical risk, and rewrite the Plan for one-at-a-time execution. Update each
+planned issue's Dependencies and Dependents sections to match the new ordering.
 
 Prefer decisions that increase confidence for downstream sequential execution. When
 in doubt, keep execution sequential.
@@ -17,8 +17,8 @@ in doubt, keep execution sequential.
 
 The user provides: $ARGUMENTS
 
-$ARGUMENTS may contain a specific lens or constraint (e.g. "focus on the auth
-subsystem" or "exclude phase 3"). If empty, replan everything.
+$ARGUMENTS may contain a specific lens or constraint. If empty, replan the full
+current Plan.
 
 ---
 
@@ -32,7 +32,7 @@ TASKS_REPO=$(gh repo view --json nameWithOwner -q '(.owner.login) + "/" + (.name
 
 ---
 
-## Phase 1: Gather all open issues
+## Phase 1: Gather planned issues
 
 ### Step 1: Find the Plan tracking issue
 
@@ -51,21 +51,15 @@ gh issue view {plan-issue-number} --repo {tasks-repo} --json body -q .body
 Extract every issue reference (`#{number}`) from the plan body. These are the
 issues under active planning.
 
-### Step 3: Fetch all open issues in full
+### Step 3: Fetch all planned issues in full
 
-For each issue number found in the plan, and also:
-
-```bash
-gh issue list --repo {tasks-repo} --state open --json number,title,body --limit 100
-```
-
-Read the full body of every open issue:
+Read the full body of every issue referenced by the Plan:
 
 ```bash
 gh issue view {issue-number} --repo {tasks-repo} --json number,title,body,state -q '{number,title,body,state}'
 ```
 
-Build an in-memory map: `issue_number → { title, body, dependencies: [], dependents: [] }`.
+Build an in-memory map: `issue_number -> { title, body, dependencies: [], dependents: [] }`.
 
 ---
 
@@ -87,7 +81,7 @@ After parsing all issues:
 
 ## Phase 3: Assess technical risk
 
-For each open issue, score its **technical risk** from 1 (low) to 5 (high) based on:
+For each planned issue, score its **technical risk** from 1 (low) to 5 (high) based on:
 
 - **Cross-cutting concerns** — touches auth, data model, deployment, shared
   infrastructure, or core abstractions → higher risk
@@ -184,8 +178,7 @@ not, prepend the appropriate prefix based on the issue content.
 gh issue edit {issue-number} --repo {tasks-repo} --title "{new-title}"
 ```
 
-Only update the title if it actually changes. Show the user what will change before
-editing.
+Only update the title if it actually changes.
 
 ### Step 3: Apply batch label and remove stale batch labels
 
@@ -204,10 +197,10 @@ If an issue has moved batches since the last replan, note this in the Phase 7 re
 
 ---
 
-## Phase 7: Update issue bodies with accurate dependents
+## Phase 6: Update issue bodies with accurate dependents
 
-For each issue where the **Dependents** list has changed (issues that depend on this
-one), update the issue body.
+For each planned issue where the **Dependents** list has changed, update the
+issue body.
 
 Add or update a **Dependents** section immediately after the Dependencies section:
 
@@ -237,12 +230,12 @@ gh issue edit {issue-number} --repo {tasks-repo} --body "{updated body}"
 **IMPORTANT:**
 - Preserve all existing sections — only add or update the Dependents section.
 - Do NOT change the title, Stage, Acceptance criteria, Test plan, or any other section. Title changes happen in Phase 5.
-- Show the user a diff of what will change for each issue before editing.
-- Ask for confirmation before applying any edits.
+- Apply edits directly when the new dependency graph is clear.
+- Summarize the changes after editing instead of asking for confirmation first.
 
 ---
 
-## Phase 8: Rewrite the Plan tracking issue
+## Phase 7: Rewrite the Plan tracking issue
 
 Rewrite the Plan tracking issue body with the new batch structure. The new format:
 

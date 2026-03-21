@@ -13,6 +13,7 @@ GitHub or git state.
 - Select only from the Plan tracking issue.
 - Prepare the issue deterministically before implementation begins.
 - Use the verified worktree, branch, remote branch, and PR only.
+- Allow prep to create a bootstrap empty commit if that is required to open the PR.
 - Invoke the implementation skill only after prep is valid.
 - Keep the issue thread active until the PR is merged or externally blocked.
 
@@ -28,7 +29,7 @@ GitHub or git state.
 1. Select the issue:
 
 ```bash
-.agents/scripts/dev-loop/plan-next-issue.sh
+.agents/scripts/dev-loop/select-next-work.sh
 ```
 
 2. Prepare and verify the issue:

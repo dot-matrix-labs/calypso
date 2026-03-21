@@ -23,6 +23,7 @@ PR_JSON="$(gh pr list --repo "$REPO" --state open --json number,title,body,headR
 created_branch=false
 created_pr=false
 pushed_branch=false
+created_bootstrap_commit=false
 
 git fetch origin main >/dev/null 2>&1
 
@@ -53,6 +54,12 @@ if ! git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; th
 fi
 
 if [[ -z "$PR_JSON" || "$PR_JSON" == "null" ]]; then
+  ahead_of_main="$(git -C "$WORKTREE_PATH" rev-list --count "origin/main..HEAD" 2>/dev/null || printf '0')"
+  if [[ "$ahead_of_main" == "0" ]]; then
+    git -C "$WORKTREE_PATH" commit --allow-empty -m "chore: initialize issue #$ISSUE_NUMBER worktree" >/dev/null
+    git -C "$WORKTREE_PATH" push origin "$BRANCH_NAME" >/dev/null
+    created_bootstrap_commit=true
+  fi
   pr_url="$(gh pr create --repo "$REPO" --base main --head "$BRANCH_NAME" --draft --title "$ISSUE_TITLE" --body "Closes #$ISSUE_NUMBER")"
   PR_JSON="$(gh pr view "$BRANCH_NAME" --repo "$REPO" --json number,title,body,headRefName,url,isDraft)"
   created_pr=true
@@ -70,6 +77,7 @@ jq -n \
   --argjson branch_status "$BRANCH_STATUS" \
   --argjson created_branch "$created_branch" \
   --argjson pushed_branch "$pushed_branch" \
+  --argjson created_bootstrap_commit "$created_bootstrap_commit" \
   --argjson created_pr "$created_pr" \
   '{
     issue: $issue,
@@ -85,6 +93,7 @@ jq -n \
     prep_actions: {
       created_branch: $created_branch,
       pushed_branch: $pushed_branch,
+      created_bootstrap_commit: $created_bootstrap_commit,
       created_pr: $created_pr
     }
   }'

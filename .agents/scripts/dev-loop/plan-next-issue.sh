@@ -17,8 +17,6 @@ PLAN_BODY="$(gh issue view "$(jq -r '.number' <<<"$PLAN_JSON")" --repo "$REPO" -
 
 mapfile -t plan_issue_numbers < <(printf '%s\n' "$PLAN_BODY" | extract_issue_refs)
 
-OPEN_PRS_JSON="$(gh pr list --repo "$(canonical_repo)" --state open --json number,body)"
-
 for issue_number in "${plan_issue_numbers[@]}"; do
   [[ -n "$issue_number" ]] || continue
 
@@ -30,18 +28,20 @@ for issue_number in "${plan_issue_numbers[@]}"; do
     continue
   fi
 
-  has_open_pr="$(jq -r --arg issue "$issue_number" '
-    map(select((.body | split("\n"))[]? | test("^(Closes|Fixes|Resolves) #" + $issue + "$"; "i"))) | length > 0
-  ' <<<"$OPEN_PRS_JSON")"
+  pr_json="$(gh pr list --repo "$(canonical_repo)" --state open --json number,title,body,headRefName,isDraft,url \
+    --jq 'map(select((.body | split("\n"))[]? | test("^(Closes|Fixes|Resolves) #'$issue_number'$"; "i"))) | .[0]')"
 
-  if [[ "$has_open_pr" == "true" ]]; then
-    continue
-  fi
-
-  jq -n --argjson issue "$issue_json" '{
+  jq -n --argjson issue "$issue_json" --argjson pr "${pr_json:-null}" '{
     kind: "issue",
     reason: "next-plan-issue",
-    issue: $issue
+    issue: $issue,
+    pr: (if $pr == null then null else {
+      number: $pr.number,
+      title: $pr.title,
+      url: $pr.url,
+      head_ref: $pr.headRefName,
+      is_draft: $pr.isDraft
+    } end)
   }'
   exit 0
 done

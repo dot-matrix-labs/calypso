@@ -16,6 +16,7 @@ Before invoking this skill, the caller must already have:
 - selected the issue from the Plan
 - prepared the issue with deterministic scripts
 - verified the worktree, branch, remote tracking, and PR
+- accepted any prep-created bootstrap commit as part of PR initialization
 
 Use these scripts as the source of truth:
 
@@ -24,6 +25,8 @@ Use these scripts as the source of truth:
 .agents/scripts/dev-loop/pr-status.sh {pr-number}
 .agents/scripts/dev-loop/issue-status.sh {issue-number}
 .agents/scripts/dev-loop/remote-branch-status.sh {branch-name}
+.agents/scripts/dev-loop/needs-rebase.sh {pr-number}
+.agents/scripts/dev-loop/rebase-issue-branch.sh {pr-number}
 .agents/scripts/dev-loop/merge-ready.sh {pr-number}
 ```
 
@@ -33,6 +36,7 @@ Use these scripts as the source of truth:
 - Implement acceptance criteria and test plan items in small increments.
 - Push regularly so CI stays current.
 - Resolve CI, mergeability, and checklist problems as they appear.
+- Rebase the selected branch when deterministic checks say it is behind `origin/main`.
 - Mark the PR ready and merge it when deterministic checks allow it.
 - Confirm the linked issue closes after merge.
 
@@ -52,12 +56,13 @@ Use these scripts as the source of truth:
    - PR status
    - issue checklist state
    - remote branch state
-5. Fix CI or mergeability issues immediately when they appear.
-6. Update issue checklist items and stage when implementation evidence supports it.
-7. When `merge-ready.sh` says the PR is ready:
+5. If `needs-rebase.sh` says the branch is behind `origin/main`, run `rebase-issue-branch.sh` and push.
+6. Fix CI or mergeability issues immediately when they appear.
+7. Update issue checklist items and stage when implementation evidence supports it.
+8. When `merge-ready.sh` says the PR is ready:
    - run `mark-pr-ready.sh`
    - run `merge-pr.sh`
-8. Confirm the issue is closed.
+9. Confirm the issue is closed.
 
 ## Stop only when
 
