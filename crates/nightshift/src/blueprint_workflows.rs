@@ -72,6 +72,11 @@ impl BlueprintWorkflowLibrary {
     pub fn parse(yaml: &str) -> Result<BlueprintWorkflow, serde_yaml::Error> {
         serde_yaml::from_str(yaml)
     }
+
+    /// Parse raw YAML bytes into a [`BlueprintWorkflow`].
+    pub fn parse_bytes(yaml: &[u8]) -> Result<BlueprintWorkflow, serde_yaml::Error> {
+        serde_yaml::from_slice(yaml)
+    }
 }
 
 // ── Top-level document ───────────────────────────────────────────────────────

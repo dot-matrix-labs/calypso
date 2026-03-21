@@ -162,6 +162,25 @@ pub fn run_structural_audit() -> StateMachineAudit {
     StateMachineAudit { findings }
 }
 
+/// Parse and audit a single workflow YAML document as an isolated graph root.
+pub fn audit_workflow_yaml(yaml: &str) -> Result<StateMachineAudit, serde_yaml::Error> {
+    let workflow: BlueprintWorkflow = serde_yaml::from_str(yaml)?;
+    Ok(audit_single_workflow_graph(&workflow))
+}
+
+/// Audit a single parsed workflow as an isolated graph root.
+pub fn audit_single_workflow_graph(workflow: &BlueprintWorkflow) -> StateMachineAudit {
+    let mut findings = Vec::new();
+    let mut workflows = BTreeMap::new();
+    let root_name = workflow
+        .name
+        .clone()
+        .unwrap_or_else(|| "fuzz-workflow".to_string());
+    workflows.insert(root_name.clone(), workflow.clone());
+    audit_workflow_graph(&[root_name.as_str()], &workflows, &mut findings);
+    StateMachineAudit { findings }
+}
+
 /// Returns the names of all top-level entry point workflows — those that are
 /// not exclusively used as sub-workflows by other workflows.
 fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&str> {
