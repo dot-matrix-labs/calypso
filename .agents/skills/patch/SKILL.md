@@ -1,7 +1,7 @@
 ---
 name: patch
 description: Extract off-topic changes from the current branch into their own issue, branch, worktree, and PR. No clarifications asked — all naming and scoping judgements are made autonomously.
-user_invocable: true
+user_invocable: false
 ---
 
 # Patch

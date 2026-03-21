@@ -1,7 +1,7 @@
 ---
 name: pr-sync
 description: Keep one issue-linked PR aligned with repository rules using deterministic checks.
-user_invocable: true
+user_invocable: false
 ---
 
 # PR Sync
@@ -25,8 +25,8 @@ repository rules.
 ## Deterministic helpers
 
 ```bash
-.agents/scripts/dev-loop/pr-status.sh {pr-number}
-.agents/scripts/dev-loop/needs-rebase.sh {pr-number}
-.agents/scripts/dev-loop/merge-ready.sh {pr-number}
-.agents/scripts/dev-loop/mark-pr-ready.sh {pr-number}
+.agents/scripts/auto/pr-status.sh {pr-number}
+.agents/scripts/auto/needs-rebase.sh {pr-number}
+.agents/scripts/auto/merge-ready.sh {pr-number}
+.agents/scripts/auto/mark-pr-ready.sh {pr-number}
 ```

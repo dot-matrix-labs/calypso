@@ -1,7 +1,7 @@
 ---
 name: develop-issue
 description: Implement one already-selected, already-prepared issue in its verified worktree and own it through merge.
-user_invocable: true
+user_invocable: false
 ---
 
 # Develop Issue
@@ -21,13 +21,13 @@ Before invoking this skill, the caller must already have:
 Use these scripts as the source of truth:
 
 ```bash
-.agents/scripts/dev-loop/verify-issue-prep.sh {issue-number}
-.agents/scripts/dev-loop/pr-status.sh {pr-number}
-.agents/scripts/dev-loop/issue-status.sh {issue-number}
-.agents/scripts/dev-loop/remote-branch-status.sh {branch-name}
-.agents/scripts/dev-loop/needs-rebase.sh {pr-number}
-.agents/scripts/dev-loop/rebase-issue-branch.sh {pr-number}
-.agents/scripts/dev-loop/merge-ready.sh {pr-number}
+.agents/scripts/auto/verify-issue-prep.sh {issue-number}
+.agents/scripts/auto/pr-status.sh {pr-number}
+.agents/scripts/auto/issue-status.sh {issue-number}
+.agents/scripts/auto/remote-branch-status.sh {branch-name}
+.agents/scripts/auto/needs-rebase.sh {pr-number}
+.agents/scripts/auto/rebase-issue-branch.sh {pr-number}
+.agents/scripts/auto/merge-ready.sh {pr-number}
 ```
 
 ## Must do

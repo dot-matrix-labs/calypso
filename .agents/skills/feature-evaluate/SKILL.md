@@ -1,7 +1,7 @@
 ---
 name: feature-evaluate
 description: Evaluate a feature request against PRD, blueprint, duplicates, and the current Plan, then emit structured issue JSON.
-user_invocable: true
+user_invocable: false
 ---
 
 # Feature Evaluate

@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 input="$(cat)"
 prompt="$(jq -r '.prompt // ""' <<<"$input")"
 
-if [[ ! "$prompt" =~ (^|[[:space:]/-])(feature|new-feature)($|[[:space:]]) ]]; then
+if [[ ! "$prompt" =~ (^|[[:space:]/-])(feature|calypso-feature)($|[[:space:]]) ]]; then
   exit 0
 fi
 

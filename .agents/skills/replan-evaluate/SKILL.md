@@ -1,7 +1,7 @@
 ---
 name: replan-evaluate
 description: Evaluate compliant planned issues for dependency order, code coupling, and technical risk, then emit structured sequential plan JSON.
-user_invocable: true
+user_invocable: false
 ---
 
 # Replan Evaluate

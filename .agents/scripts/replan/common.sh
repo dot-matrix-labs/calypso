@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=.agents/scripts/dev-loop/common.sh
-source "$SCRIPT_DIR/../dev-loop/common.sh"
+# shellcheck source=.agents/scripts/auto/common.sh
+source "$SCRIPT_DIR/../auto/common.sh"
 
 find_plan_issue() {
   gh issue list --repo "$(tasks_repo)" --state open --json number,title,url \

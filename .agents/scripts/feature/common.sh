@@ -2,8 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=.agents/scripts/dev-loop/common.sh
-source "$SCRIPT_DIR/../dev-loop/common.sh"
+# shellcheck source=.agents/scripts/auto/common.sh
+source "$SCRIPT_DIR/../auto/common.sh"
 
 feature_request_file_usage() {
   printf 'expected a JSON file with keys: name, motivation, intended_experience, constraints\n' >&2

@@ -1,7 +1,7 @@
 ---
 name: merge
 description: Merge one ready PR using deterministic readiness checks and repository rules.
-user_invocable: true
+user_invocable: false
 ---
 
 # Merge
@@ -11,9 +11,9 @@ Merge one ready PR. Use deterministic scripts for readiness and merge actions.
 ## Deterministic helpers
 
 ```bash
-.agents/scripts/dev-loop/merge-ready.sh {pr-number}
-.agents/scripts/dev-loop/mark-pr-ready.sh {pr-number}
-.agents/scripts/dev-loop/merge-pr.sh {pr-number}
+.agents/scripts/auto/merge-ready.sh {pr-number}
+.agents/scripts/auto/mark-pr-ready.sh {pr-number}
+.agents/scripts/auto/merge-pr.sh {pr-number}
 ```
 
 ## Must do
@@ -26,7 +26,7 @@ Merge one ready PR. Use deterministic scripts for readiness and merge actions.
 
 - Do not merge on intuition.
 - Do not bypass CI or checklist gates.
-- Do not use this skill to choose work ordering; that belongs to `dev-loop`.
+- Do not use this skill to choose work ordering; that belongs to `auto`.
 
 ## Stop only when
 

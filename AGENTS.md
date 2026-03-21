@@ -9,7 +9,7 @@ This repository uses a Plan-driven agent workflow. Shared agent assets live unde
 
 - `.agents/commands/` contains command entrypoints and orchestration guidance.
 - `.agents/skills/` contains focused LLM workflows.
-- `.agents/scripts/dev-loop/` contains deterministic helpers for selection, git,
+- `.agents/scripts/auto/` contains deterministic helpers for selection, git,
   issue, PR, CI, and merge state.
 
 Vendor-specific paths may symlink to those directories. Do not create divergent
@@ -26,11 +26,14 @@ vendor-only copies of shared logic.
 
 ## Default Entry Points
 
-- Use `dev-loop` for continuous Plan execution.
-- Use `develop` to carry one selected Plan issue from verified prep through merge.
-- Use `merge` only for deterministic merge actions on the current selected PR.
-- Use `feature` or `new-feature` as the command flow for new planned work.
-- Use `replan` as the command for compliance auditing plus Plan rewriting.
+- Use `calypso-auto` for continuous Plan execution.
+- Use `calypso-develop` to carry one selected Plan issue from verified prep through merge.
+- Use `calypso-merge` only for deterministic merge actions on the current selected PR.
+- Use `calypso-feature` as the command flow for new planned work.
+- Use `calypso-replan` as the command for compliance auditing plus Plan rewriting.
+
+Skills under `.agents/skills/` are internal implementation details. Enter through
+commands, not skills.
 
 ## Must Do
 
