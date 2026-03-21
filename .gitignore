@@ -1,3 +1,7 @@
 # LLVM coverage profiling data
 *.profraw
+.agents/worktrees/
+.claude/*
+!.claude/settings.json
+!.claude/skills/
 target/
