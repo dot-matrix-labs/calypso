@@ -4,8 +4,8 @@
 //! data model and text rendering logic; no terminal UI (crossterm) dependencies.
 
 use crate::state::{
-    AgentSessionStatus, EvidenceStatus, FeatureState, GateGroupStatus,
-    GateStatus, GithubMergeability, GithubReviewStatus, WorkflowState,
+    AgentSessionStatus, EvidenceStatus, FeatureState, GateGroupStatus, GateStatus,
+    GithubMergeability, GithubReviewStatus, WorkflowState,
 };
 
 // ── Public types ────────────────────────────────────────────────────────────

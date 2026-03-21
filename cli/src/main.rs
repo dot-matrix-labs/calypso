@@ -10,9 +10,9 @@ use calypso_cli::init::{
     HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
     render_init_status, run_init_interactive, run_init_step,
 };
+use calypso_cli::operator_surface::OperatorSurface;
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
-use calypso_cli::operator_surface::OperatorSurface;
 use calypso_cli::{BuildInfo, render_help, render_version};
 
 fn build_info() -> BuildInfo<'static> {
@@ -77,9 +77,7 @@ fn main() {
             }
         },
         [command, flag, path] if command == "status" && flag == "--state" => render_status(path),
-        [command, flag, path, _headless]
-            if command == "status" && flag == "--state" =>
-        {
+        [command, flag, path, _headless] if command == "status" && flag == "--state" => {
             render_status(path)
         }
         // calypso dev-status [--json]

@@ -12,6 +12,7 @@ pub mod github;
 pub mod headless;
 pub mod init;
 pub mod interpreter;
+pub mod operator_surface;
 pub mod pinned_prompt;
 pub mod policy;
 pub mod pr_checklist;
@@ -22,7 +23,6 @@ pub mod sm_audit;
 pub mod state;
 pub mod telemetry;
 pub mod template;
-pub mod operator_surface;
 pub mod webview;
 pub mod workflows;
 
