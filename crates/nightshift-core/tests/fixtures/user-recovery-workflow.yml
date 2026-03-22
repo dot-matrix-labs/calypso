@@ -1,0 +1,25 @@
+# User-authored recovery workflow — used in acceptance tests
+name: recovery-loop
+initial_state: scan
+
+states:
+  - name: scan
+    action: agent
+    on_success: check
+    on_failure: error
+
+  - name: check
+    action: builtin
+    builtin: builtin.git.is_main_compatible
+    on_pass: done
+    on_fail: retry
+
+  - name: retry
+    action: loop
+    target: scan
+
+  - name: done
+    action: terminal
+
+  - name: error
+    action: terminal

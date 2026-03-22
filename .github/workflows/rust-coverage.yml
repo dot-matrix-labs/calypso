@@ -46,7 +46,7 @@ jobs:
           submodules: false
       - name: Init submodules (non-recursive)
         if: needs.changes.outputs.coverage_needed == 'true'
-        run: git submodule update --init
+        run: git submodule update --init calypso-blueprint
 
       - name: Set up Rust
         if: needs.changes.outputs.coverage_needed == 'true'

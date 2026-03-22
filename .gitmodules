@@ -3,5 +3,5 @@
 	url = https://github.com/dot-matrix-labs/calypso-blueprint
 [submodule ".agents"]
 	path = .agents
-	url = git@github-lucky:dot-matrix-labs/calypso-agents.git
+	url = https://github.com/dot-matrix-labs/calypso-agents
 	branch = main

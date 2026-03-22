@@ -35,7 +35,7 @@ jobs:
           submodules: false
           fetch-depth: 0
       - name: Init submodules (non-recursive)
-        run: git submodule update --init
+        run: git submodule update --init calypso-blueprint
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -101,7 +101,7 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Init submodules (non-recursive)
-        run: git submodule update --init
+        run: git submodule update --init calypso-blueprint
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4

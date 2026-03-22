@@ -74,7 +74,7 @@ jobs:
           submodules: false
       - name: Init submodules (non-recursive)
         if: needs.changes.outputs.rust_relevant == 'true'
-        run: git submodule update --init
+        run: git submodule update --init calypso-blueprint
 
       - name: Set up Rust
         # Tests are expected to pass on the current stable toolchain even while
