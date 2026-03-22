@@ -27,7 +27,6 @@ Input should come from the deterministic replan scripts, especially:
 
 ## Must not do
 
-- Do not plan parallel work.
 - Do not emit phase, batch, or step metadata for issue titles or issue bodies.
 - Do not invent issue facts not grounded in the provided payload.
 - Do not emit free-form markdown as the primary output.
@@ -46,10 +45,22 @@ Emit JSON with this shape:
       "risk": 4,
       "rationale": "Cross-cutting CLI architecture removal touches many commands.",
       "dependencies": [],
-      "dependents": [201]
+      "dependents": [201],
+      "parallel_safe": true
     }
   ]
 }
 ```
 
 `ordered_issues` must be a strict total order with no parallel groups.
+
+### `parallel_safe` field
+
+Each issue must include a `parallel_safe` boolean. An issue is `parallel_safe: true`
+when its `dependencies` array is empty or contains only issues that are already
+CLOSED at replan time. Issues whose dependencies include any OPEN issue that
+appears earlier in the ordering are `parallel_safe: false`.
+
+This annotation is informational only. Merge ordering still follows the strict
+total order. The annotation tells tooling which issues could be safely developed
+concurrently without merge conflicts or integration risk.
