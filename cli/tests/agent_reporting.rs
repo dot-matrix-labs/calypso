@@ -270,6 +270,8 @@ fn repo_state_with_sessions(sessions: Vec<AgentSession>) -> RepositoryState {
         providers: vec![],
         releases: vec![],
         deployments: vec![],
+        github_auth_ref: None,
+        secure_key_refs: vec![],
     }
 }
 

@@ -1,8 +1,9 @@
 use calypso_cli::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
     run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
-    run_state_status_json, run_state_status_plain, run_status, run_workflows_list,
-    run_workflows_show, run_workflows_validate,
+    run_keys_list, run_keys_list_json, run_keys_revoke, run_keys_rotate, run_state_status_json,
+    run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
+    run_workflows_validate,
 };
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
@@ -285,6 +286,47 @@ fn main() {
                 Ok(message) => println!("{message}"),
                 Err(error) => {
                     eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // calypso keys list [--json]
+        [command, subcommand] if command == "keys" && subcommand == "list" => {
+            match run_keys_list(&cwd) {
+                Ok(output) => println!("{output}"),
+                Err(error) => {
+                    eprintln!("keys list error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        [command, subcommand, flag]
+            if command == "keys" && subcommand == "list" && flag == "--json" =>
+        {
+            match run_keys_list_json(&cwd) {
+                Ok(json) => println!("{json}"),
+                Err(error) => {
+                    eprintln!("keys list error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // calypso keys rotate <name>
+        [command, subcommand, name] if command == "keys" && subcommand == "rotate" => {
+            match run_keys_rotate(&cwd, name) {
+                Ok(output) => println!("{output}"),
+                Err(error) => {
+                    eprintln!("keys rotate error: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        // calypso keys revoke <name>
+        [command, subcommand, name] if command == "keys" && subcommand == "revoke" => {
+            match run_keys_revoke(&cwd, name) {
+                Ok(output) => println!("{output}"),
+                Err(error) => {
+                    eprintln!("keys revoke error: {error}");
                     std::process::exit(1);
                 }
             }
