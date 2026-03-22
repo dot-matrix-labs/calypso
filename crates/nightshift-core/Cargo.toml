@@ -13,6 +13,9 @@ serde_yaml = "0.9"
 chrono = "0.4"
 cron = "0.12"
 
+[dev-dependencies]
+proptest = "1"
+
 [lib]
 name = "nightshift_core"
 path = "src/lib.rs"
