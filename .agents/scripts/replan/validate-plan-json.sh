@@ -31,9 +31,10 @@ if jq -e '
     or (.rationale == null)
     or ((.dependencies // []) | type != "array")
     or ((.dependents // []) | type != "array")
+    or (has("parallel_safe") and ((.parallel_safe | type) != "boolean"))
   )
 ' "$PLAN_FILE" >/dev/null; then
-  printf 'invalid plan json: ordered issue is missing required fields\n' >&2
+  printf 'invalid plan json: ordered issue is missing required fields or has invalid parallel_safe type\n' >&2
   exit 4
 fi
 

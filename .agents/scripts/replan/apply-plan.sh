@@ -20,7 +20,10 @@ body="$(jq -r '
     "",
     "> Last replanned: " + (now | todateiso8601 | split("T")[0]),
     "",
-    (.ordered_issues[] | "- #" + (.number|tostring) + " - " + .title + " [risk: " + (.risk|tostring) + "]")
+    (.ordered_issues[] |
+      "- #" + (.number|tostring) + " - " + .title + " [risk: " + (.risk|tostring) + "]"
+      + (if .parallel_safe == true then " ⊜" else "" end)
+    )
   ] | join("\n")
 ' "$PLAN_FILE")"
 

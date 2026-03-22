@@ -61,8 +61,29 @@ Use these scripts as the source of truth:
 7. Update issue checklist items and stage when implementation evidence supports it.
 8. When `merge-ready.sh` says the PR is ready:
    - run `mark-pr-ready.sh`
+   - perform integration handoff (see below)
    - run `merge-pr.sh`
 9. Confirm the issue is closed.
+
+## Integration handoff
+
+Before merging, identify the next issue in Plan order (N+1). If it exists and is
+OPEN, post a comment on it that includes:
+
+- What files and modules changed in this PR
+- Any new or modified public APIs, type signatures, or module boundaries
+- Import path changes
+- Anything the N+1 issue scope would need to be aware of
+
+To find the next issue:
+
+1. Read the Plan tracking issue from the tasks repo.
+2. Extract the ordered issue numbers.
+3. Find the current issue's position.
+4. If there is a subsequent issue, fetch its state.
+5. If it is OPEN, post the handoff comment.
+
+Skip the handoff if there is no next issue or the next issue is already CLOSED.
 
 ## Stop only when
 

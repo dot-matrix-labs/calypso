@@ -124,9 +124,34 @@ Do not stop merely because one pass finished. Stop only when:
 
 When blocked or ambiguous, report the diagnosis from `run.sh` back to the user.
 
+## Merge ordering and Plan position
+
+`merge-ready.sh` enforces Plan position at merge time. A PR can only merge when
+all preceding issues in the Plan are CLOSED. If a predecessor is still OPEN, the
+reason `plan-predecessor-not-merged` is returned and the merge is blocked.
+
+This means development can proceed on any eligible issue, but merges always
+happen in strict Plan order.
+
+## Integration handoff
+
+Before merging an issue, the `develop-issue` skill performs an integration
+handoff: it reads the next issue in Plan order (N+1) and, if that issue is OPEN,
+posts a comment on it summarizing files changed, new APIs, import path changes,
+and anything the next issue needs to know.
+
+## Parallel eligibility
+
+Use `.agents/scripts/auto/parallel-eligible.sh` to identify issues that could
+safely be developed alongside the currently selected issue. An issue is eligible
+for parallel development when all of its dependencies are already CLOSED.
+
+Issues marked with the `parallel_safe` annotation in the Plan (shown as a marker
+in the Plan body) were identified at replan time as having no open dependencies.
+
 ## Progress rules
 
-- Sequential execution is mandatory.
+- Sequential execution is mandatory for merging; parallel development is informational only.
 - Always prefer the smallest unblocker over speculative refactoring.
 - Clean up stale managed worktrees for merged PR branches before selection.
 - If a selected issue has no branch/worktree/PR yet, create them deterministically before research begins.
