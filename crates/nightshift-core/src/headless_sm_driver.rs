@@ -158,6 +158,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
     ) -> ExitReason {
         let mut current_state = self.sm.initial_state.clone();
         let mut steps_taken: usize = 0;
+        let mut iteration: usize = 0;
 
         logger
             .entry(LogLevel::Info, "headless sm driver starting")
@@ -168,6 +169,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
             .emit();
 
         loop {
+            iteration += 1;
+
             // Guard: step limit
             if steps_taken >= self.max_steps {
                 let reason = ExitReason::StepLimitReached {
@@ -178,6 +181,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     .component(Component::StateMachine)
                     .event(LogEvent::Shutdown)
                     .field("state", &current_state)
+                    .field("step", steps_taken.to_string())
+                    .field("iteration", iteration.to_string())
                     .field("max_steps", self.max_steps.to_string())
                     .field("exit_reason", "step_limit_reached")
                     .emit();
@@ -197,6 +202,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     .component(Component::Cli)
                     .event(LogEvent::Shutdown)
                     .field("state", &current_state)
+                    .field("step", steps_taken.to_string())
+                    .field("iteration", iteration.to_string())
                     .field("signal", &signal_str)
                     .field("exit_reason", "interrupted")
                     .emit();
@@ -212,8 +219,10 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     logger
                         .entry(LogLevel::Error, &message)
                         .component(Component::StateMachine)
-                        .event(LogEvent::StateTransition)
+                        .event(LogEvent::StateEntered)
                         .field("state", &current_state)
+                        .field("step", steps_taken.to_string())
+                        .field("iteration", iteration.to_string())
                         .field("exit_reason", "error")
                         .emit();
                     return ExitReason::Error {
@@ -226,15 +235,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
             steps_taken += 1;
 
             logger
-                .entry(
-                    LogLevel::Debug,
-                    &format!("entering state '{current_state}'"),
-                )
+                .entry(LogLevel::Info, &format!("entering state '{current_state}'"))
                 .component(Component::StateMachine)
-                .event(LogEvent::StateTransition)
+                .event(LogEvent::StateEntered)
                 .field("state", &current_state)
                 .field("action", action_label(&state_def.action))
                 .field("step", steps_taken.to_string())
+                .field("iteration", iteration.to_string())
                 .emit();
 
             match &state_def.action {
@@ -247,6 +254,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
                         .component(Component::StateMachine)
                         .event(LogEvent::Shutdown)
                         .field("state", &current_state)
+                        .field("step", steps_taken.to_string())
+                        .field("iteration", iteration.to_string())
                         .field("exit_reason", "terminal")
                         .emit();
                     return ExitReason::Terminal {
@@ -258,14 +267,17 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     let next = target.clone();
                     logger
                         .entry(
-                            LogLevel::Debug,
+                            LogLevel::Info,
                             &format!("loop: '{current_state}' → '{next}'"),
                         )
                         .component(Component::StateMachine)
-                        .event(LogEvent::StateTransition)
+                        .event(LogEvent::TransitionSelected)
+                        .field("state", &current_state)
                         .field("from_state", &current_state)
                         .field("to_state", &next)
                         .field("transition", "loop")
+                        .field("step", steps_taken.to_string())
+                        .field("iteration", iteration.to_string())
                         .emit();
                     current_state = next;
                 }
@@ -280,14 +292,31 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             let next = on_success.clone();
                             logger
                                 .entry(
-                                    LogLevel::Debug,
+                                    LogLevel::Info,
                                     &format!("agent '{current_state}' succeeded → '{next}'"),
                                 )
                                 .component(Component::Agent)
-                                .event(LogEvent::AgentCompleted)
+                                .event(LogEvent::StepExecuted)
+                                .field("state", &current_state)
                                 .field("from_state", &current_state)
                                 .field("to_state", &next)
                                 .field("transition", "on_success")
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
+                                .emit();
+                            logger
+                                .entry(
+                                    LogLevel::Info,
+                                    &format!("transition: '{current_state}' →on_success→ '{next}'"),
+                                )
+                                .component(Component::StateMachine)
+                                .event(LogEvent::TransitionSelected)
+                                .field("state", &current_state)
+                                .field("from_state", &current_state)
+                                .field("to_state", &next)
+                                .field("transition", "on_success")
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .emit();
                             current_state = next;
                         }
@@ -299,11 +328,29 @@ impl<'sm> HeadlessSmDriver<'sm> {
                                     &format!("agent '{current_state}' failed → '{next}': {reason}"),
                                 )
                                 .component(Component::Agent)
-                                .event(LogEvent::AgentCompleted)
+                                .event(LogEvent::StepExecuted)
+                                .field("state", &current_state)
                                 .field("from_state", &current_state)
                                 .field("to_state", &next)
                                 .field("transition", "on_failure")
                                 .field("reason", &reason)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
+                                .emit();
+                            logger
+                                .entry(
+                                    LogLevel::Warn,
+                                    &format!("transition: '{current_state}' →on_failure→ '{next}'"),
+                                )
+                                .component(Component::StateMachine)
+                                .event(LogEvent::TransitionSelected)
+                                .field("state", &current_state)
+                                .field("from_state", &current_state)
+                                .field("to_state", &next)
+                                .field("transition", "on_failure")
+                                .field("reason", &reason)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .emit();
                             current_state = next;
                         }
@@ -314,8 +361,10 @@ impl<'sm> HeadlessSmDriver<'sm> {
                                     &format!("agent '{current_state}' fatal error: {error}"),
                                 )
                                 .component(Component::Agent)
-                                .event(LogEvent::AgentCompleted)
+                                .event(LogEvent::StepExecuted)
                                 .field("state", &current_state)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .field("exit_reason", "error")
                                 .field("error", &error)
                                 .emit();
@@ -338,15 +387,33 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             let next = on_pass.clone();
                             logger
                                 .entry(
-                                    LogLevel::Debug,
+                                    LogLevel::Info,
                                     &format!("builtin '{builtin}' passed → '{next}'"),
                                 )
                                 .component(Component::StateMachine)
-                                .event(LogEvent::StateTransition)
+                                .event(LogEvent::StepExecuted)
+                                .field("state", &current_state)
                                 .field("from_state", &current_state)
                                 .field("to_state", &next)
                                 .field("builtin", builtin)
                                 .field("transition", "on_pass")
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
+                                .emit();
+                            logger
+                                .entry(
+                                    LogLevel::Info,
+                                    &format!("transition: '{current_state}' →on_pass→ '{next}'"),
+                                )
+                                .component(Component::StateMachine)
+                                .event(LogEvent::TransitionSelected)
+                                .field("state", &current_state)
+                                .field("from_state", &current_state)
+                                .field("to_state", &next)
+                                .field("builtin", builtin)
+                                .field("transition", "on_pass")
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .emit();
                             current_state = next;
                         }
@@ -354,18 +421,37 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             let next = on_fail.clone();
                             logger
                                 .entry(
-                                    LogLevel::Debug,
+                                    LogLevel::Warn,
                                     &format!(
                                         "builtin '{builtin}' did not pass → '{next}': {reason}"
                                     ),
                                 )
                                 .component(Component::StateMachine)
-                                .event(LogEvent::StateTransition)
+                                .event(LogEvent::StepExecuted)
+                                .field("state", &current_state)
                                 .field("from_state", &current_state)
                                 .field("to_state", &next)
                                 .field("builtin", builtin)
                                 .field("transition", "on_fail")
                                 .field("reason", &reason)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
+                                .emit();
+                            logger
+                                .entry(
+                                    LogLevel::Warn,
+                                    &format!("transition: '{current_state}' →on_fail→ '{next}'"),
+                                )
+                                .component(Component::StateMachine)
+                                .event(LogEvent::TransitionSelected)
+                                .field("state", &current_state)
+                                .field("from_state", &current_state)
+                                .field("to_state", &next)
+                                .field("builtin", builtin)
+                                .field("transition", "on_fail")
+                                .field("reason", &reason)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .emit();
                             current_state = next;
                         }
@@ -376,9 +462,11 @@ impl<'sm> HeadlessSmDriver<'sm> {
                                     &format!("builtin '{builtin}' fatal error: {error}"),
                                 )
                                 .component(Component::StateMachine)
-                                .event(LogEvent::StateTransition)
+                                .event(LogEvent::StepExecuted)
                                 .field("state", &current_state)
                                 .field("builtin", builtin)
+                                .field("step", steps_taken.to_string())
+                                .field("iteration", iteration.to_string())
                                 .field("exit_reason", "error")
                                 .field("error", &error)
                                 .emit();
@@ -734,16 +822,17 @@ states:
             output.contains("loop"),
             "expected loop transition in output: {output}"
         );
-        // Should log both agent calls
+        // Each agent outcome emits step_executed + transition_selected, so each
+        // transition name appears exactly twice (once per event type).
         assert_eq!(
             output.matches("\"transition\":\"on_failure\"").count(),
-            1,
-            "expected one on_failure in output: {output}"
+            2,
+            "expected two on_failure entries (step_executed + transition_selected) in output: {output}"
         );
         assert_eq!(
             output.matches("\"transition\":\"on_success\"").count(),
-            1,
-            "expected one on_success in output: {output}"
+            2,
+            "expected two on_success entries (step_executed + transition_selected) in output: {output}"
         );
     }
 
@@ -1195,5 +1284,389 @@ states:
         let debug = format!("{a:?}");
         assert!(debug.contains("Terminal"));
         assert!(debug.contains("done"));
+    }
+
+    // ── Structured log event names ────────────────────────────────────────────
+
+    /// State entry emits the `state_entered` event with state, action, step, and
+    /// iteration fields.
+    #[test]
+    fn state_entry_emits_state_entered_event() {
+        let yaml = r#"
+initial_state: idle
+states:
+  - name: idle
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"state_entered\""),
+            "expected state_entered event in output: {output}"
+        );
+        assert!(
+            output.contains("\"state\":\"idle\""),
+            "expected state field in output: {output}"
+        );
+        assert!(
+            output.contains("\"action\":\"terminal\""),
+            "expected action field in output: {output}"
+        );
+        assert!(
+            output.contains("\"step\":\"1\""),
+            "expected step field in output: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\":\"1\""),
+            "expected iteration field in output: {output}"
+        );
+    }
+
+    /// Agent success emits `step_executed` and `transition_selected` events with
+    /// full context fields.
+    #[test]
+    fn agent_success_emits_step_executed_and_transition_selected() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![AgentOutcome::Success], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"step_executed\""),
+            "expected step_executed event in output: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"transition_selected\""),
+            "expected transition_selected event in output: {output}"
+        );
+        assert!(
+            output.contains("\"transition\":\"on_success\""),
+            "expected on_success transition in output: {output}"
+        );
+        assert!(
+            output.contains("\"from_state\":\"work\""),
+            "expected from_state in output: {output}"
+        );
+        assert!(
+            output.contains("\"to_state\":\"done\""),
+            "expected to_state in output: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\":\"1\""),
+            "expected iteration counter in output: {output}"
+        );
+    }
+
+    /// Agent failure emits `step_executed` with the failure reason and
+    /// `transition_selected` with the on_failure target.
+    #[test]
+    fn agent_failure_emits_step_executed_with_reason_and_transition_selected() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: agent
+    on_success: done
+    on_failure: error
+  - name: done
+    action: terminal
+  - name: error
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(
+            vec![AgentOutcome::Failure {
+                reason: "provider offline".to_string(),
+            }],
+            vec![],
+        );
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"step_executed\""),
+            "expected step_executed event in output: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"transition_selected\""),
+            "expected transition_selected event in output: {output}"
+        );
+        assert!(
+            output.contains("\"transition\":\"on_failure\""),
+            "expected on_failure transition in output: {output}"
+        );
+        assert!(
+            output.contains("\"reason\":\"provider offline\""),
+            "expected reason in output: {output}"
+        );
+    }
+
+    /// Builtin pass emits `step_executed` and `transition_selected` events.
+    #[test]
+    fn builtin_pass_emits_step_executed_and_transition_selected() {
+        let yaml = r#"
+initial_state: check
+states:
+  - name: check
+    action: builtin
+    builtin: builtin.git.is_main_compatible
+    on_pass: done
+    on_fail: error
+  - name: done
+    action: terminal
+  - name: error
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![BuiltinOutcome::Pass]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"step_executed\""),
+            "expected step_executed event in output: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"transition_selected\""),
+            "expected transition_selected event in output: {output}"
+        );
+        assert!(
+            output.contains("\"transition\":\"on_pass\""),
+            "expected on_pass transition in output: {output}"
+        );
+    }
+
+    /// Builtin fail emits `step_executed` with reason and `transition_selected`.
+    #[test]
+    fn builtin_fail_emits_step_executed_with_reason_and_transition_selected() {
+        let yaml = r#"
+initial_state: check
+states:
+  - name: check
+    action: builtin
+    builtin: builtin.git.is_main_compatible
+    on_pass: done
+    on_fail: error
+  - name: done
+    action: terminal
+  - name: error
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(
+            vec![],
+            vec![BuiltinOutcome::Fail {
+                reason: "not rebased".to_string(),
+            }],
+        );
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"step_executed\""),
+            "expected step_executed event in output: {output}"
+        );
+        assert!(
+            output.contains("\"event\":\"transition_selected\""),
+            "expected transition_selected event in output: {output}"
+        );
+        assert!(
+            output.contains("\"transition\":\"on_fail\""),
+            "expected on_fail transition in output: {output}"
+        );
+        assert!(
+            output.contains("\"reason\":\"not rebased\""),
+            "expected reason in output: {output}"
+        );
+    }
+
+    /// Loop transition emits `transition_selected` event.
+    #[test]
+    fn loop_transition_emits_transition_selected_event() {
+        let yaml = r#"
+initial_state: scan
+states:
+  - name: scan
+    action: agent
+    on_success: done
+    on_failure: retry
+  - name: retry
+    action: loop
+    target: scan
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(
+            vec![
+                AgentOutcome::Failure {
+                    reason: "first try".to_string(),
+                },
+                AgentOutcome::Success,
+            ],
+            vec![],
+        );
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"event\":\"transition_selected\""),
+            "expected transition_selected event in output: {output}"
+        );
+        // Verify the loop transition is logged
+        assert!(
+            output.contains("\"transition\":\"loop\""),
+            "expected loop transition in output: {output}"
+        );
+    }
+
+    /// Iteration counter increases across loop cycles — verifies two distinct
+    /// iteration values appear in the log.
+    #[test]
+    fn iteration_counter_increments_across_loop_cycles() {
+        let yaml = r#"
+initial_state: scan
+states:
+  - name: scan
+    action: agent
+    on_success: done
+    on_failure: retry
+  - name: retry
+    action: loop
+    target: scan
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        // First scan fails (goes to retry), then succeeds (goes to done).
+        // Steps: [scan(fail), retry(loop), scan(success), done(terminal)]
+        // Iterations: 1,2,3,4
+        let executor = ScriptedExecutor::new(
+            vec![
+                AgentOutcome::Failure {
+                    reason: "not yet".to_string(),
+                },
+                AgentOutcome::Success,
+            ],
+            vec![],
+        );
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        let output = writer.contents();
+        // The first iteration of scan is iteration 1; the second is iteration 3
+        // (after the retry loop step at iteration 2). Both must appear.
+        assert!(
+            output.contains("\"iteration\":\"1\""),
+            "expected iteration 1 in output: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\":\"3\""),
+            "expected iteration 3 (second scan entry) in output: {output}"
+        );
+    }
+
+    /// Step counter and iteration counter appear in the step_limit_reached shutdown
+    /// log so a human can see where the loop stalled.
+    #[test]
+    fn step_limit_log_includes_step_and_iteration() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: loop
+    target: work
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_max_steps(3)
+            .run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"step\":\"3\""),
+            "expected step count in step_limit log: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\""),
+            "expected iteration in step_limit log: {output}"
+        );
+    }
+
+    /// Shutdown signal log includes the shutdown cause (signal name), step, and
+    /// iteration fields.
+    #[test]
+    fn shutdown_log_includes_signal_step_and_iteration() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(crate::signal::SignalKind::Terminate).unwrap();
+        let shutdown = crate::signal::ShutdownSignal::from_receiver(rx);
+
+        let _ = HeadlessSmDriver::new(&sm).run(&executor, &logger, Some(&shutdown));
+
+        let output = writer.contents();
+        assert!(
+            output.contains("\"signal\":\"SIGTERM\""),
+            "expected signal name in shutdown log: {output}"
+        );
+        assert!(
+            output.contains("\"step\""),
+            "expected step field in shutdown log: {output}"
+        );
+        assert!(
+            output.contains("\"iteration\""),
+            "expected iteration field in shutdown log: {output}"
+        );
     }
 }

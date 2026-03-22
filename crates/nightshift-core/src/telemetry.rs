@@ -104,6 +104,12 @@ impl fmt::Display for Component {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogEvent {
     StateTransition,
+    /// A state has been entered and its action is about to execute.
+    StateEntered,
+    /// A step (agent or builtin action) has completed.
+    StepExecuted,
+    /// The next state has been selected as a result of a transition rule.
+    TransitionSelected,
     GateEvaluated,
     AgentStarted,
     AgentCompleted,
@@ -117,6 +123,9 @@ impl LogEvent {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::StateTransition => "state_transition",
+            Self::StateEntered => "state_entered",
+            Self::StepExecuted => "step_executed",
+            Self::TransitionSelected => "transition_selected",
             Self::GateEvaluated => "gate_evaluated",
             Self::AgentStarted => "agent_started",
             Self::AgentCompleted => "agent_completed",
