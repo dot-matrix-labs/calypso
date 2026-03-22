@@ -36,6 +36,8 @@ pub enum DoctorCheckId {
     GitHooksPathConfigured,
     RequiredGitHooksInstalled,
     StateMachineIntegrity,
+    /// Advisory check: Docker daemon is accessible (required for `db twin` commands).
+    DockerAvailable,
 }
 
 /// Severity of a failing check — determines whether a non-passing result is
@@ -54,6 +56,8 @@ impl DoctorCheckId {
         match self {
             // Optional tooling — nice-to-have, not required for core workflow.
             DoctorCheckId::CodexInstalled => CheckSeverity::Advisory,
+            // Docker is advisory: its absence blocks `db twin` but not the core workflow.
+            DoctorCheckId::DockerAvailable => CheckSeverity::Advisory,
             // All other checks are hard requirements.
             _ => CheckSeverity::Required,
         }
@@ -75,6 +79,7 @@ impl DoctorCheckId {
                 "builtin.doctor.required_git_hooks_installed"
             }
             DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
+            DoctorCheckId::DockerAvailable => "builtin.doctor.docker_available",
         }
     }
 
@@ -90,6 +95,7 @@ impl DoctorCheckId {
             DoctorCheckId::GitHooksPathConfigured => "git-hooks-path-configured",
             DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
             DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
+            DoctorCheckId::DockerAvailable => "docker-available",
         }
     }
 }
@@ -185,6 +191,8 @@ pub trait DoctorEnvironment {
     fn git_hooks_path_configured(&self, repo_root: &Path) -> bool;
     /// Resolves the git hooks directory for the given repo root.
     fn git_hooks_path(&self, repo_root: &Path) -> Option<PathBuf>;
+    /// Returns `true` if the Docker daemon is reachable on this host.
+    fn docker_available(&self) -> bool;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -332,6 +340,10 @@ impl DoctorEnvironment for HostDoctorEnvironment {
             Some(repo_root.join(raw))
         }
     }
+
+    fn docker_available(&self) -> bool {
+        crate::db::docker_available()
+    }
 }
 
 pub fn collect_doctor_report(
@@ -457,6 +469,14 @@ pub fn collect_doctor_report(
                 } else {
                     Some(sm_audit::render_audit(&sm_audit))
                 },
+                repo_root,
+                None,
+            ),
+            make_check(
+                DoctorCheckId::DockerAvailable,
+                DoctorCheckScope::LocalConfiguration,
+                environment.docker_available(),
+                None,
                 repo_root,
                 None,
             ),
@@ -795,6 +815,12 @@ fn failing_doctor_fix(
                 "Review the state machine audit output and correct workflow references in blueprint YAML files."
                     .to_string(),
         }),
+
+        // Docker install is platform-specific; advise the user manually.
+        DoctorCheckId::DockerAvailable => Some(DoctorFix::Manual {
+            instructions: "Install Docker Engine and ensure the daemon is running. \
+                           See https://docs.docker.com/engine/install/".to_string(),
+        }),
     }
 }
 
@@ -841,6 +867,10 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
         DoctorCheckId::StateMachineIntegrity => {
             Some("Review the state machine audit findings and fix workflow references.".to_string())
         }
+        DoctorCheckId::DockerAvailable => Some(
+            "Install Docker Engine and start the daemon to enable `calypso db twin` commands."
+                .to_string(),
+        ),
     }
 }
 

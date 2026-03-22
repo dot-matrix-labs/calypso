@@ -118,6 +118,12 @@ impl DoctorEnvironment for FakeEnvironment {
     fn git_hooks_path_configured(&self, _repo_root: &Path) -> bool {
         self.git_hooks_path_configured
     }
+
+    fn docker_available(&self) -> bool {
+        // Fake environment: always report Docker as available so that existing
+        // tests don't acquire an unexpected advisory warning for DockerAvailable.
+        true
+    }
 }
 
 fn status_map(report: &calypso_cli::doctor::DoctorReport) -> BTreeMap<DoctorCheckId, DoctorStatus> {

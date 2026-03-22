@@ -73,6 +73,11 @@ Commands:
                       Print the raw YAML for the named blueprint workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
+  db status           Show database environment inventory and schema versions
+  db twin create      Create a digital twin from latest backup and run migration
+  db twin create --env <name>
+                      Create a twin for the named environment
+  db twin destroy     Clean up the twin container
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

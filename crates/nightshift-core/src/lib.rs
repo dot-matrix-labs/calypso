@@ -1,6 +1,7 @@
 pub mod app;
 pub mod blueprint_workflows;
 pub mod claude;
+pub mod db;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
 pub mod doctor;
@@ -91,6 +92,11 @@ Commands:
                       Parse the named workflow and report OK or the parse error
   webview             Start a local HTTP server (port 7373) with live state UI
   webview --port <N>  Start the webview server on a custom port
+  db status           Show database environment inventory and schema versions
+  db twin create      Create a digital twin from latest backup and run migration
+  db twin create --env <name>
+                      Create a twin for the named environment
+  db twin destroy     Clean up the twin container
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

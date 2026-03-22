@@ -4,6 +4,9 @@ use calypso_cli::app::{
     run_state_status_json, run_state_status_plain, run_status, run_workflows_list,
     run_workflows_show, run_workflows_validate,
 };
+use calypso_cli::db::{
+    HostDbEnvironment, render_db_status, run_db_status, run_twin_create, run_twin_destroy,
+};
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
 use calypso_cli::init::{
@@ -287,6 +290,44 @@ fn main() {
                     eprintln!("{error}");
                     std::process::exit(1);
                 }
+            }
+        }
+        // calypso db status
+        [command, subcommand] if command == "db" && subcommand == "status" => {
+            let env = HostDbEnvironment;
+            let report = run_db_status(&env);
+            println!("{}", render_db_status(&report));
+        }
+        // calypso db twin create [--env <name>]
+        [command, subcommand, action]
+            if command == "db" && subcommand == "twin" && action == "create" =>
+        {
+            let env = HostDbEnvironment;
+            let (msg, ok) = run_twin_create(&env, "default");
+            println!("{msg}");
+            if !ok {
+                std::process::exit(1);
+            }
+        }
+        [command, subcommand, action, flag, env_name]
+            if command == "db" && subcommand == "twin" && action == "create" && flag == "--env" =>
+        {
+            let db_env = HostDbEnvironment;
+            let (msg, ok) = run_twin_create(&db_env, env_name);
+            println!("{msg}");
+            if !ok {
+                std::process::exit(1);
+            }
+        }
+        // calypso db twin destroy
+        [command, subcommand, action]
+            if command == "db" && subcommand == "twin" && action == "destroy" =>
+        {
+            let env = HostDbEnvironment;
+            let (msg, ok) = run_twin_destroy(&env);
+            println!("{msg}");
+            if !ok {
+                std::process::exit(1);
             }
         }
         // calypso <path> — positional project directory (kept for backward compatibility)
