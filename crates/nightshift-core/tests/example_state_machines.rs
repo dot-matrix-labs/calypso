@@ -52,7 +52,10 @@ fn task_intake_loop_contains_a_loop_state() {
         .states
         .values()
         .any(|s| matches!(s.action, HeadlessAction::Loop { .. }));
-    assert!(has_loop, "task-intake-loop.yml must contain at least one loop state");
+    assert!(
+        has_loop,
+        "task-intake-loop.yml must contain at least one loop state"
+    );
 }
 
 #[test]
@@ -102,7 +105,10 @@ fn review_queue_loop_contains_a_loop_state() {
         .states
         .values()
         .any(|s| matches!(s.action, HeadlessAction::Loop { .. }));
-    assert!(has_loop, "review-queue-loop.yml must contain at least one loop state");
+    assert!(
+        has_loop,
+        "review-queue-loop.yml must contain at least one loop state"
+    );
 }
 
 #[test]
@@ -152,7 +158,10 @@ fn implementation_loop_contains_a_loop_state() {
         .states
         .values()
         .any(|s| matches!(s.action, HeadlessAction::Loop { .. }));
-    assert!(has_loop, "implementation-loop.yml must contain at least one loop state");
+    assert!(
+        has_loop,
+        "implementation-loop.yml must contain at least one loop state"
+    );
 }
 
 #[test]
