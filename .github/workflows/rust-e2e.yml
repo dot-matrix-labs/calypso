@@ -74,7 +74,7 @@ jobs:
           submodules: false
       - name: Init submodules (non-recursive)
         if: needs.changes.outputs.rust_relevant == 'true'
-        run: git submodule update --init
+        run: git submodule update --init calypso-blueprint
 
       - name: Set up Rust
         # End-to-end behavior is expected to stay green on the current stable

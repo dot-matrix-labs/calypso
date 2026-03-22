@@ -69,7 +69,10 @@ jobs:
         if: needs.changes.outputs.init_relevant == 'true'
         uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
+      - name: Init calypso-blueprint submodule
+        if: needs.changes.outputs.init_relevant == 'true'
+        run: git submodule update --init calypso-blueprint
 
       - name: Setup Rust
         if: needs.changes.outputs.init_relevant == 'true'
