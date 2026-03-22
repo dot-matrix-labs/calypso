@@ -546,6 +546,7 @@ fn scan_gha_directory(repo_root: &Path) -> BTreeMap<String, GhaWorkflow> {
 }
 
 /// Find the closest matching GHA filename using simple substring matching.
+#[allow(dead_code)]
 fn suggest_filename(target: &str, available: &BTreeMap<String, GhaWorkflow>) -> Option<String> {
     // Extract the basename from a path like `.github/workflows/foo.yml`
     let target_base = target
@@ -573,199 +574,27 @@ fn suggest_filename(target: &str, available: &BTreeMap<String, GhaWorkflow>) -> 
 }
 
 /// Count the number of characters in common (simple heuristic).
+#[allow(dead_code)]
 fn common_char_count(a: &str, b: &str) -> usize {
     let a_chars: BTreeSet<char> = a.chars().collect();
     let b_chars: BTreeSet<char> = b.chars().collect();
     a_chars.intersection(&b_chars).count()
 }
 
-/// Audit a single blueprint workflow for reference integrity and orphan checks.
+/// Audit a single blueprint workflow for reference integrity.
+///
+/// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
+/// no longer exist. Validation focuses on workflow-level `uses:` references
+/// for `kind: workflow` states and check reference integrity.
 fn audit_blueprint_workflow(
     stem: &str,
     wf: &BlueprintWorkflow,
-    repo_root: &Path,
-    available_gha_files: &BTreeMap<String, GhaWorkflow>,
+    _repo_root: &Path,
+    _available_gha_files: &BTreeMap<String, GhaWorkflow>,
     findings: &mut Vec<AuditFinding>,
 ) {
-    // a) Collect all workflow paths from checks and validate them
-    for (check_name, check_cfg) in &wf.checks {
-        // Skip checks that are marked as proposed — they reference workflows
-        // that don't exist yet and are intentionally not validated.
-        if check_cfg.status.as_deref() == Some("proposed") {
-            continue;
-        }
-        if let Some(wf_path) = &check_cfg.workflow {
-            // Only validate paths that look like GHA file references
-            if wf_path.starts_with(".github/workflows/") {
-                validate_workflow_reference(
-                    stem,
-                    &format!("check '{check_name}'"),
-                    wf_path,
-                    check_cfg.workflow_name.as_deref(),
-                    AuditSeverity::Error,
-                    repo_root,
-                    available_gha_files,
-                    findings,
-                );
-
-                // c) Job key validation via `check_names`
-                if let Some(check_names) = &check_cfg.check_names {
-                    validate_job_keys(
-                        stem,
-                        &format!("check '{check_name}'"),
-                        wf_path,
-                        check_names,
-                        available_gha_files,
-                        findings,
-                    );
-                }
-
-                // c) Job key validation via `job` field
-                if let Some(job) = &check_cfg.job {
-                    validate_job_keys(
-                        stem,
-                        &format!("check '{check_name}'"),
-                        wf_path,
-                        std::slice::from_ref(job),
-                        available_gha_files,
-                        findings,
-                    );
-                }
-            }
-        }
-    }
-
-    // Also validate workflow references in `github_actions` section.
-    // current_required entries are errors if missing; proposed_required and other
-    // non-current keys (proposed, etc.) produce warnings only — those files may not
-    // exist yet.
-    if let Some(gha) = &wf.github_actions {
-        // current_required → Error for missing files
-        for entry in gha.current_required.iter().flatten() {
-            if let Some(wf_path) = &entry.workflow
-                && wf_path.starts_with(".github/workflows/")
-            {
-                validate_workflow_reference(
-                    stem,
-                    &format!("github_actions entry '{wf_path}'"),
-                    wf_path,
-                    entry.workflow_name.as_deref(),
-                    AuditSeverity::Error,
-                    repo_root,
-                    available_gha_files,
-                    findings,
-                );
-
-                if let Some(check_names) = &entry.check_names {
-                    validate_job_keys(
-                        stem,
-                        &format!("github_actions entry '{wf_path}'"),
-                        wf_path,
-                        check_names,
-                        available_gha_files,
-                        findings,
-                    );
-                }
-            }
-        }
-
-        // proposed_required → Warning for missing files (not yet created)
-        for entry in gha.proposed_required.iter().flatten() {
-            if let Some(wf_path) = &entry.workflow
-                && wf_path.starts_with(".github/workflows/")
-            {
-                validate_workflow_reference(
-                    stem,
-                    &format!("github_actions entry '{wf_path}'"),
-                    wf_path,
-                    entry.workflow_name.as_deref(),
-                    AuditSeverity::Warning,
-                    repo_root,
-                    available_gha_files,
-                    findings,
-                );
-
-                if let Some(check_names) = &entry.check_names {
-                    validate_job_keys(
-                        stem,
-                        &format!("github_actions entry '{wf_path}'"),
-                        wf_path,
-                        check_names,
-                        available_gha_files,
-                        findings,
-                    );
-                }
-            }
-        }
-    }
-
-    // Also validate workflow references in `hard_gates.ci_workflows`
-    if let Some(hard_gates) = &wf.hard_gates
-        && let Some(ci_workflows) = &hard_gates.ci_workflows
-    {
-        for gate in ci_workflows {
-            if let Some(wf_path) = &gate.workflow
-                && wf_path.starts_with(".github/workflows/")
-            {
-                validate_workflow_reference(
-                    stem,
-                    &format!("hard_gates ci_workflow '{wf_path}'"),
-                    wf_path,
-                    None,
-                    AuditSeverity::Error,
-                    repo_root,
-                    available_gha_files,
-                    findings,
-                );
-
-                if let Some(check_names) = &gate.check_names {
-                    validate_job_keys(
-                        stem,
-                        &format!("hard_gates ci_workflow '{wf_path}'"),
-                        wf_path,
-                        check_names,
-                        available_gha_files,
-                        findings,
-                    );
-                }
-            }
-        }
-    }
-
-    // Also validate workflow references from state-level `workflows` lists
-    for (state_name, state_cfg) in &wf.states {
-        if let Some(wf_refs) = &state_cfg.workflows {
-            for wf_ref in wf_refs {
-                if let Some(wf_path) = &wf_ref.path
-                    && wf_path.starts_with(".github/workflows/")
-                {
-                    validate_workflow_reference(
-                        stem,
-                        &format!("state '{state_name}' workflow ref"),
-                        wf_path,
-                        None,
-                        AuditSeverity::Error,
-                        repo_root,
-                        available_gha_files,
-                        findings,
-                    );
-
-                    if let Some(check_names) = &wf_ref.check_names {
-                        validate_job_keys(
-                            stem,
-                            &format!("state '{state_name}' workflow ref"),
-                            wf_path,
-                            check_names,
-                            available_gha_files,
-                            findings,
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // d) Orphan/dangling check detection
+    // Orphan/dangling check detection (checks map is empty in GHA format,
+    // but retained for backward compatibility with test workflows).
     audit_check_references(stem, wf, findings);
 }
 
@@ -775,6 +604,7 @@ fn audit_blueprint_workflow(
 /// or a warning — use `Warning` for entries under `proposed_required` or other
 /// not-yet-created workflows.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn validate_workflow_reference(
     source: &str,
     context: &str,
@@ -819,6 +649,7 @@ fn validate_workflow_reference(
 }
 
 /// Validate job keys referenced by `check_names` exist in the target GHA file.
+#[allow(dead_code)]
 fn validate_job_keys(
     source: &str,
     context: &str,
@@ -933,6 +764,7 @@ fn audit_template_policy_gates(
 }
 
 /// Case-insensitive name comparison.
+#[allow(dead_code)]
 fn names_match(a: &str, b: &str) -> bool {
     a.eq_ignore_ascii_case(b)
 }

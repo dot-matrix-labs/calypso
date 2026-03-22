@@ -1,7 +1,11 @@
 //! Embedded blueprint workflow YAML files from the calypso-blueprint submodule.
 //!
-//! This module provides compile-time access to all `calypso-*.yaml` workflow files.
-//! Use [`BlueprintWorkflowLibrary`] to enumerate, look up, and parse them.
+//! This module provides compile-time access to all `calypso-*.yaml` workflow files
+//! in GitHub Actions YAML format. Use [`BlueprintWorkflowLibrary`] to enumerate,
+//! look up, and parse them.
+//!
+//! The GHA format uses `jobs:` instead of `states:`, with transitions expressed via
+//! `needs:` + `outputs:` + `if:` conditions rather than `next:` specs.
 
 use std::collections::HashMap;
 
@@ -68,94 +72,417 @@ impl BlueprintWorkflowLibrary {
             .map(|(_, yaml)| *yaml)
     }
 
-    /// Parse a raw YAML string into a [`BlueprintWorkflow`].
+    /// Parse a raw GHA YAML string into a [`BlueprintWorkflow`].
+    ///
+    /// This parses the GitHub Actions format and derives the state machine
+    /// representation (states, transitions, kinds) from the GHA structure.
     pub fn parse(yaml: &str) -> Result<BlueprintWorkflow, serde_yaml::Error> {
-        serde_yaml::from_str(yaml)
+        let raw: GhaWorkflowRaw = serde_yaml::from_str(yaml)?;
+        Ok(BlueprintWorkflow::from_gha(raw))
     }
 }
 
-// ── Top-level document ───────────────────────────────────────────────────────
+// ── Raw GHA deserialization types ────────────────────────────────────────────
 
-/// A blueprint workflow document (one `calypso-*.yaml` file).
+/// Raw GitHub Actions workflow document — deserialized directly from YAML.
+///
+/// Note: we use `serde_yaml::Value` for `jobs` to preserve YAML key ordering,
+/// which is needed to determine the initial state (first job in file order).
+#[derive(Debug, Clone, Deserialize)]
+struct GhaWorkflowRaw {
+    name: Option<String>,
+    #[serde(rename = "on")]
+    on_trigger: Option<serde_yaml::Value>,
+    #[serde(default)]
+    jobs: serde_yaml::Value,
+}
+
+/// Raw GitHub Actions job — deserialized directly from YAML.
+#[derive(Debug, Clone, Deserialize)]
+struct GhaJobRaw {
+    needs: Option<serde_yaml::Value>,
+    #[serde(rename = "if")]
+    if_condition: Option<String>,
+    #[serde(rename = "runs-on")]
+    #[allow(dead_code)]
+    runs_on: Option<String>,
+    /// Job-level `uses:` for reusable workflow calls.
+    uses: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    outputs: HashMap<String, serde_yaml::Value>,
+    #[serde(default)]
+    steps: Vec<GhaStepRaw>,
+}
+
+/// Raw GitHub Actions step.
+#[derive(Debug, Clone, Deserialize)]
+struct GhaStepRaw {
+    #[allow(dead_code)]
+    id: Option<String>,
+    uses: Option<String>,
+    run: Option<String>,
+    #[allow(dead_code)]
+    shell: Option<String>,
+    #[serde(rename = "with")]
+    with_fields: Option<HashMap<String, serde_yaml::Value>>,
+}
+
+// ── Public workflow types ─────────────────────────────────────────────────────
+
+/// A blueprint workflow document parsed from GHA YAML.
+///
+/// Maintains backward compatibility with the old custom format API:
+/// - `states` contains one entry per GHA job
+/// - `initial_state` is the first job with no `needs:`
+/// - `schedule` is extracted from `on: schedule:`
+/// - Transitions are derived from `needs:` + `if:` conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BlueprintWorkflow {
-    pub version: Option<u32>,
     pub name: Option<String>,
     pub initial_state: Option<String>,
-
-    // Optional top-level blocks — only some workflows define each one.
-    pub feature_unit: Option<FeatureUnit>,
-    pub prd_requirements: Option<PrdRequirements>,
-    pub pull_request_template: Option<PullRequestTemplate>,
-    pub plan: Option<PlanConfig>,
-    pub trigger: Option<TriggerConfig>,
     pub schedule: Option<ScheduleConfig>,
-    pub release_requirements: Option<ReleaseRequirements>,
-    pub artifact_requirements: Option<ArtifactRequirements>,
-    pub rollout_order: Option<Vec<String>>,
+    pub trigger: Option<TriggerConfig>,
 
-    /// States keyed by state name.
+    /// States keyed by job name, derived from GHA `jobs:`.
     #[serde(default)]
     pub states: HashMap<String, StateConfig>,
 
-    /// Checks keyed by check name.
+    /// Checks — always empty in GHA format (checks are validated differently).
     #[serde(default)]
     pub checks: HashMap<String, CheckConfig>,
-
-    /// Agent role prompts keyed by role name.
-    #[serde(default)]
-    pub agent_prompts: HashMap<String, String>,
-
-    pub hard_gates: Option<HardGates>,
-    pub github_actions: Option<GitHubActions>,
 }
 
-// ── feature_unit ─────────────────────────────────────────────────────────────
+impl BlueprintWorkflow {
+    /// Parse the `jobs:` value into an ordered list of (name, GhaJobRaw).
+    fn parse_jobs(jobs_val: &serde_yaml::Value) -> Vec<(String, GhaJobRaw)> {
+        let Some(mapping) = jobs_val.as_mapping() else {
+            return vec![];
+        };
+        let mut result = Vec::new();
+        for (key, val) in mapping {
+            if let Some(name) = key.as_str() {
+                if let Ok(job) = serde_yaml::from_value::<GhaJobRaw>(val.clone()) {
+                    result.push((name.to_string(), job));
+                }
+            }
+        }
+        result
+    }
 
+    /// Convert a raw GHA workflow into the state machine representation.
+    fn from_gha(raw: GhaWorkflowRaw) -> Self {
+        let name = raw.name.clone();
+
+        // Extract schedule from on: trigger
+        let schedule = Self::extract_schedule(&raw.on_trigger);
+        let trigger = Self::extract_trigger(&raw.on_trigger);
+
+        // Parse jobs preserving YAML key order
+        let ordered_jobs = Self::parse_jobs(&raw.jobs);
+
+        // Build a HashMap for lookup
+        let jobs_map: HashMap<String, GhaJobRaw> = ordered_jobs
+            .iter()
+            .map(|(n, j)| (n.clone(), j.clone()))
+            .collect();
+
+        // Build the set of all job names that appear as `needs:` targets
+        // (i.e., they have downstream dependents). Jobs not in this set
+        // that also have no outgoing transitions are terminal.
+        let mut has_dependents: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        for (_, job) in &ordered_jobs {
+            for dep in Self::parse_needs(&job.needs) {
+                has_dependents.insert(dep);
+            }
+        }
+
+        // Determine initial state:
+        // 1. First job with no `needs:` (if any)
+        // 2. Otherwise, the first job in YAML order (handles cyclic graphs)
+        let mut initial_state = None;
+        for (job_name, job) in &ordered_jobs {
+            let needs = Self::parse_needs(&job.needs);
+            if needs.is_empty() {
+                initial_state = Some(job_name.clone());
+                break;
+            }
+        }
+        if initial_state.is_none() && !ordered_jobs.is_empty() {
+            initial_state = Some(ordered_jobs[0].0.clone());
+        }
+
+        let mut states = HashMap::new();
+
+        for (job_name, job) in &ordered_jobs {
+            let kind = Self::derive_kind(job, &has_dependents, job_name);
+            let (role, cost, prompt) = Self::extract_agent_config(job);
+            let workflow_ref = Self::extract_workflow_ref(job);
+            let command = Self::extract_command(job);
+
+            // Build the next spec by scanning all downstream jobs
+            let next = Self::build_next_spec(job_name, &jobs_map);
+
+            states.insert(
+                job_name.clone(),
+                StateConfig {
+                    kind: Some(kind),
+                    role,
+                    cost,
+                    description: None,
+                    prompt,
+                    function: None,
+                    command,
+                    workflow: workflow_ref,
+                    actor: None,
+                    trigger: None,
+                    workflows: None,
+                    poll_cmd: None,
+                    ci_job: None,
+                    checks: None,
+                    completion: None,
+                    cleanup: None,
+                    gates: None,
+                    next,
+                },
+            );
+        }
+
+        BlueprintWorkflow {
+            name,
+            initial_state,
+            schedule,
+            trigger,
+            states,
+            checks: HashMap::new(),
+        }
+    }
+
+    /// Extract schedule config from `on: schedule: - cron: ...`.
+    fn extract_schedule(on_trigger: &Option<serde_yaml::Value>) -> Option<ScheduleConfig> {
+        let on_val = on_trigger.as_ref()?;
+        let schedule_val = on_val.get("schedule")?;
+        let arr = schedule_val.as_sequence()?;
+        let first = arr.first()?;
+        let cron = first.get("cron")?.as_str()?;
+        Some(ScheduleConfig {
+            cron: cron.to_string(),
+            description: None,
+        })
+    }
+
+    /// Extract trigger config from `on: workflow_dispatch: inputs:`.
+    fn extract_trigger(on_trigger: &Option<serde_yaml::Value>) -> Option<TriggerConfig> {
+        let on_val = on_trigger.as_ref()?;
+        let dispatch = on_val.get("workflow_dispatch")?;
+        let inputs = dispatch.get("inputs")?;
+        let event_input = inputs.get("event")?;
+        let event_desc = event_input.get("description")?.as_str()?;
+        // Only treat as a trigger if the description looks like an event name
+        // (e.g. "git-tag-push"), not generic "Trigger event".
+        if event_desc.contains('-') && !event_desc.contains(' ') {
+            Some(TriggerConfig {
+                event: Some(event_desc.to_string()),
+                pattern: event_input
+                    .get("default")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                branch_constraint: None,
+                ci_entry: None,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Parse the `needs:` field which can be a string or array of strings.
+    fn parse_needs(needs: &Option<serde_yaml::Value>) -> Vec<String> {
+        match needs {
+            None => vec![],
+            Some(serde_yaml::Value::String(s)) => vec![s.clone()],
+            Some(serde_yaml::Value::Sequence(arr)) => arr
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect(),
+            _ => vec![],
+        }
+    }
+
+    /// Derive the StateKind from a GHA job's steps or uses field.
+    fn derive_kind(
+        job: &GhaJobRaw,
+        has_dependents: &std::collections::HashSet<String>,
+        job_name: &str,
+    ) -> StateKind {
+        // Job-level uses: → Workflow
+        if let Some(ref uses) = job.uses {
+            if uses.contains(".github/workflows/") {
+                return StateKind::Workflow;
+            }
+        }
+
+        // Check steps for action references
+        for step in &job.steps {
+            if let Some(ref uses) = step.uses {
+                if uses.contains("calypso-agent") {
+                    return StateKind::Agent;
+                }
+                if uses.contains("calypso-human-gate") {
+                    return StateKind::Human;
+                }
+                if uses.contains("calypso-github-poller") {
+                    return StateKind::Github;
+                }
+                if uses.contains("calypso-function") {
+                    return StateKind::Function;
+                }
+            }
+            if step.run.is_some() {
+                // Check if this is a terminal state marker
+                if let Some(ref run_cmd) = step.run {
+                    if run_cmd.contains("Terminal state:") {
+                        return StateKind::Terminal;
+                    }
+                }
+                // If it has no dependents and the run command is just an echo,
+                // it might still be deterministic
+                if !has_dependents.contains(job_name) {
+                    // Check if there's any real command vs just terminal echo
+                    if let Some(ref run_cmd) = step.run {
+                        if run_cmd.contains("Terminal state:") {
+                            return StateKind::Terminal;
+                        }
+                    }
+                }
+                return StateKind::Deterministic;
+            }
+        }
+
+        // Fallback: if no steps and no dependents, terminal
+        if !has_dependents.contains(job_name) && job.steps.is_empty() && job.uses.is_none() {
+            return StateKind::Terminal;
+        }
+
+        StateKind::Deterministic
+    }
+
+    /// Extract agent config (role, cost, prompt) from step `with:` fields.
+    fn extract_agent_config(
+        job: &GhaJobRaw,
+    ) -> (Option<String>, Option<AgentCost>, Option<String>) {
+        for step in &job.steps {
+            if let Some(ref with_fields) = step.with_fields {
+                let role = with_fields
+                    .get("role")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                let cost = with_fields.get("cost").and_then(|v| v.as_str()).map(|s| {
+                    match s {
+                        "guru" => AgentCost::Guru,
+                        "cheap" => AgentCost::Cheap,
+                        _ => AgentCost::Default,
+                    }
+                });
+                let prompt = with_fields
+                    .get("prompt")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+
+                if role.is_some() || prompt.is_some() {
+                    return (role, cost, prompt);
+                }
+            }
+        }
+        (None, None, None)
+    }
+
+    /// Extract workflow reference from job-level `uses:` field.
+    fn extract_workflow_ref(job: &GhaJobRaw) -> Option<String> {
+        let uses = job.uses.as_ref()?;
+        if uses.contains(".github/workflows/") {
+            // Extract the workflow name stem from the path
+            let stem = uses
+                .trim_start_matches("./.github/workflows/")
+                .trim_end_matches(".yml")
+                .trim_end_matches(".yaml");
+            Some(stem.to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Extract command from a `run:` step.
+    fn extract_command(job: &GhaJobRaw) -> Option<String> {
+        for step in &job.steps {
+            if let Some(ref run_cmd) = step.run {
+                return Some(run_cmd.clone());
+            }
+        }
+        None
+    }
+
+    /// Build the NextSpec for a job by scanning all other jobs' `needs:` and `if:`
+    /// conditions to find which events from this job lead to which downstream jobs.
+    fn build_next_spec(
+        job_name: &str,
+        all_jobs: &HashMap<String, GhaJobRaw>,
+    ) -> Option<NextSpec> {
+        let mut transitions: Vec<(String, String)> = Vec::new();
+
+        for (target_name, target_job) in all_jobs {
+            let needs = Self::parse_needs(&target_job.needs);
+            if !needs.contains(&job_name.to_string()) {
+                continue;
+            }
+
+            // Parse the if condition to find which event from this job leads here
+            if let Some(ref if_cond) = target_job.if_condition {
+                // Parse patterns like: needs.job-name.outputs.event == 'event-name'
+                let pattern = format!("needs.{}.outputs.event == '", job_name);
+                for segment in if_cond.split(&pattern) {
+                    // Skip the first segment (before the pattern)
+                    if segment.starts_with("needs.") || !segment.contains('\'') {
+                        continue;
+                    }
+                    if let Some(end) = segment.find('\'') {
+                        let event = &segment[..end];
+                        transitions.push((event.to_string(), target_name.clone()));
+                    }
+                }
+            } else {
+                // No if condition — unconditional dependency. Use a generic event.
+                // This shouldn't normally happen in our workflows, but handle it.
+                transitions.push(("on_complete".to_string(), target_name.clone()));
+            }
+        }
+
+        if transitions.is_empty() {
+            return None;
+        }
+
+        // Build the YAML value for the NextSpec
+        let mut map = serde_yaml::Mapping::new();
+        for (event, target) in &transitions {
+            map.insert(
+                serde_yaml::Value::String(event.clone()),
+                serde_yaml::Value::String(target.clone()),
+            );
+        }
+        Some(NextSpec(serde_yaml::Value::Mapping(map)))
+    }
+}
+
+// ── Schedule ─────────────────────────────────────────────────────────────────
+
+/// Cron-based schedule for entry-point workflows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FeatureUnit {
-    pub invariant: Option<String>,
-    pub branch_from: Option<String>,
-    pub branch_required: Option<bool>,
-    pub worktree_required: Option<bool>,
-    pub push_to_origin_required: Option<bool>,
-    pub pull_request_required: Option<bool>,
+pub struct ScheduleConfig {
+    pub cron: String,
+    pub description: Option<String>,
 }
 
-// ── prd_requirements ─────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrdRequirements {
-    pub read_before_feature_definition: Option<bool>,
-    pub source_documents: Option<Vec<String>>,
-}
-
-// ── pull_request_template ────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PullRequestTemplate {
-    pub required_sections: Option<Vec<PrSection>>,
-    pub completion_checks: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PrSection {
-    pub id: Option<String>,
-    pub label: Option<String>,
-    #[serde(rename = "type")]
-    pub section_type: Option<String>,
-}
-
-// ── plan ─────────────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PlanConfig {
-    pub document: Option<String>,
-    pub issue_tracker: Option<String>,
-    pub priority_labels: Option<Vec<String>>,
-}
-
-// ── trigger ──────────────────────────────────────────────────────────────────
+// ── Trigger ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerConfig {
@@ -165,45 +492,9 @@ pub struct TriggerConfig {
     pub ci_entry: Option<String>,
 }
 
-// ── schedule ─────────────────────────────────────────────────────────────────
+// ── States ───────────────────────────────────────────────────────────────────
 
-/// Cron-based schedule for entry-point workflows. The orchestrator evaluates
-/// these expressions and dispatches the workflow on match.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ScheduleConfig {
-    /// Cron expression with second-level granularity: "sec min hour day month weekday".
-    /// Examples: `"*/30 * * * * *"` (every 30s), `"0 */5 * * * *"` (every 5 min),
-    /// `"0 0 2 * * *"` (daily at 02:00 UTC).
-    pub cron: String,
-    /// Human-readable description of what this schedule triggers.
-    pub description: Option<String>,
-}
-
-// ── release_requirements ─────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ReleaseRequirements {
-    pub source_branch: Option<String>,
-    pub tag_required: Option<bool>,
-    pub tag_format: Option<String>,
-    pub tag_format_examples: Option<Vec<String>>,
-    pub tag_constraints: Option<Vec<String>>,
-}
-
-// ── artifact_requirements ────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ArtifactRequirements {
-    pub github_release_required: Option<bool>,
-    pub github_release_asset_required: Option<bool>,
-    pub ghcr_images_required: Option<bool>,
-    #[serde(rename = "kubernetes-image-ready-signal_required")]
-    pub kubernetes_image_ready_signal_required: Option<bool>,
-}
-
-// ── states ───────────────────────────────────────────────────────────────────
-
-/// Configuration for a single state in the workflow.
+/// Configuration for a single state (job) in the workflow.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateConfig {
     pub kind: Option<StateKind>,
@@ -216,7 +507,7 @@ pub struct StateConfig {
     pub function: Option<String>,
     /// For `kind: deterministic` states with a shell command.
     pub command: Option<String>,
-    /// For `kind: workflow` states.
+    /// For `kind: workflow` states — the referenced workflow name stem.
     pub workflow: Option<String>,
 
     /// For `kind: github` states.
@@ -225,22 +516,22 @@ pub struct StateConfig {
     pub workflows: Option<Vec<WorkflowRef>>,
     pub poll_cmd: Option<String>,
 
-    /// CI job specification (used in calypso-release-request).
+    /// CI job specification.
     pub ci_job: Option<serde_yaml::Value>,
 
-    /// Checks that must pass to complete a deterministic or github state.
+    /// Checks that must pass.
     pub checks: Option<Vec<String>>,
 
     /// Completion criteria for agent/human states.
     pub completion: Option<CompletionCriteria>,
 
-    /// Cleanup commands run after the state exits.
+    /// Cleanup commands.
     pub cleanup: Option<Vec<CleanupStep>>,
 
-    /// Inline gates attached to this state (used in calypso-save-state).
+    /// Inline gates.
     pub gates: Option<Vec<serde_yaml::Value>>,
 
-    /// Transition spec — multiple YAML shapes are handled via `serde_yaml::Value`.
+    /// Transition spec — derived from downstream jobs' `needs:` + `if:` conditions.
     pub next: Option<NextSpec>,
 }
 
@@ -292,18 +583,12 @@ pub struct CleanupStep {
 
 // ── next (transition spec) ───────────────────────────────────────────────────
 //
-// The `next` field appears in several incompatible shapes across workflow files:
+// In GHA format, the `next` field is derived from downstream jobs' `needs:` and
+// `if:` conditions. The events are extracted from `if:` patterns like:
+//   `needs.job-name.outputs.event == 'event-name'`
 //
-//   { on: { event: target, ... } }           — map of event → target state
-//   { on_success: state, on_failure: state }  — binary success/failure routing
-//   { on_pass: state, on_fail: state }        — deterministic pass/fail routing
-//   { pass: state, fail: state }              — github state pass/fail routing
-//   { on_complete: state }                    — single terminal transition
-//   { on_success: state }                     — one-sided (human states)
-//   { on_rejection: state, on_failure: state} — commit state
-//
-// Rather than fighting the serde untagged enum machinery for mutually-ambiguous
-// maps, we store the raw YAML value and expose typed accessors.
+// The resulting NextSpec has the same API as before:
+//   { event_name: target_job_name, ... }
 
 /// Raw transition specification — parsed from whatever shape appears in YAML.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -315,13 +600,13 @@ impl NextSpec {
     pub fn target_for(&self, outcome: &str) -> Option<&str> {
         let map = self.0.as_mapping()?;
 
-        // Direct top-level key (on_success, on_failure, pass, fail, on_complete, …)
+        // Direct top-level key (on_success, on_failure, pass, fail, on_complete, ...)
         let key = serde_yaml::Value::String(outcome.to_owned());
         if let Some(v) = map.get(&key) {
             return v.as_str();
         }
 
-        // Nested under `on:` (the event-dispatch shape)
+        // Nested under `on:` (the event-dispatch shape from old format)
         let on_key = serde_yaml::Value::String("on".to_owned());
         if let Some(serde_yaml::Value::Mapping(on_map)) = map.get(&on_key) {
             let ev_key = serde_yaml::Value::String(outcome.to_owned());
@@ -335,10 +620,7 @@ impl NextSpec {
 
     /// Returns all event key names from this transition spec.
     ///
-    /// For `{ on: { event: target } }` → returns the event names.
-    /// For `{ on_success: s, on_failure: s }` → returns `["on_success", "on_failure"]`.
-    /// This is useful for cross-workflow handoff validation where the event keys
-    /// should match terminal state names in the sub-workflow.
+    /// Handles both flat format `{ event: target }` and nested `{ on: { event: target } }`.
     pub fn all_event_keys(&self) -> Vec<&str> {
         let mut keys = Vec::new();
         let Some(map) = self.0.as_mapping() else {
@@ -357,7 +639,6 @@ impl NextSpec {
                         }
                     }
                 } else {
-                    // Top-level key: on_success, on_failure, etc.
                     keys.push(key_str);
                 }
             }
@@ -368,11 +649,7 @@ impl NextSpec {
 
     /// Returns all target state names reachable from this transition spec.
     ///
-    /// Handles all YAML shapes:
-    /// - `{ on_success: s, on_failure: s, on_rejection: s, ... }` — top-level string values
-    /// - `{ on: { event: target, ... } }` — nested event dispatch map
-    /// - `{ pass: s, fail: s }` — github routing
-    /// - `{ on_complete: s }` — terminal transition
+    /// Handles both flat format and nested `on:` maps.
     pub fn all_targets(&self) -> Vec<&str> {
         let mut targets = Vec::new();
         let Some(map) = self.0.as_mapping() else {
@@ -391,7 +668,6 @@ impl NextSpec {
                         }
                     }
                 } else if let Some(s) = value.as_str() {
-                    // Top-level key: on_success, on_failure, pass, fail, on_complete, on_rejection, etc.
                     targets.push(s);
                 }
             }
@@ -401,20 +677,16 @@ impl NextSpec {
     }
 }
 
-// ── checks ───────────────────────────────────────────────────────────────────
+// ── Checks (kept for API compatibility) ──────────────────────────────────────
 
-/// Configuration for a single named check.
+/// Configuration for a single named check — retained for API compatibility.
+/// In GHA format, checks are not embedded in the workflow files.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CheckConfig {
     pub kind: Option<CheckKind>,
     pub role: Option<String>,
     pub description: Option<String>,
-
-    /// Lifecycle status — `"proposed"` checks are not yet implemented and are
-    /// skipped by the audit validator.
     pub status: Option<String>,
-
-    // Deterministic check fields
     pub cmd: Option<String>,
     pub source: Option<CheckSource>,
     pub hook: Option<String>,
@@ -422,12 +694,8 @@ pub struct CheckConfig {
     pub workflow_name: Option<String>,
     pub check_names: Option<Vec<String>>,
     pub builtin: Option<String>,
-
-    // CI job reference (calypso-release-request)
     pub job: Option<String>,
     pub step: Option<String>,
-
-    // Git-hook check fields (calypso-save-state)
     pub blocking: Option<bool>,
     pub behavior: Option<String>,
 }
@@ -452,59 +720,6 @@ pub enum CheckSource {
     GitHook,
     Ci,
     Builtin,
-}
-
-// ── hard_gates ───────────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HardGates {
-    pub git_hooks: Option<Vec<GitHookGate>>,
-    pub ci_workflows: Option<Vec<CiWorkflowGate>>,
-    pub merge_compatibility: Option<MergeCompatibility>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHookGate {
-    pub hook: Option<String>,
-    pub blocking: Option<bool>,
-    pub checks: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CiWorkflowGate {
-    pub workflow: Option<String>,
-    pub blocking: Option<bool>,
-    pub check_names: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct MergeCompatibility {
-    pub blocking: Option<bool>,
-    pub check: Option<String>,
-    pub remediation_state: Option<String>,
-}
-
-// ── github_actions ───────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHubActions {
-    /// Workflows that are currently required and exist in the repository.
-    pub current_required: Option<Vec<GitHubActionEntry>>,
-    /// Workflows that are proposed / not yet created.
-    pub proposed_required: Option<Vec<GitHubActionEntry>>,
-    /// Alternate key used in calypso-release-request.
-    pub current: Option<Vec<serde_yaml::Value>>,
-    /// Alternate proposed key used in calypso-release-request.
-    pub proposed: Option<Vec<serde_yaml::Value>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitHubActionEntry {
-    pub workflow: Option<String>,
-    pub workflow_name: Option<String>,
-    pub check_names: Option<Vec<String>>,
-    pub used_for: Option<Vec<String>>,
-    pub purpose: Option<String>,
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -564,12 +779,14 @@ mod tests {
     }
 
     #[test]
-    fn default_feature_workflow_checks_are_populated() {
+    fn default_feature_workflow_has_workflow_kind_states() {
         let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
-        assert!(
-            !wf.checks.is_empty(),
-            "expected at least one check in the feature workflow"
+        let impl_loop = wf.states.get("implementation-loop").unwrap();
+        assert_eq!(impl_loop.kind, Some(StateKind::Workflow));
+        assert_eq!(
+            impl_loop.workflow.as_deref(),
+            Some("calypso-implementation-loop")
         );
     }
 
@@ -587,7 +804,7 @@ mod tests {
     }
 
     #[test]
-    fn next_spec_target_for_resolves_on_event() {
+    fn next_spec_target_for_resolves_on_failure() {
         let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
         let state = wf.states.get("write-failing-tests").unwrap();
@@ -597,5 +814,60 @@ mod tests {
             Some("blocked"),
             "expected on_failure → blocked"
         );
+    }
+
+    #[test]
+    fn orchestrator_has_schedule() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        assert!(wf.schedule.is_some(), "expected schedule on orchestrator");
+        assert_eq!(wf.schedule.unwrap().cron, "0 */5 * * * *");
+    }
+
+    #[test]
+    fn release_request_has_trigger() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-release-request").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        assert!(wf.trigger.is_some(), "expected trigger on release-request");
+        assert_eq!(
+            wf.trigger.as_ref().unwrap().event.as_deref(),
+            Some("git-tag-push")
+        );
+    }
+
+    #[test]
+    fn terminal_states_are_detected() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let done = wf.states.get("done").unwrap();
+        assert_eq!(done.kind, Some(StateKind::Terminal));
+        let aborted = wf.states.get("aborted").unwrap();
+        assert_eq!(aborted.kind, Some(StateKind::Terminal));
+    }
+
+    #[test]
+    fn agent_states_have_role_and_cost() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let fetch = wf.states.get("fetch-open-issues").unwrap();
+        assert_eq!(fetch.kind, Some(StateKind::Agent));
+        assert_eq!(fetch.role.as_deref(), Some("planner"));
+        assert_eq!(fetch.cost, Some(AgentCost::Cheap));
+    }
+
+    #[test]
+    fn github_poller_states_detected() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-pr-review-merge").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let check_pr = wf.states.get("check-pr-structure").unwrap();
+        assert_eq!(check_pr.kind, Some(StateKind::Github));
+    }
+
+    #[test]
+    fn human_states_detected() {
+        let yaml = BlueprintWorkflowLibrary::get("calypso-implementation-loop").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let req = wf.states.get("request-clarification").unwrap();
+        assert_eq!(req.kind, Some(StateKind::Human));
     }
 }
