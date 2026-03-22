@@ -116,7 +116,10 @@ fn state_entry_sequence(output: &str) -> Vec<String> {
         .filter(|l| l.contains("\"event\":\"state_entered\""))
         .filter_map(|line| {
             let v: serde_json::Value = serde_json::from_str(line).ok()?;
-            v.get("fields")?.get("state")?.as_str().map(|s| s.to_string())
+            v.get("fields")?
+                .get("state")?
+                .as_str()
+                .map(|s| s.to_string())
         })
         .collect()
 }
@@ -130,7 +133,10 @@ fn transition_sequence(output: &str) -> Vec<String> {
         .filter(|l| l.contains("\"event\":\"transition_selected\""))
         .filter_map(|line| {
             let v: serde_json::Value = serde_json::from_str(line).ok()?;
-            v.get("fields")?.get("transition")?.as_str().map(|s| s.to_string())
+            v.get("fields")?
+                .get("transition")?
+                .as_str()
+                .map(|s| s.to_string())
         })
         .collect()
 }
