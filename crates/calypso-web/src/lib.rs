@@ -566,18 +566,32 @@ mod tests {
         let workflows_dir = tmp.join(".calypso").join("workflows");
         std::fs::create_dir_all(&workflows_dir).unwrap();
 
-        // Write a minimal workflow YAML with a known state.
+        // Write a minimal GHA-format workflow YAML with a known state.
         let yaml = r#"
 name: my-local-workflow
-states:
+on:
+  workflow_dispatch:
+jobs:
   review:
-    kind: human
-    next:
-      on:
-        approve: deploy
-        reject: review
+    needs: [review, deploy]
+    if: needs.review.outputs.event == 'reject'
+    runs-on: ubuntu-latest
+    outputs:
+      event:
+        value: ${{ steps.run.outputs.event }}
+    steps:
+      - id: run
+        uses: ./.github/actions/calypso-human-gate
+        with:
+          prompt: review
   deploy:
-    kind: deterministic
+    needs: review
+    if: needs.review.outputs.event == 'approve'
+    runs-on: ubuntu-latest
+    steps:
+      - id: run
+        run: echo deploy
+        shell: bash
 "#;
         std::fs::write(workflows_dir.join("my-local-workflow.yml"), yaml).unwrap();
 
@@ -600,7 +614,7 @@ states:
         // Write a non-YAML file that should be ignored.
         std::fs::write(workflows_dir.join("readme.txt"), "not yaml").unwrap();
         // Write a YAML that does NOT match the requested workflow.
-        let yaml = "name: other-workflow\nstates:\n  start:\n    kind: agent\n";
+        let yaml = "name: other-workflow\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: start\n";
         std::fs::write(workflows_dir.join("other-workflow.yml"), yaml).unwrap();
 
         // Should fall back to embedded library since no match.
@@ -643,8 +657,8 @@ states:
         // An invalid YAML file — forces line 275 (parse-error continue path).
         std::fs::write(workflows_dir.join("aaa-broken.yml"), "{unclosed").unwrap();
 
-        // Workflow with deterministic, agent, and github states.
-        let yaml = "name: kind-test\nstates:\n  s1:\n    kind: deterministic\n  s2:\n    kind: agent\n  s3:\n    kind: github\n";
+        // Workflow with deterministic, agent, and github states in GHA format.
+        let yaml = "name: kind-test\non:\n  workflow_dispatch:\njobs:\n  s1:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        run: echo s1\n        shell: bash\n  s2:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: do work\n  s3:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-github-poller\n        with:\n          checks: '[]'\n";
         std::fs::write(workflows_dir.join("kind-test.yml"), yaml).unwrap();
 
         let (_, k1) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s1");

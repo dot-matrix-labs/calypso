@@ -1,0 +1,25 @@
+name: calypso-agent
+description: Invoke a Calypso AI agent with a specified role and cost tier.
+inputs:
+  role:
+    description: Agent role (e.g. engineer, release-manager, planner)
+    required: true
+  cost:
+    description: Cost tier — guru, default, or cheap
+    required: false
+    default: default
+  prompt:
+    description: The prompt text sent to the agent
+    required: true
+outputs:
+  event:
+    description: Outcome event emitted by the agent (e.g. on_success, on_failure)
+    value: ${{ steps.run.outputs.event }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: |
+        echo "calypso-agent: role=${{ inputs.role }} cost=${{ inputs.cost }}"
+        echo "event=on_success" >> "$GITHUB_OUTPUT"

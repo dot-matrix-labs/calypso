@@ -1,0 +1,18 @@
+name: calypso-github-poller
+description: Poll GitHub for check/status results.
+inputs:
+  checks:
+    description: JSON array of check names to poll
+    required: true
+outputs:
+  event:
+    description: Outcome event (e.g. on_pass, on_fail)
+    value: ${{ steps.run.outputs.event }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      run: |
+        echo "calypso-github-poller: checks=${{ inputs.checks }}"
+        echo "event=on_pass" >> "$GITHUB_OUTPUT"
