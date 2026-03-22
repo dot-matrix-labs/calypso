@@ -188,6 +188,8 @@ pub fn load_or_initialize_runtime(
             providers: Vec::new(),
             releases: Vec::new(),
             deployments: Vec::new(),
+            github_auth_ref: None,
+            secure_key_refs: Vec::new(),
         };
 
         let runtime = RuntimeState {

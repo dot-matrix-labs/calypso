@@ -1259,6 +1259,8 @@ fn do_init_steps(
         current_feature: default_feature_state(),
         releases: vec![],
         deployments: vec![],
+        github_auth_ref: None,
+        secure_key_refs: vec![],
     };
 
     let json = serde_json::to_string_pretty(&state).map_err(InitError::StateSerialize)?;
