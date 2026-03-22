@@ -15,6 +15,7 @@ pub mod headless_sm;
 pub mod headless_sm_driver;
 pub mod init;
 pub mod interpreter;
+pub mod interpreter_scheduler;
 pub mod operator_surface;
 pub mod pinned_prompt;
 pub mod policy;

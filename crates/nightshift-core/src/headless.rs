@@ -12,6 +12,7 @@ use crate::doctor::{DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_d
 use crate::driver::{DriverMode, DriverStepResult, StateMachineDriver};
 use crate::execution::ExecutionConfig;
 use crate::github::{HostGithubEnvironment, collect_github_report};
+use crate::interpreter_scheduler::{SchedulerMode, run_interpreter_scheduler};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
 use crate::state::RepositoryState;
@@ -170,8 +171,83 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         return signal.exit_code();
     }
 
-    // 8. Enter orchestrator loop (state machine driver)
-    let exit_code = run_driver_loop(logger, &repo_root, &state_path, &shutdown);
+    // 8. Enter orchestrator loop via the YAML workflow interpreter scheduler.
+    //
+    // The interpreter scheduler replaces the legacy StateMachineDriver as the
+    // source of truth for what to execute next.  It loads all embedded blueprint
+    // workflows, discovers entry points, and in daemon mode fires cron-scheduled
+    // workflows on their configured interval.
+    //
+    // For backward compatibility the legacy driver loop is preserved below and
+    // used to actually execute agent steps once the scheduler fires.
+    logger.log_event(
+        LogLevel::Info,
+        Component::StateMachine,
+        LogEvent::StateTransition,
+        "entering interpreter scheduler",
+        BTreeMap::new(),
+    );
+
+    let scheduler_outcome = run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, logger);
+
+    // Map scheduler outcome to exit code and log the result.
+    let exit_code = match scheduler_outcome {
+        crate::interpreter_scheduler::SchedulerOutcome::Discovered { entry_point_count } => {
+            logger
+                .entry(LogLevel::Info, "interpreter scheduler complete")
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .field("entry_point_count", entry_point_count.to_string())
+                .emit();
+            // Proceed to the legacy driver loop for actual step execution.
+            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::Fired {
+            ref workflow,
+            ref initial_state,
+        } => {
+            logger
+                .entry(
+                    LogLevel::Info,
+                    &format!("interpreter scheduler fired '{workflow}'"),
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::StateTransition)
+                .field("workflow", workflow.as_str())
+                .field("initial_state", initial_state.as_str())
+                .emit();
+            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::Interrupted => {
+            logger.log_event(
+                LogLevel::Warn,
+                Component::Cli,
+                LogEvent::Shutdown,
+                "interpreter scheduler interrupted",
+                BTreeMap::new(),
+            );
+            // Use the signal's exit code (143 for SIGTERM, etc.) — default to 1.
+            1
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries => {
+            logger.log_event(
+                LogLevel::Warn,
+                Component::StateMachine,
+                LogEvent::Startup,
+                "interpreter scheduler: no cron entries found; falling back to legacy driver",
+                BTreeMap::new(),
+            );
+            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
+            logger
+                .entry(LogLevel::Error, "interpreter scheduler load error")
+                .component(Component::StateMachine)
+                .field("error", e.as_str())
+                .emit();
+            2
+        }
+    };
 
     // 9. Log completion
     logger.log_event(
