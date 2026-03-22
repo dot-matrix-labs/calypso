@@ -424,7 +424,7 @@ impl BlueprintWorkflow {
             // Parse the if condition to find which event from this job leads here
             if let Some(ref if_cond) = target_job.if_condition {
                 // Parse patterns like: needs.job-name.outputs.event == 'event-name'
-                let pattern = format!("needs.{}.outputs.event == '", job_name);
+                let pattern = format!("needs.{job_name}.outputs.event == '");
                 for segment in if_cond.split(&pattern) {
                     // Skip the first segment (before the pattern)
                     if segment.starts_with("needs.") || !segment.contains('\'') {
