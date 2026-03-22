@@ -7,44 +7,90 @@ on:
   merge_group:
   workflow_dispatch:
 
+concurrency:
+  group: rust-coverage-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  coverage:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      coverage_needed: ${{ steps.filter.outputs.coverage }}
 
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Detect CLI Rust changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            coverage:
+              - 'cli/**/*.rs'
+
+  coverage:
+    needs: changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Skip coverage when no CLI Rust files changed
+        if: needs.changes.outputs.coverage_needed != 'true'
+        run: echo "No Rust changes under cli/; coverage gate skipped."
+
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.coverage_needed == 'true'
+        with:
           submodules: false
       - name: Init submodules (non-recursive)
+        if: needs.changes.outputs.coverage_needed == 'true'
         run: git submodule update --init
 
       - name: Set up Rust
+        if: needs.changes.outputs.coverage_needed == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install cargo-llvm-cov
+        if: needs.changes.outputs.coverage_needed == 'true'
         uses: taiki-e/install-action@cargo-llvm-cov
 
       - name: Cache cargo artifacts
+        if: needs.changes.outputs.coverage_needed == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
       - name: Run coverage with 90% line threshold
+        if: needs.changes.outputs.coverage_needed == 'true'
         working-directory: cli
         run: cargo coverage
 
       - name: Upload coverage artifact
+        if: >-
+          needs.changes.outputs.coverage_needed == 'true' &&
+          (github.event_name == 'workflow_dispatch' ||
+          (github.event_name == 'push' && github.ref == 'refs/heads/main'))
         uses: actions/upload-artifact@v6
         with:
           name: cli-coverage-lcov
           path: cli/lcov.info
 
       - name: Append coverage summary
-        working-directory: cli
         shell: bash
         run: |
           echo "## CLI Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ needs.changes.outputs.coverage_needed }}" != "true" ]]; then
+            echo "- Skipped: no Rust changes under \`cli/\`" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           echo "- Enforced line coverage target: 90% (returns to 99% at Phase 3)" >> "$GITHUB_STEP_SUMMARY"
-          echo "- LCOV artifact: cli-coverage-lcov" >> "$GITHUB_STEP_SUMMARY"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || ("${{ github.event_name }}" == "push" && "${{ github.ref }}" == "refs/heads/main") ]]; then
+            echo "- LCOV artifact: cli-coverage-lcov" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "- LCOV artifact upload skipped for PR/merge-group speed" >> "$GITHUB_STEP_SUMMARY"
+          fi
