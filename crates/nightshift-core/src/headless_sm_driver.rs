@@ -29,6 +29,9 @@
 //! The default maximum number of steps is [`DEFAULT_MAX_STEPS`] (10 000).
 //! Override via [`HeadlessSmDriver::with_max_steps`].
 
+use std::path::PathBuf;
+
+use crate::headless_persist::{ExitReasonTag, HeadlessRunState, now_rfc3339};
 use crate::headless_sm::{HeadlessAction, HeadlessStateMachine};
 use crate::signal::ShutdownSignal;
 use crate::telemetry::{Component, LogEvent, LogLevel, Logger};
@@ -125,6 +128,15 @@ pub enum ExitReason {
 pub struct HeadlessSmDriver<'sm> {
     sm: &'sm HeadlessStateMachine,
     max_steps: usize,
+    /// If set, the driver writes a [`HeadlessRunState`] snapshot to this path
+    /// on each state entry and on exit.  After a clean `Terminal` exit the
+    /// file is deleted.
+    persist_path: Option<PathBuf>,
+    /// If set, the driver resumes from this state instead of
+    /// `sm.initial_state`.  The caller is responsible for loading the
+    /// snapshot and verifying that the recorded state still exists in the
+    /// current state machine graph.
+    resume_state: Option<HeadlessRunState>,
 }
 
 impl<'sm> HeadlessSmDriver<'sm> {
@@ -133,6 +145,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
         Self {
             sm,
             max_steps: DEFAULT_MAX_STEPS,
+            persist_path: None,
+            resume_state: None,
         }
     }
 
@@ -142,31 +156,84 @@ impl<'sm> HeadlessSmDriver<'sm> {
         self
     }
 
+    /// Enable iteration-state persistence.
+    ///
+    /// On each state entry the driver writes a [`HeadlessRunState`] snapshot
+    /// to `path`.  The snapshot records the current state name, iteration
+    /// count, and a timestamp.  On exit the driver overwrites the snapshot
+    /// with the final exit reason.  After a clean `Terminal` exit the file is
+    /// deleted so subsequent runs start fresh.
+    pub fn with_persist_path(mut self, path: PathBuf) -> Self {
+        self.persist_path = Some(path);
+        self
+    }
+
+    /// Resume from a previously persisted run state.
+    ///
+    /// When `resume` is provided the driver starts from `resume.current_state`
+    /// and `resume.iteration` instead of the state machine's `initial_state`.
+    /// A startup log entry records the resumption so that terminal output
+    /// clearly explains what happened.
+    ///
+    /// The caller must verify that `resume.current_state` exists in the
+    /// current state machine graph before calling this method.
+    pub fn with_resume(mut self, resume: HeadlessRunState) -> Self {
+        self.resume_state = Some(resume);
+        self
+    }
+
     /// Execute the state machine to completion.
     ///
-    /// The driver starts from `sm.initial_state` and steps through the graph
-    /// until it reaches a terminal state, receives a shutdown signal, or
-    /// encounters a fatal error.
+    /// The driver starts from `sm.initial_state` (or from the state recorded
+    /// in [`Self::with_resume`]) and steps through the graph until it reaches
+    /// a terminal state, receives a shutdown signal, or encounters a fatal
+    /// error.
     ///
     /// All state transitions are logged via `logger`.  If `shutdown` is
     /// `None` the driver runs without signal awareness (useful in tests).
+    ///
+    /// When a `persist_path` is configured the driver writes a
+    /// [`HeadlessRunState`] snapshot before each state action and on exit.
+    /// After a clean `Terminal` exit the snapshot is deleted.
     pub fn run(
         &self,
         executor: &dyn StepExecutor,
         logger: &Logger,
         shutdown: Option<&ShutdownSignal>,
     ) -> ExitReason {
-        let mut current_state = self.sm.initial_state.clone();
+        // Determine starting state and iteration counter.
+        let (mut current_state, mut iteration) = match &self.resume_state {
+            Some(prev) => {
+                logger
+                    .entry(
+                        LogLevel::Warn,
+                        &format!(
+                            "resuming from state '{}' (previous run: {}, iteration {})",
+                            prev.current_state, prev.exit_reason, prev.iteration,
+                        ),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::Startup)
+                    .field("resumed_from_state", &prev.current_state)
+                    .field("previous_exit_reason", prev.exit_reason.as_str())
+                    .field("previous_iteration", prev.iteration.to_string())
+                    .field("state_count", self.sm.states.len().to_string())
+                    .emit();
+                (prev.current_state.clone(), prev.iteration)
+            }
+            None => {
+                let initial = self.sm.initial_state.clone();
+                logger
+                    .entry(LogLevel::Info, "headless sm driver starting")
+                    .component(Component::StateMachine)
+                    .event(LogEvent::Startup)
+                    .field("initial_state", &initial)
+                    .field("state_count", self.sm.states.len().to_string())
+                    .emit();
+                (initial, 0)
+            }
+        };
         let mut steps_taken: usize = 0;
-        let mut iteration: usize = 0;
-
-        logger
-            .entry(LogLevel::Info, "headless sm driver starting")
-            .component(Component::StateMachine)
-            .event(LogEvent::Startup)
-            .field("initial_state", &current_state)
-            .field("state_count", self.sm.states.len().to_string())
-            .emit();
 
         loop {
             iteration += 1;
@@ -186,6 +253,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     .field("max_steps", self.max_steps.to_string())
                     .field("exit_reason", "step_limit_reached")
                     .emit();
+                self.persist_exit(
+                    &current_state,
+                    iteration,
+                    ExitReasonTag::StepLimitReached,
+                    Some(format!("max_steps={}", self.max_steps)),
+                    logger,
+                );
                 return reason;
             }
 
@@ -207,6 +281,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     .field("signal", &signal_str)
                     .field("exit_reason", "interrupted")
                     .emit();
+                self.persist_exit(
+                    &current_state,
+                    iteration,
+                    ExitReasonTag::Interrupted,
+                    Some(signal_str.clone()),
+                    logger,
+                );
                 return ExitReason::Interrupted { signal: signal_str };
             }
 
@@ -225,6 +306,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
                         .field("iteration", iteration.to_string())
                         .field("exit_reason", "error")
                         .emit();
+                    self.persist_exit(
+                        &current_state,
+                        iteration,
+                        ExitReasonTag::Error,
+                        Some(message.clone()),
+                        logger,
+                    );
                     return ExitReason::Error {
                         state: current_state,
                         message,
@@ -233,6 +321,11 @@ impl<'sm> HeadlessSmDriver<'sm> {
             };
 
             steps_taken += 1;
+
+            // Persist current position before executing the action so that if
+            // the process is killed mid-step, the snapshot still records where
+            // execution was.
+            self.persist_iteration(&current_state, iteration, logger);
 
             logger
                 .entry(LogLevel::Info, &format!("entering state '{current_state}'"))
@@ -258,6 +351,8 @@ impl<'sm> HeadlessSmDriver<'sm> {
                         .field("iteration", iteration.to_string())
                         .field("exit_reason", "terminal")
                         .emit();
+                    // Clean exit — delete the snapshot so the next run starts fresh.
+                    self.clear_persist(logger);
                     return ExitReason::Terminal {
                         state: current_state,
                     };
@@ -368,6 +463,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
                                 .field("exit_reason", "error")
                                 .field("error", &error)
                                 .emit();
+                            self.persist_exit(
+                                &current_state,
+                                iteration,
+                                ExitReasonTag::Error,
+                                Some(error.clone()),
+                                logger,
+                            );
                             return ExitReason::Error {
                                 state: current_state,
                                 message: error,
@@ -470,6 +572,13 @@ impl<'sm> HeadlessSmDriver<'sm> {
                                 .field("exit_reason", "error")
                                 .field("error", &error)
                                 .emit();
+                            self.persist_exit(
+                                &current_state,
+                                iteration,
+                                ExitReasonTag::Error,
+                                Some(error.clone()),
+                                logger,
+                            );
                             return ExitReason::Error {
                                 state: current_state,
                                 message: error,
@@ -478,6 +587,79 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     }
                 }
             }
+        }
+    }
+
+    /// Write a mid-run snapshot recording the current state and iteration.
+    ///
+    /// Does nothing if no `persist_path` is configured.  Logs a warning if
+    /// the write fails but does not abort the run.
+    fn persist_iteration(&self, state: &str, iteration: usize, logger: &Logger) {
+        let Some(path) = &self.persist_path else {
+            return;
+        };
+        let snapshot = HeadlessRunState {
+            current_state: state.to_string(),
+            iteration,
+            exit_reason: ExitReasonTag::Interrupted,
+            exit_detail: None,
+            timestamp: now_rfc3339(),
+        };
+        if let Err(e) = snapshot.save(path) {
+            logger
+                .entry(LogLevel::Warn, "failed to write iteration snapshot")
+                .component(Component::StateMachine)
+                .field("path", path.display().to_string())
+                .field("error", e.to_string())
+                .emit();
+        }
+    }
+
+    /// Write a final snapshot on exit with the actual exit reason and detail.
+    ///
+    /// Does nothing if no `persist_path` is configured.
+    fn persist_exit(
+        &self,
+        state: &str,
+        iteration: usize,
+        reason: ExitReasonTag,
+        detail: Option<String>,
+        logger: &Logger,
+    ) {
+        let Some(path) = &self.persist_path else {
+            return;
+        };
+        let snapshot = HeadlessRunState {
+            current_state: state.to_string(),
+            iteration,
+            exit_reason: reason,
+            exit_detail: detail,
+            timestamp: now_rfc3339(),
+        };
+        if let Err(e) = snapshot.save(path) {
+            logger
+                .entry(LogLevel::Warn, "failed to write exit snapshot")
+                .component(Component::StateMachine)
+                .field("path", path.display().to_string())
+                .field("error", e.to_string())
+                .emit();
+        }
+    }
+
+    /// Delete the snapshot file after a clean terminal exit.
+    ///
+    /// Does nothing if no `persist_path` is configured.
+    fn clear_persist(&self, logger: &Logger) {
+        let Some(path) = &self.persist_path else {
+            return;
+        };
+        if let Err(e) = HeadlessRunState::clear(path) {
+            logger
+                .entry(LogLevel::Warn, "failed to clear run snapshot")
+                .component(Component::StateMachine)
+                .field("path", path.display().to_string())
+                .field("error", e.to_string())
+                .emit();
         }
     }
 }
@@ -1667,6 +1849,330 @@ states:
         assert!(
             output.contains("\"iteration\""),
             "expected iteration field in shutdown log: {output}"
+        );
+    }
+
+    // ── Persistence: snapshot written on interrupt ─────────────────────────────
+
+    fn tmp_persist_path(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir()
+            .join(format!("calypso-driver-persist-test-{name}"))
+            .join("headless-state.json")
+    }
+
+    /// When a shutdown signal is received the driver writes a snapshot
+    /// recording the interrupted state, iteration, and signal name.
+    #[test]
+    fn persist_path_snapshot_written_on_interrupt() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let path = tmp_persist_path("interrupt");
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        tx.send(crate::signal::SignalKind::Interrupt).unwrap();
+        let shutdown = crate::signal::ShutdownSignal::from_receiver(rx);
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_persist_path(path.clone())
+            .run(&executor, &logger, Some(&shutdown));
+
+        let snapshot = crate::headless_persist::HeadlessRunState::load(&path)
+            .expect("load should succeed")
+            .expect("snapshot should exist after interrupt");
+
+        assert_eq!(snapshot.current_state, "work");
+        assert_eq!(
+            snapshot.exit_reason,
+            crate::headless_persist::ExitReasonTag::Interrupted
+        );
+        assert_eq!(snapshot.exit_detail.as_deref(), Some("SIGINT"));
+
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+    }
+
+    /// After a clean Terminal exit the snapshot file is deleted.
+    #[test]
+    fn persist_path_snapshot_cleared_on_terminal_exit() {
+        let yaml = r#"
+initial_state: done
+states:
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let path = tmp_persist_path("terminal-clear");
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_persist_path(path.clone())
+            .run(&executor, &logger, None);
+
+        assert!(
+            !path.exists(),
+            "snapshot should be deleted after terminal exit"
+        );
+    }
+
+    /// When a step limit is reached the snapshot is written with
+    /// `StepLimitReached` as the exit reason.
+    #[test]
+    fn persist_path_snapshot_written_on_step_limit() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: loop
+    target: work
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let path = tmp_persist_path("step-limit");
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_persist_path(path.clone())
+            .with_max_steps(3)
+            .run(&executor, &logger, None);
+
+        let snapshot = crate::headless_persist::HeadlessRunState::load(&path)
+            .expect("load should succeed")
+            .expect("snapshot should exist after step limit");
+
+        assert_eq!(
+            snapshot.exit_reason,
+            crate::headless_persist::ExitReasonTag::StepLimitReached
+        );
+        assert_eq!(snapshot.current_state, "work");
+
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+    }
+
+    /// When an agent fatal error occurs the snapshot is written with `Error`.
+    #[test]
+    fn persist_path_snapshot_written_on_agent_error() {
+        let yaml = r#"
+initial_state: work
+states:
+  - name: work
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(
+            vec![AgentOutcome::Error {
+                error: "provider crashed".to_string(),
+            }],
+            vec![],
+        );
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let path = tmp_persist_path("agent-error");
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_persist_path(path.clone())
+            .run(&executor, &logger, None);
+
+        let snapshot = crate::headless_persist::HeadlessRunState::load(&path)
+            .expect("load should succeed")
+            .expect("snapshot should exist after agent error");
+
+        assert_eq!(
+            snapshot.exit_reason,
+            crate::headless_persist::ExitReasonTag::Error
+        );
+        assert_eq!(snapshot.current_state, "work");
+        assert!(
+            snapshot
+                .exit_detail
+                .as_deref()
+                .unwrap_or("")
+                .contains("provider crashed"),
+            "expected error detail in snapshot"
+        );
+
+        let _ = crate::headless_persist::HeadlessRunState::clear(&path);
+    }
+
+    // ── Persistence: resume from previous snapshot ─────────────────────────────
+
+    /// Resuming from a persisted state starts from the recorded state, not
+    /// `initial_state`, and logs a resumption notice.
+    #[test]
+    fn resume_starts_from_recorded_state_not_initial() {
+        // Two-state machine: start → done. If resumed from "done", should
+        // exit immediately without ever visiting "start".
+        let yaml = r#"
+initial_state: start
+states:
+  - name: start
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        // No agent outcomes queued — if "start" were entered this would panic.
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let resume = crate::headless_persist::HeadlessRunState {
+            current_state: "done".to_string(),
+            iteration: 5,
+            exit_reason: crate::headless_persist::ExitReasonTag::Interrupted,
+            exit_detail: Some("SIGINT".to_string()),
+            timestamp: "2026-03-22T06:00:00Z".to_string(),
+        };
+
+        let result = HeadlessSmDriver::new(&sm)
+            .with_resume(resume)
+            .run(&executor, &logger, None);
+
+        assert_eq!(
+            result,
+            ExitReason::Terminal {
+                state: "done".to_string()
+            },
+            "expected terminal at 'done' when resuming"
+        );
+
+        let output = writer.contents();
+        assert!(
+            output.contains("resuming from state"),
+            "expected resumption notice in output: {output}"
+        );
+        assert!(
+            output.contains("\"resumed_from_state\":\"done\""),
+            "expected resumed_from_state field in output: {output}"
+        );
+    }
+
+    /// The iteration counter continues from the resumed snapshot's iteration
+    /// value, not from zero.
+    #[test]
+    fn resume_continues_iteration_counter_from_snapshot() {
+        let yaml = r#"
+initial_state: scan
+states:
+  - name: scan
+    action: agent
+    on_success: done
+    on_failure: done
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![AgentOutcome::Success], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let resume = crate::headless_persist::HeadlessRunState {
+            current_state: "scan".to_string(),
+            iteration: 10,
+            exit_reason: crate::headless_persist::ExitReasonTag::Interrupted,
+            exit_detail: Some("SIGINT".to_string()),
+            timestamp: "2026-03-22T06:00:00Z".to_string(),
+        };
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_resume(resume)
+            .run(&executor, &logger, None);
+
+        let output = writer.contents();
+        // Iteration 10 + 1 = 11 on the first loop after resume
+        assert!(
+            output.contains("\"iteration\":\"11\""),
+            "expected resumed iteration counter (11) in output: {output}"
+        );
+    }
+
+    /// Resume logs the previous exit reason from the snapshot so it is
+    /// visible in terminal output.
+    #[test]
+    fn resume_logs_previous_exit_reason() {
+        let yaml = r#"
+initial_state: done
+states:
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        let resume = crate::headless_persist::HeadlessRunState {
+            current_state: "done".to_string(),
+            iteration: 3,
+            exit_reason: crate::headless_persist::ExitReasonTag::Interrupted,
+            exit_detail: Some("SIGTERM".to_string()),
+            timestamp: "2026-03-22T06:00:00Z".to_string(),
+        };
+
+        let _ = HeadlessSmDriver::new(&sm)
+            .with_resume(resume)
+            .run(&executor, &logger, None);
+
+        let output = writer.contents();
+        assert!(
+            output.contains("previous_exit_reason"),
+            "expected previous_exit_reason in startup log: {output}"
+        );
+        assert!(
+            output.contains("interrupted"),
+            "expected previous exit reason value in startup log: {output}"
+        );
+    }
+
+    /// Running without a persist_path does not error or panic even with
+    /// all exit paths exercised.
+    #[test]
+    fn no_persist_path_runs_cleanly() {
+        let yaml = r#"
+initial_state: done
+states:
+  - name: done
+    action: terminal
+"#;
+        let sm = load_and_validate(yaml, "<test>").unwrap();
+        let executor = ScriptedExecutor::new(vec![], vec![]);
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+
+        // Should complete without panicking or writing any files.
+        let result = HeadlessSmDriver::new(&sm).run(&executor, &logger, None);
+
+        assert_eq!(
+            result,
+            ExitReason::Terminal {
+                state: "done".to_string()
+            }
         );
     }
 }
