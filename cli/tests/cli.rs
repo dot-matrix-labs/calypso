@@ -579,7 +579,10 @@ fn keys_list_json_returns_valid_json_array() {
         "keys list --json output should be valid JSON: {stdout}"
     );
     let val = parsed.unwrap();
-    assert!(val.is_array(), "keys list --json should return a JSON array");
+    assert!(
+        val.is_array(),
+        "keys list --json should return a JSON array"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }
