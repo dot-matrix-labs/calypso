@@ -305,8 +305,8 @@ fn regression_boolean_action_value() {
 #[test]
 fn regression_source_name_in_error_message() {
     let yaml = "initial_state: ghost\nstates:\n  - name: real\n    action: terminal\n";
-    let err = load_and_validate(yaml, "my-special-source.yml")
-        .expect_err("expected validation error");
+    let err =
+        load_and_validate(yaml, "my-special-source.yml").expect_err("expected validation error");
     let msg = err.to_string();
     assert!(
         msg.contains("my-special-source.yml"),
