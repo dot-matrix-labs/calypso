@@ -9,28 +9,87 @@ on:
     - cron: "15 1 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: rust-unit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit:
+  changes:
     runs-on: ubuntu-latest
+    outputs:
+      rust_relevant: ${{ steps.diff.outputs.rust_relevant }}
 
     steps:
       - uses: actions/checkout@v5
         with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Detect Rust-relevant changes
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "merge_group" ]]; then
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [[ "$base" == "0000000000000000000000000000000000000000" ]]; then
+              echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "$base" "$head")"
+
+          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-unit\.yml$)' <<<"$changed"; then
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  unit:
+    needs: changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Skip unit tests when Rust-relevant files are unchanged
+        if: needs.changes.outputs.rust_relevant != 'true'
+        run: echo "No Rust-relevant changes detected; unit tests skipped."
+
+      - uses: actions/checkout@v5
+        if: needs.changes.outputs.rust_relevant == 'true'
+        with:
           submodules: false
       - name: Init submodules (non-recursive)
+        if: needs.changes.outputs.rust_relevant == 'true'
         run: git submodule update --init
 
       - name: Set up Rust
         # Tests are expected to pass on the current stable toolchain even while
         # quality/build compatibility is checked against a wider version range.
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo artifacts
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
       - name: Run unit tests
+        if: needs.changes.outputs.rust_relevant == 'true'
         working-directory: cli
         run: cargo test-unit
