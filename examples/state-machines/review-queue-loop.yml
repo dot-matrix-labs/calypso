@@ -1,0 +1,40 @@
+# Review queue loop — runs continuously until interrupted
+#
+# Workflow shape: review queue → process item → mark result → restart
+#
+# Copy this file, rename it, and adapt the state names and transitions to fit
+# your review pipeline.  The `loop` action returns execution to `dequeue` so
+# items are processed one at a time in a continuous cycle.
+#
+# Schema: minimum supported headless YAML state-machine (nightshift-core)
+
+name: review-queue-loop
+initial_state: dequeue
+
+states:
+  # Pull the next item from the review queue.
+  - name: dequeue
+    action: agent
+    on_success: process
+    on_failure: error
+
+  # Inspect the item and apply the appropriate review action.
+  - name: process
+    action: agent
+    on_success: mark
+    on_failure: error
+
+  # Record the outcome (approved, rejected, needs-work …).
+  - name: mark
+    action: agent
+    on_success: restart
+    on_failure: error
+
+  # Loop unconditionally back to dequeue so the next item is picked up.
+  - name: restart
+    action: loop
+    target: dequeue
+
+  # Terminal error state — execution stops here on unrecoverable failure.
+  - name: error
+    action: terminal
