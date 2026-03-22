@@ -164,10 +164,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
             .component(Component::StateMachine)
             .event(LogEvent::Startup)
             .field("initial_state", &current_state)
-            .field(
-                "state_count",
-                self.sm.states.len().to_string(),
-            )
+            .field("state_count", self.sm.states.len().to_string())
             .emit();
 
         loop {
@@ -188,24 +185,22 @@ impl<'sm> HeadlessSmDriver<'sm> {
             }
 
             // Guard: shutdown signal
-            if let Some(sig_handle) = shutdown {
-                if let Some(signal) = sig_handle.try_recv() {
-                    let signal_str = signal.to_string();
-                    logger
-                        .entry(
-                            LogLevel::Warn,
-                            &format!("received {signal_str}, shutting down"),
-                        )
-                        .component(Component::Cli)
-                        .event(LogEvent::Shutdown)
-                        .field("state", &current_state)
-                        .field("signal", &signal_str)
-                        .field("exit_reason", "interrupted")
-                        .emit();
-                    return ExitReason::Interrupted {
-                        signal: signal_str,
-                    };
-                }
+            if let Some(sig_handle) = shutdown
+                && let Some(signal) = sig_handle.try_recv()
+            {
+                let signal_str = signal.to_string();
+                logger
+                    .entry(
+                        LogLevel::Warn,
+                        &format!("received {signal_str}, shutting down"),
+                    )
+                    .component(Component::Cli)
+                    .event(LogEvent::Shutdown)
+                    .field("state", &current_state)
+                    .field("signal", &signal_str)
+                    .field("exit_reason", "interrupted")
+                    .emit();
+                return ExitReason::Interrupted { signal: signal_str };
             }
 
             // Look up current state (must exist — validated on load)
@@ -286,9 +281,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             logger
                                 .entry(
                                     LogLevel::Debug,
-                                    &format!(
-                                        "agent '{current_state}' succeeded → '{next}'"
-                                    ),
+                                    &format!("agent '{current_state}' succeeded → '{next}'"),
                                 )
                                 .component(Component::Agent)
                                 .event(LogEvent::AgentCompleted)
@@ -303,9 +296,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             logger
                                 .entry(
                                     LogLevel::Warn,
-                                    &format!(
-                                        "agent '{current_state}' failed → '{next}': {reason}"
-                                    ),
+                                    &format!("agent '{current_state}' failed → '{next}': {reason}"),
                                 )
                                 .component(Component::Agent)
                                 .event(LogEvent::AgentCompleted)
@@ -320,9 +311,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             logger
                                 .entry(
                                     LogLevel::Error,
-                                    &format!(
-                                        "agent '{current_state}' fatal error: {error}"
-                                    ),
+                                    &format!("agent '{current_state}' fatal error: {error}"),
                                 )
                                 .component(Component::Agent)
                                 .event(LogEvent::AgentCompleted)
@@ -350,9 +339,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             logger
                                 .entry(
                                     LogLevel::Debug,
-                                    &format!(
-                                        "builtin '{builtin}' passed → '{next}'"
-                                    ),
+                                    &format!("builtin '{builtin}' passed → '{next}'"),
                                 )
                                 .component(Component::StateMachine)
                                 .event(LogEvent::StateTransition)
@@ -386,9 +373,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             logger
                                 .entry(
                                     LogLevel::Error,
-                                    &format!(
-                                        "builtin '{builtin}' fatal error: {error}"
-                                    ),
+                                    &format!("builtin '{builtin}' fatal error: {error}"),
                                 )
                                 .component(Component::StateMachine)
                                 .event(LogEvent::StateTransition)
@@ -477,10 +462,7 @@ mod tests {
     }
 
     impl ScriptedExecutor {
-        fn new(
-            agent_outcomes: Vec<AgentOutcome>,
-            builtin_outcomes: Vec<BuiltinOutcome>,
-        ) -> Self {
+        fn new(agent_outcomes: Vec<AgentOutcome>, builtin_outcomes: Vec<BuiltinOutcome>) -> Self {
             Self {
                 agent_outcomes: Mutex::new(agent_outcomes),
                 builtin_outcomes: Mutex::new(builtin_outcomes),
@@ -771,8 +753,8 @@ states:
         let yaml = include_str!("../tests/fixtures/user-recovery-workflow.yml");
         let sm = load_and_validate(yaml, "<test>").unwrap();
         let executor = ScriptedExecutor::new(
-            vec![AgentOutcome::Success],      // scan succeeds
-            vec![BuiltinOutcome::Pass],        // check passes
+            vec![AgentOutcome::Success], // scan succeeds
+            vec![BuiltinOutcome::Pass],  // check passes
         );
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
@@ -794,7 +776,12 @@ states:
         let sm = load_and_validate(yaml, "<test>").unwrap();
         let executor = ScriptedExecutor::new(
             vec![AgentOutcome::Success, AgentOutcome::Success],
-            vec![BuiltinOutcome::Fail { reason: "not ready".to_string() }, BuiltinOutcome::Pass],
+            vec![
+                BuiltinOutcome::Fail {
+                    reason: "not ready".to_string(),
+                },
+                BuiltinOutcome::Pass,
+            ],
         );
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
@@ -961,9 +948,10 @@ states:
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
 
-        let result = HeadlessSmDriver::new(&sm)
-            .with_max_steps(5)
-            .run(&AlwaysFailExecutor, &logger, None);
+        let result =
+            HeadlessSmDriver::new(&sm)
+                .with_max_steps(5)
+                .run(&AlwaysFailExecutor, &logger, None);
 
         assert_eq!(
             result,
