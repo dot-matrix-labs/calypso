@@ -1,0 +1,33 @@
+# Exclude version control metadata
+.git/
+.gitmodules
+.gitignore
+
+# Rust build artifacts (large, not needed in build context)
+target/
+
+# Agent and CI configuration (not needed for Docker build)
+.agents/
+.github/
+.claude/
+.codex/
+
+# Documentation
+*.md
+docs/
+
+# Kubernetes and infrastructure configs (not part of the CLI build)
+k8s/
+containers/
+
+# Node / frontend tooling
+node_modules/
+package.json
+
+# Development helpers
+scripts/
+FAQ.md
+
+# Temporary files
+*.profraw
+*.tmp
