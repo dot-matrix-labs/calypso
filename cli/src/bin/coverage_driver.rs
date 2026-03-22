@@ -33,14 +33,14 @@ fn run() -> Result<(), String> {
         Ok(())
     } else {
         Err(format!(
-            "Line coverage below target: {covered}/{total} ({:.2}% < 90.00%)",
+            "Line coverage below target: {covered}/{total} ({:.2}% < 99.00%)",
             coverage_percent(covered, total)
         ))
     }
 }
 
 fn meets_line_threshold(covered: u64, total: u64) -> bool {
-    coverage_percent(covered, total) >= 90.0
+    coverage_percent(covered, total) >= 99.0
 }
 
 fn coverage_percent(covered: u64, total: u64) -> f64 {
@@ -111,8 +111,9 @@ end_of_record
 
     #[test]
     fn line_threshold_accepts_99_percent_or_more() {
-        assert!(meets_line_threshold(90, 100));
+        assert!(meets_line_threshold(99, 100));
         assert!(meets_line_threshold(100, 100));
+        assert!(!meets_line_threshold(98, 100));
         assert!(!meets_line_threshold(89, 100));
     }
 }
