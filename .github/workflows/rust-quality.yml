@@ -7,8 +7,59 @@ on:
   merge_group:
   workflow_dispatch:
 
+concurrency:
+  group: rust-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      rust_relevant: ${{ steps.diff.outputs.rust_relevant }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Detect Rust-relevant changes
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "merge_group" ]]; then
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [[ "$base" == "0000000000000000000000000000000000000000" ]]; then
+              echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "$base" "$head")"
+          echo "$changed"
+
+          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-quality\.yml$)' <<<"$changed"; then
+            echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "rust_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   format:
+    needs: changes
     runs-on: ubuntu-latest
 
     strategy:
@@ -24,29 +75,39 @@ jobs:
     name: format (${{ matrix.name }})
 
     steps:
+      - name: Skip format when Rust-relevant files are unchanged
+        if: needs.changes.outputs.rust_relevant != 'true'
+        run: echo "No Rust-relevant changes detected; format skipped."
+
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.rust_relevant == 'true'
         with:
           submodules: false
       - name: Init submodules (non-recursive)
+        if: needs.changes.outputs.rust_relevant == 'true'
         run: git submodule update --init
 
       - name: Set up Rust
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: rustfmt
 
       - name: Cache cargo artifacts
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
       - name: Check formatting
+        if: needs.changes.outputs.rust_relevant == 'true'
         working-directory: cli
         run: cargo fmt-check
 
   clippy:
+    needs: changes
     runs-on: ubuntu-latest
 
     strategy:
@@ -62,29 +123,39 @@ jobs:
     name: clippy (${{ matrix.name }})
 
     steps:
+      - name: Skip clippy when Rust-relevant files are unchanged
+        if: needs.changes.outputs.rust_relevant != 'true'
+        run: echo "No Rust-relevant changes detected; clippy skipped."
+
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.rust_relevant == 'true'
         with:
           submodules: false
       - name: Init submodules (non-recursive)
+        if: needs.changes.outputs.rust_relevant == 'true'
         run: git submodule update --init
 
       - name: Set up Rust
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
           components: clippy
 
       - name: Cache cargo artifacts
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
       - name: Run clippy
+        if: needs.changes.outputs.rust_relevant == 'true'
         working-directory: cli
         run: cargo lint
 
   build:
+    needs: changes
     runs-on: ubuntu-latest
 
     strategy:
@@ -100,23 +171,32 @@ jobs:
     name: build (${{ matrix.name }})
 
     steps:
+      - name: Skip build when Rust-relevant files are unchanged
+        if: needs.changes.outputs.rust_relevant != 'true'
+        run: echo "No Rust-relevant changes detected; build skipped."
+
       - uses: actions/checkout@v5
+        if: needs.changes.outputs.rust_relevant == 'true'
         with:
           submodules: false
       - name: Init submodules (non-recursive)
+        if: needs.changes.outputs.rust_relevant == 'true'
         run: git submodule update --init
 
       - name: Set up Rust
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.toolchain }}
 
       - name: Cache cargo artifacts
+        if: needs.changes.outputs.rust_relevant == 'true'
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             cli -> target
 
       - name: Build
+        if: needs.changes.outputs.rust_relevant == 'true'
         working-directory: cli
         run: cargo build-check

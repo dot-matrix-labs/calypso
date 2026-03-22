@@ -6,25 +6,83 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: init-test-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      init_relevant: ${{ steps.diff.outputs.init_relevant }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Detect init-relevant changes
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || "${{ github.event_name }}" == "schedule" || "${{ github.event_name }}" == "merge_group" ]]; then
+            echo "init_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            if [[ "$base" == "0000000000000000000000000000000000000000" ]]; then
+              echo "init_relevant=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "init_relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          changed="$(git diff --name-only "$base" "$head")"
+
+          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/init-test\.yml$)' <<<"$changed"; then
+            echo "init_relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "init_relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
   test-init:
+    needs: changes
     name: Test CLI Initialization
     runs-on: ubuntu-latest
     steps:
+      - name: Skip init integration test when init-relevant files are unchanged
+        if: needs.changes.outputs.init_relevant != 'true'
+        run: echo "No init-relevant changes detected; init integration test skipped."
+
       - name: Checkout Code
+        if: needs.changes.outputs.init_relevant == 'true'
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
       - name: Setup Rust
+        if: needs.changes.outputs.init_relevant == 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
       - name: Build Calypso CLI
+        if: needs.changes.outputs.init_relevant == 'true'
         run: cargo build -p calypso-cli
 
       - name: Test Default Initialization
+        if: needs.changes.outputs.init_relevant == 'true'
         run: |
           mkdir -p $HOME/calypso-tests
           TEST_PATH=$HOME/calypso-tests/test-default
@@ -34,6 +92,7 @@ jobs:
           ./target/debug/calypso-cli doctor --path "$TEST_PATH"
 
       - name: Test Hello World Initialization
+        if: needs.changes.outputs.init_relevant == 'true'
         run: |
           TEST_PATH=$HOME/calypso-tests/test-hello-world
           # Initialize with hello-world
