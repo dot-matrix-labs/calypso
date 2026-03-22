@@ -185,7 +185,7 @@ fn read_state_json(cwd: &Path) -> String {
 
 /// Return all embedded workflows as a JSON array of `{ name, yaml }` objects.
 fn read_workflows_json() -> String {
-    use crate::blueprint_workflows::BlueprintWorkflowLibrary;
+    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
 
     let entries: Vec<Value> = BlueprintWorkflowLibrary::list()
         .iter()
@@ -227,7 +227,7 @@ fn read_json_file(path: &Path) -> Option<Value> {
 
 /// Collect all embedded workflows that declare a `schedule.cron` field.
 fn collect_cron_workflows() -> Vec<Value> {
-    use crate::blueprint_workflows::BlueprintWorkflowLibrary;
+    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
 
     let mut result = Vec::new();
     for (name, yaml) in BlueprintWorkflowLibrary::list() {
@@ -253,7 +253,7 @@ fn resolve_active_state_info_with_local(
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
-    use crate::blueprint_workflows::BlueprintWorkflowLibrary;
+    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
 
     // Try local files first.
     if let Ok(entries) = std::fs::read_dir(workflows_dir) {
@@ -285,7 +285,7 @@ fn resolve_active_state_info_with_local(
             }
             if let Some(state) = wf.states.get(state_name) {
                 let kind = state.kind.as_ref().map(|k| {
-                    use crate::blueprint_workflows::StateKind;
+                    use nightshift_core::blueprint_workflows::StateKind;
                     match k {
                         StateKind::Deterministic => "deterministic",
                         StateKind::Agent => "agent",
@@ -318,7 +318,7 @@ fn resolve_active_state_info(
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
-    use crate::blueprint_workflows::BlueprintWorkflowLibrary;
+    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
 
     let yaml = match BlueprintWorkflowLibrary::get(workflow_name) {
         Some(y) => y,
@@ -335,7 +335,7 @@ fn resolve_active_state_info(
     };
 
     let kind = state.kind.as_ref().map(|k| {
-        use crate::blueprint_workflows::StateKind;
+        use nightshift_core::blueprint_workflows::StateKind;
         match k {
             StateKind::Deterministic => "deterministic",
             StateKind::Agent => "agent",

@@ -23,7 +23,6 @@ pub mod sm_audit;
 pub mod state;
 pub mod telemetry;
 pub mod template;
-pub mod webview;
 pub mod workflows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,7 +1,7 @@
 use calypso_cli::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
     run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
-    run_state_status_json, run_state_status_plain, run_status, run_webview, run_workflows_list,
+    run_state_status_json, run_state_status_plain, run_status, run_workflows_list,
     run_workflows_show, run_workflows_validate,
 };
 use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
@@ -14,6 +14,7 @@ use calypso_cli::operator_surface::OperatorSurface;
 use calypso_cli::state::RepositoryState;
 use calypso_cli::template::TemplateSet;
 use calypso_cli::{BuildInfo, render_help, render_version};
+use calypso_web::run_webview;
 
 fn build_info() -> BuildInfo<'static> {
     const VERSION: &str = concat!(

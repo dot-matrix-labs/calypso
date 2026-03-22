@@ -48,11 +48,20 @@ checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 name = "calypso-cli"
 version = "0.1.0"
 dependencies = [
+ "calypso-web",
  "expectrl",
- "nightshift",
+ "nightshift-core",
  "serde",
  "serde_json",
  "serde_yaml",
+]
+
+[[package]]
+name = "calypso-web"
+version = "0.1.0"
+dependencies = [
+ "nightshift-core",
+ "serde_json",
 ]
 
 [[package]]
@@ -280,7 +289,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "nightshift"
+name = "nightshift-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
