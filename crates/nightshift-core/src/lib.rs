@@ -4,7 +4,6 @@ pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
 pub mod doctor;
-pub mod keys;
 pub mod driver;
 pub mod error;
 pub mod execution;
@@ -17,6 +16,7 @@ pub mod headless_sm_driver;
 pub mod init;
 pub mod interpreter;
 pub mod interpreter_scheduler;
+pub mod keys;
 pub mod operator_surface;
 pub mod pinned_prompt;
 pub mod policy;

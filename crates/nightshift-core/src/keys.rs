@@ -165,7 +165,11 @@ pub enum KeyError {
     /// No key with the given name was found.
     NotFound(String),
     /// The key is in the wrong lifecycle state for the requested operation.
-    InvalidTransition { name: String, current: String, requested: String },
+    InvalidTransition {
+        name: String,
+        current: String,
+        requested: String,
+    },
 }
 
 impl fmt::Display for KeyError {
@@ -174,7 +178,11 @@ impl fmt::Display for KeyError {
             KeyError::InvalidName(msg) => write!(f, "invalid key name: {msg}"),
             KeyError::AlreadyExists(name) => write!(f, "key '{name}' already exists"),
             KeyError::NotFound(name) => write!(f, "key '{name}' not found"),
-            KeyError::InvalidTransition { name, current, requested } => write!(
+            KeyError::InvalidTransition {
+                name,
+                current,
+                requested,
+            } => write!(
                 f,
                 "key '{name}' cannot transition from '{current}' to '{requested}'"
             ),
@@ -407,14 +415,12 @@ pub fn render_keys_list(keys: &[&ManagedKey]) -> String {
     if keys.is_empty() {
         return "No managed keys found.".to_string();
     }
-    let mut lines = vec!["NAME                 PURPOSE                  STATUS    CREATED".to_string()];
+    let mut lines =
+        vec!["NAME                 PURPOSE                  STATUS    CREATED".to_string()];
     for key in keys {
         lines.push(format!(
             "{:<20} {:<24} {:<9} {}",
-            key.name,
-            key.purpose,
-            key.status,
-            key.created_at,
+            key.name, key.purpose, key.status, key.created_at,
         ));
     }
     lines.join("\n")
@@ -455,10 +461,7 @@ mod tests {
     #[test]
     fn key_name_rejects_special_characters() {
         for bad in ["my key", "key/path", "key.name", "key@host"] {
-            assert!(
-                KeyName::new(bad).is_err(),
-                "expected error for '{bad}'"
-            );
+            assert!(KeyName::new(bad).is_err(), "expected error for '{bad}'");
         }
     }
 

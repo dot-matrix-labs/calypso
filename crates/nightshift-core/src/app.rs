@@ -867,13 +867,12 @@ fn load_key_store(cwd: &Path) -> Result<KeyStore, String> {
 
 fn save_key_store(store: &KeyStore, cwd: &Path) -> Result<(), String> {
     let calypso_dir = cwd.join(".calypso");
-    std::fs::create_dir_all(&calypso_dir)
-        .map_err(|e| format!("cannot create .calypso/: {e}"))?;
+    std::fs::create_dir_all(&calypso_dir).map_err(|e| format!("cannot create .calypso/: {e}"))?;
     let path = calypso_dir.join(KEY_STORE_FILE);
     let tmp = path.with_extension("tmp");
     let snapshot = KeyStoreSnapshot::from(store);
-    let json = serde_json::to_string_pretty(&snapshot)
-        .map_err(|e| format!("serialization error: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(&snapshot).map_err(|e| format!("serialization error: {e}"))?;
     std::fs::write(&tmp, json).map_err(|e| format!("write error: {e}"))?;
     std::fs::rename(&tmp, &path).map_err(|e| format!("rename error: {e}"))?;
     Ok(())
@@ -895,8 +894,7 @@ pub fn run_keys_list(cwd: &Path) -> Result<String, String> {
 pub fn run_keys_list_json(cwd: &Path) -> Result<String, String> {
     let store = load_key_store(cwd)?;
     let snapshot = KeyStoreSnapshot::from(&store);
-    serde_json::to_string_pretty(&snapshot.keys)
-        .map_err(|e| format!("serialization error: {e}"))
+    serde_json::to_string_pretty(&snapshot.keys).map_err(|e| format!("serialization error: {e}"))
 }
 
 /// `calypso keys rotate <name>` — rotate the named key.
