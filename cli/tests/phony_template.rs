@@ -63,6 +63,8 @@ fn minimal_state(workflow_state: WorkflowState) -> RepositoryState {
         providers: vec![],
         releases: vec![],
         deployments: vec![],
+        github_auth_ref: None,
+        secure_key_refs: vec![],
     }
 }
 

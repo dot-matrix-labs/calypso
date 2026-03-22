@@ -663,6 +663,8 @@ mod tests {
             providers: vec![],
             releases: vec![],
             deployments: vec![],
+            github_auth_ref: None,
+            secure_key_refs: vec![],
         }
     }
 

@@ -71,6 +71,8 @@ fn sample_state() -> RepositoryState {
             transcript_refs: Vec::new(),
             clarification_history: Vec::new(),
         },
+        github_auth_ref: None,
+        secure_key_refs: Vec::new(),
     }
 }
 

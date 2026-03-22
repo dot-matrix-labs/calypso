@@ -4,6 +4,7 @@ pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
 pub mod doctor;
+pub mod keys;
 pub mod driver;
 pub mod error;
 pub mod execution;
@@ -94,6 +95,10 @@ Commands:
                       Parse the named workflow and report OK or the parse error
   webview             Start a local HTTP server (port 7373) with live state UI
   webview --port <N>  Start the webview server on a custom port
+  keys list           List all managed keys with metadata
+  keys list --json    List managed keys as JSON
+  keys rotate <name>  Rotate the named key (generates new material, archives old)
+  keys revoke <name>  Revoke the named key (marks it unusable)
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags
