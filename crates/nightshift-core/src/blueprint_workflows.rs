@@ -161,10 +161,10 @@ impl BlueprintWorkflow {
         };
         let mut result = Vec::new();
         for (key, val) in mapping {
-            if let Some(name) = key.as_str() {
-                if let Ok(job) = serde_yaml::from_value::<GhaJobRaw>(val.clone()) {
-                    result.push((name.to_string(), job));
-                }
+            if let Some(name) = key.as_str()
+                && let Ok(job) = serde_yaml::from_value::<GhaJobRaw>(val.clone())
+            {
+                result.push((name.to_string(), job));
             }
         }
         result
@@ -316,10 +316,10 @@ impl BlueprintWorkflow {
         job_name: &str,
     ) -> StateKind {
         // Job-level uses: → Workflow
-        if let Some(ref uses) = job.uses {
-            if uses.contains(".github/workflows/") {
-                return StateKind::Workflow;
-            }
+        if let Some(ref uses) = job.uses
+            && uses.contains(".github/workflows/")
+        {
+            return StateKind::Workflow;
         }
 
         // Check steps for action references
@@ -338,22 +338,9 @@ impl BlueprintWorkflow {
                     return StateKind::Function;
                 }
             }
-            if step.run.is_some() {
-                // Check if this is a terminal state marker
-                if let Some(ref run_cmd) = step.run {
-                    if run_cmd.contains("Terminal state:") {
-                        return StateKind::Terminal;
-                    }
-                }
-                // If it has no dependents and the run command is just an echo,
-                // it might still be deterministic
-                if !has_dependents.contains(job_name) {
-                    // Check if there's any real command vs just terminal echo
-                    if let Some(ref run_cmd) = step.run {
-                        if run_cmd.contains("Terminal state:") {
-                            return StateKind::Terminal;
-                        }
-                    }
+            if let Some(ref run_cmd) = step.run {
+                if run_cmd.contains("Terminal state:") {
+                    return StateKind::Terminal;
                 }
                 return StateKind::Deterministic;
             }
@@ -377,13 +364,14 @@ impl BlueprintWorkflow {
                     .get("role")
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
-                let cost = with_fields.get("cost").and_then(|v| v.as_str()).map(|s| {
-                    match s {
+                let cost = with_fields
+                    .get("cost")
+                    .and_then(|v| v.as_str())
+                    .map(|s| match s {
                         "guru" => AgentCost::Guru,
                         "cheap" => AgentCost::Cheap,
                         _ => AgentCost::Default,
-                    }
-                });
+                    });
                 let prompt = with_fields
                     .get("prompt")
                     .and_then(|v| v.as_str())
@@ -424,10 +412,7 @@ impl BlueprintWorkflow {
 
     /// Build the NextSpec for a job by scanning all other jobs' `needs:` and `if:`
     /// conditions to find which events from this job lead to which downstream jobs.
-    fn build_next_spec(
-        job_name: &str,
-        all_jobs: &HashMap<String, GhaJobRaw>,
-    ) -> Option<NextSpec> {
+    fn build_next_spec(job_name: &str, all_jobs: &HashMap<String, GhaJobRaw>) -> Option<NextSpec> {
         let mut transitions: Vec<(String, String)> = Vec::new();
 
         for (target_name, target_job) in all_jobs {
