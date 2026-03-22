@@ -11,6 +11,7 @@ pub mod feature_start;
 pub mod github;
 pub mod headless;
 pub mod headless_sm;
+pub mod headless_sm_driver;
 pub mod init;
 pub mod interpreter;
 pub mod operator_surface;
