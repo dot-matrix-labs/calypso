@@ -16,6 +16,7 @@ pub mod headless_sm_driver;
 pub mod init;
 pub mod interpreter;
 pub mod interpreter_scheduler;
+pub mod keys;
 pub mod operator_surface;
 pub mod pinned_prompt;
 pub mod policy;
@@ -94,6 +95,10 @@ Commands:
                       Parse the named workflow and report OK or the parse error
   webview             Start a local HTTP server (port 7373) with live state UI
   webview --port <N>  Start the webview server on a custom port
+  keys list           List all managed keys with metadata
+  keys list --json    List managed keys as JSON
+  keys rotate <name>  Rotate the named key (generates new material, archives old)
+  keys revoke <name>  Revoke the named key (marks it unusable)
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

@@ -15,13 +15,8 @@ pub struct RepositoryIdentity {
     pub default_branch: String,
 }
 
-// FUTURE: #42 — vault-backed credential references
-// #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// pub struct SecureKeyRef {
-//     pub id: String,
-//     pub name: String,
-//     pub purpose: String,
-// }
+// SecureKeyRef lives in crate::keys — re-exported here for state-level access.
+pub use crate::keys::SecureKeyRef;
 
 /// A summary entry for an active feature, used in the repository-level index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,12 +54,12 @@ pub struct RepositoryState {
     // integration is pending multi-vendor support.
     #[serde(default)]
     pub providers: Vec<String>,
-    // FUTURE: #42 — token name or keychain reference for GitHub auth; never the raw token
-    // #[serde(default)]
-    // pub github_auth_ref: Option<String>,
-    // FUTURE: #42 — vault-backed credential references; contains only identifiers, never raw secrets
-    // #[serde(default)]
-    // pub secure_key_refs: Vec<SecureKeyRef>,
+    /// Token name or keychain reference for GitHub auth; never the raw token.
+    #[serde(default)]
+    pub github_auth_ref: Option<String>,
+    /// Secure key references; contains only identifiers, never raw key material.
+    #[serde(default)]
+    pub secure_key_refs: Vec<SecureKeyRef>,
     // FUTURE: #40 — repository-level index of all active features
     // #[serde(default)]
     // pub active_features: Vec<FeatureSummary>,

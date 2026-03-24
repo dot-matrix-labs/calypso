@@ -44,6 +44,12 @@ jobs:
               echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+            # After a force-push rebase the before-SHA may no longer be
+            # reachable in the shallow clone; treat that as fully relevant.
+            if ! git cat-file -e "$base" 2>/dev/null; then
+              echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           else
             echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
             exit 0

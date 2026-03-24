@@ -62,6 +62,8 @@ fn full_repository_state() -> RepositoryState {
         releases: Vec::new(),
         deployments: Vec::new(),
         current_feature: minimal_feature_state("feat-auth"),
+        github_auth_ref: None,
+        secure_key_refs: Vec::new(),
     }
 }
 

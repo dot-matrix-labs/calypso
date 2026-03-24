@@ -36,6 +36,8 @@ pub enum DoctorCheckId {
     GitHooksPathConfigured,
     RequiredGitHooksInstalled,
     StateMachineIntegrity,
+    /// Validates internal consistency of the on-disk key store, if one exists.
+    KeyStoreHealth,
 }
 
 /// Severity of a failing check — determines whether a non-passing result is
@@ -54,6 +56,8 @@ impl DoctorCheckId {
         match self {
             // Optional tooling — nice-to-have, not required for core workflow.
             DoctorCheckId::CodexInstalled => CheckSeverity::Advisory,
+            // Key store health is advisory — a missing store is not an error.
+            DoctorCheckId::KeyStoreHealth => CheckSeverity::Advisory,
             // All other checks are hard requirements.
             _ => CheckSeverity::Required,
         }
@@ -75,6 +79,7 @@ impl DoctorCheckId {
                 "builtin.doctor.required_git_hooks_installed"
             }
             DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
+            DoctorCheckId::KeyStoreHealth => "builtin.doctor.key_store_health",
         }
     }
 
@@ -90,6 +95,7 @@ impl DoctorCheckId {
             DoctorCheckId::GitHooksPathConfigured => "git-hooks-path-configured",
             DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
             DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
+            DoctorCheckId::KeyStoreHealth => "key-store-health",
         }
     }
 }
@@ -460,7 +466,54 @@ pub fn collect_doctor_report(
                 repo_root,
                 None,
             ),
+            {
+                let (ks_ok, ks_detail) = check_key_store_health(repo_root);
+                make_check(
+                    DoctorCheckId::KeyStoreHealth,
+                    DoctorCheckScope::LocalConfiguration,
+                    ks_ok,
+                    ks_detail,
+                    repo_root,
+                    None,
+                )
+            },
         ],
+    }
+}
+
+/// Load the key store snapshot from `.calypso/keys.json` and run `health_check`.
+///
+/// Returns `(true, None)` when the store is healthy or absent.
+/// Returns `(false, Some(detail))` when the store has internal consistency errors.
+fn check_key_store_health(repo_root: &Path) -> (bool, Option<String>) {
+    use crate::keys::KeyStoreSnapshot;
+
+    let path = repo_root.join(".calypso").join("keys.json");
+    if !path.exists() {
+        // No store yet — this is normal for repos that have not used `calypso keys` yet.
+        return (true, None);
+    }
+
+    let json = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) => {
+            return (false, Some(format!("cannot read {}: {e}", path.display())));
+        }
+    };
+
+    let snapshot: KeyStoreSnapshot = match serde_json::from_str(&json) {
+        Ok(s) => s,
+        Err(e) => {
+            return (false, Some(format!("key store JSON invalid: {e}")));
+        }
+    };
+
+    let store = snapshot.into_store();
+    let issues = store.health_check();
+    if issues.is_empty() {
+        (true, None)
+    } else {
+        (false, Some(issues.join("; ")))
     }
 }
 
@@ -795,6 +848,11 @@ fn failing_doctor_fix(
                 "Review the state machine audit output and correct workflow references in blueprint YAML files."
                     .to_string(),
         }),
+
+        // No automated fix for key store corruption — manual review required.
+        DoctorCheckId::KeyStoreHealth => Some(DoctorFix::Manual {
+            instructions: "Inspect `.calypso/keys.json` for corruption. Use `calypso keys list` to check key metadata.".to_string(),
+        }),
     }
 }
 
@@ -841,6 +899,10 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
         DoctorCheckId::StateMachineIntegrity => {
             Some("Review the state machine audit findings and fix workflow references.".to_string())
         }
+        DoctorCheckId::KeyStoreHealth => Some(format!(
+            "Key store has integrity issues: {}",
+            detail.unwrap_or("unknown")
+        )),
     }
 }
 

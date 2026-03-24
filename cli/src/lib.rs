@@ -73,6 +73,10 @@ Commands:
                       Print the raw YAML for the named blueprint workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
+  keys list           List all managed keys with metadata
+  keys list --json    List managed keys as JSON
+  keys rotate <name>  Rotate the named key (generates new material, archives old)
+  keys revoke <name>  Revoke the named key (marks it unusable)
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags

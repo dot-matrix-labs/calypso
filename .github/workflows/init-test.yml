@@ -43,6 +43,12 @@ jobs:
               echo "init_relevant=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi
+            # After a force-push rebase the before-SHA may no longer be
+            # reachable in the shallow clone; treat that as fully relevant.
+            if ! git cat-file -e "$base" 2>/dev/null; then
+              echo "init_relevant=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
           else
             echo "init_relevant=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -70,6 +76,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: false
+
       - name: Init calypso-blueprint submodule
         if: needs.changes.outputs.init_relevant == 'true'
         run: git submodule update --init calypso-blueprint
