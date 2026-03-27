@@ -500,27 +500,30 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> 
         }
     }
 
-    // Embedded blueprint workflows — listed after local files.
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
-            continue;
-        };
-        let filename = format!("{stem}.yaml");
-        let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
+    // Embedded blueprint workflows — shown only when the project has no local workflows.
+    // Local files override the embedded library so the user sees a project-specific list.
+    if entries.is_empty() {
+        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+            let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
+                continue;
+            };
+            let filename = format!("{stem}.yaml");
+            let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
 
-        if let Some(ref sched) = wf.schedule {
-            entries.push(FlowEntry {
-                label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                stem: Some(stem.to_string()),
-                path: None,
-            });
-        }
-        if wf.trigger.is_some() {
-            entries.push(FlowEntry {
-                label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                stem: Some(stem.to_string()),
-                path: None,
-            });
+            if let Some(ref sched) = wf.schedule {
+                entries.push(FlowEntry {
+                    label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                    stem: Some(stem.to_string()),
+                    path: None,
+                });
+            }
+            if wf.trigger.is_some() {
+                entries.push(FlowEntry {
+                    label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                    stem: Some(stem.to_string()),
+                    path: None,
+                });
+            }
         }
     }
 

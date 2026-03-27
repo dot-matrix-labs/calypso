@@ -243,6 +243,45 @@ fn cron_entry_includes_cron_pattern() {
     );
 }
 
+// ── Local workflows override embedded defaults ────────────────────────────────
+
+/// When a project directory contains local workflow files in `.calypso/`, the
+/// selector must show ONLY those local files — no embedded blueprint entries.
+///
+/// This also exercises the full setup path: create a fresh directory, insert
+/// `turnstile.yaml`, and verify the selector output.
+#[test]
+fn local_workflows_override_embedded_defaults() {
+    let turnstile = include_str!("fixtures/workflows/turnstile.yaml");
+    let out = spawned_calypso()
+        .args(["--select-flow"])
+        .calypso_file("turnstile.yaml", turnstile)
+        // Send an out-of-range selection so the process exits cleanly after
+        // printing the list (we only care about the listing, not execution).
+        .stdin("0\n")
+        .run();
+
+    // The turnstile workflow must appear.
+    assert!(
+        out.stdout.contains("turnstile.yaml"),
+        "expected 'turnstile.yaml' in selector list; stdout:\n{}",
+        out.stdout
+    );
+
+    // No embedded blueprint filenames may appear.
+    for embedded in &[
+        "calypso-orchestrator-startup.yaml",
+        "calypso-planning.yaml",
+        "calypso-implementation-loop.yaml",
+    ] {
+        assert!(
+            !out.stdout.contains(embedded),
+            "embedded workflow '{embedded}' must not appear when local files exist; stdout:\n{}",
+            out.stdout
+        );
+    }
+}
+
 // ── Turnstile: cyclic local workflow ──────────────────────────────────────────
 
 /// The turnstile workflow cycles alice → bob → carol → alice indefinitely.
