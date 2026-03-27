@@ -109,7 +109,7 @@ fn route(
             ("200 OK", "application/json", json.into_bytes())
         }
         ("GET", "/api/workflows") => {
-            let json = read_workflows_json();
+            let json = read_workflows_json(cwd);
             ("200 OK", "application/json", json.into_bytes())
         }
         ("POST", "/api/trigger") => {
@@ -146,7 +146,7 @@ fn read_state_json(cwd: &Path) -> String {
         read_json_file(&calypso_dir.join("state.json")).unwrap_or(Value::Null);
 
     // Collect cron workflows from the embedded library.
-    let cron_workflows = collect_cron_workflows();
+    let cron_workflows = collect_cron_workflows(cwd);
 
     // Determine the active workflow name and state from workflow_state.
     let active_workflow_name = workflow_state
@@ -183,16 +183,17 @@ fn read_state_json(cwd: &Path) -> String {
     serde_json::to_string(&result).unwrap_or_else(|_| "{}".to_string())
 }
 
-/// Return all embedded workflows as a JSON array of `{ name, yaml }` objects.
-fn read_workflows_json() -> String {
-    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
+/// Return all effective workflows as a JSON array of `{ name, yaml }` objects.
+fn read_workflows_json(cwd: &Path) -> String {
+    use nightshift_core::blueprint_workflows::WorkflowCatalog;
 
-    let entries: Vec<Value> = BlueprintWorkflowLibrary::list()
+    let entries: Vec<Value> = WorkflowCatalog::load(cwd)
+        .entries()
         .iter()
-        .map(|(name, yaml)| {
+        .map(|entry| {
             serde_json::json!({
-                "name": name,
-                "yaml": yaml,
+                "name": entry.handle.display_name(),
+                "yaml": entry.yaml,
             })
         })
         .collect();
@@ -225,17 +226,17 @@ fn read_json_file(path: &Path) -> Option<Value> {
     serde_json::from_str(&text).ok()
 }
 
-/// Collect all embedded workflows that declare a `schedule.cron` field.
-fn collect_cron_workflows() -> Vec<Value> {
-    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
+/// Collect all effective workflows that declare a `schedule.cron` field.
+fn collect_cron_workflows(cwd: &Path) -> Vec<Value> {
+    use nightshift_core::blueprint_workflows::WorkflowCatalog;
 
     let mut result = Vec::new();
-    for (name, yaml) in BlueprintWorkflowLibrary::list() {
-        if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml)
+    for entry in WorkflowCatalog::load(cwd).entries() {
+        if let Ok(wf) = entry.parse()
             && let Some(schedule) = &wf.schedule
         {
             result.push(serde_json::json!({
-                "name": name,
+                "name": entry.handle.display_name(),
                 "cron": schedule.cron,
                 "description": schedule.description,
             }));
@@ -244,91 +245,42 @@ fn collect_cron_workflows() -> Vec<Value> {
     result
 }
 
-/// Like `resolve_active_state_info` but checks local YAML files in `workflows_dir` first.
-///
-/// Tries every `.yml` / `.yaml` file whose stem matches `workflow_name` (or whose
-/// `name:` field matches). Falls back to the embedded blueprint library.
 fn resolve_active_state_info_with_local(
     workflows_dir: &Path,
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
-    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
-
-    // Try local files first.
-    if let Ok(entries) = std::fs::read_dir(workflows_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let is_yaml = path
-                .extension()
-                .map(|e| e == "yml" || e == "yaml")
-                .unwrap_or(false);
-            if !is_yaml {
-                continue;
-            }
-            let yaml = match std::fs::read_to_string(&path) {
-                Ok(y) => y,
-                Err(_) => continue,
-            };
-            let wf = match BlueprintWorkflowLibrary::parse(&yaml) {
-                Ok(w) => w,
-                Err(_) => continue,
-            };
-            // Match by name field or by file stem.
-            let stem = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or_default();
-            let matches = wf.name.as_deref() == Some(workflow_name) || stem == workflow_name;
-            if !matches {
-                continue;
-            }
-            if let Some(state) = wf.states.get(state_name) {
-                let kind = state.kind.as_ref().map(|k| {
-                    use nightshift_core::blueprint_workflows::StateKind;
-                    match k {
-                        StateKind::Deterministic => "deterministic",
-                        StateKind::Agent => "agent",
-                        StateKind::Human => "human",
-                        StateKind::Github => "github",
-                        StateKind::Function => "function",
-                        StateKind::Workflow => "workflow",
-                        StateKind::Terminal => "terminal",
-                        StateKind::GitHook => "git-hook",
-                        StateKind::Ci => "ci",
-                    }
-                    .to_string()
-                });
-                let transitions = state
-                    .next
-                    .as_ref()
-                    .map(|n| n.all_event_keys().iter().map(|s| s.to_string()).collect())
-                    .unwrap_or_default();
-                return (transitions, kind);
-            }
-        }
-    }
-
-    // Fall back to the embedded library.
-    resolve_active_state_info(workflow_name, state_name)
+    resolve_active_state_info_from_catalog(
+        &workflow_catalog_for_workflows_dir(workflows_dir),
+        workflow_name,
+        state_name,
+    )
 }
 
 /// Given a workflow name and state name, return (transitions, kind) for that state.
+#[cfg_attr(not(test), allow(dead_code))]
 fn resolve_active_state_info(
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
-    use nightshift_core::blueprint_workflows::BlueprintWorkflowLibrary;
+    use nightshift_core::blueprint_workflows::WorkflowCatalog;
 
-    let yaml = match BlueprintWorkflowLibrary::get(workflow_name) {
-        Some(y) => y,
+    resolve_active_state_info_from_catalog(&WorkflowCatalog::embedded(), workflow_name, state_name)
+}
+
+fn resolve_active_state_info_from_catalog(
+    catalog: &nightshift_core::blueprint_workflows::WorkflowCatalog,
+    workflow_name: &str,
+    state_name: &str,
+) -> (Vec<String>, Option<String>) {
+    let entry = match catalog.find(workflow_name) {
+        Some(entry) => entry,
         None => return (vec![], None),
     };
-    let wf = match BlueprintWorkflowLibrary::parse(yaml) {
-        Ok(w) => w,
+    let wf = match entry.parse() {
+        Ok(wf) => wf,
         Err(_) => return (vec![], None),
     };
-
     let state = match wf.states.get(state_name) {
         Some(s) => s,
         None => return (vec![], None),
@@ -357,6 +309,22 @@ fn resolve_active_state_info(
         .unwrap_or_default();
 
     (transitions, kind)
+}
+
+fn workflow_catalog_for_workflows_dir(
+    workflows_dir: &Path,
+) -> nightshift_core::blueprint_workflows::WorkflowCatalog {
+    let repo_root = workflows_dir
+        .parent()
+        .and_then(|path| {
+            (path.file_name().and_then(|name| name.to_str()) == Some(".calypso")).then_some(path)
+        })
+        .and_then(Path::parent);
+
+    match repo_root {
+        Some(repo_root) => nightshift_core::blueprint_workflows::WorkflowCatalog::load(repo_root),
+        None => nightshift_core::blueprint_workflows::WorkflowCatalog::embedded(),
+    }
 }
 
 // ── Worktree-local path used only in tests ────────────────────────────────────
@@ -509,13 +477,13 @@ mod tests {
 
     #[test]
     fn collect_cron_workflows_is_non_empty() {
-        let crons = collect_cron_workflows();
+        let crons = collect_cron_workflows(&std::env::temp_dir());
         assert!(!crons.is_empty(), "expected at least one cron workflow");
     }
 
     #[test]
     fn collect_cron_workflows_entries_have_required_fields() {
-        for entry in collect_cron_workflows() {
+        for entry in collect_cron_workflows(&std::env::temp_dir()) {
             assert!(entry.get("name").is_some(), "missing 'name' field");
             assert!(entry.get("cron").is_some(), "missing 'cron' field");
         }
@@ -606,7 +574,7 @@ jobs:
     }
 
     #[test]
-    fn resolve_active_state_info_with_local_skips_non_yaml_files() {
+    fn resolve_active_state_info_with_local_does_not_fallback_when_local_catalog_exists() {
         let tmp = std::env::temp_dir().join("calypso-webview-local-skip");
         let workflows_dir = tmp.join(".calypso").join("workflows");
         std::fs::create_dir_all(&workflows_dir).unwrap();
@@ -617,14 +585,17 @@ jobs:
         let yaml = "name: other-workflow\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: start\n";
         std::fs::write(workflows_dir.join("other-workflow.yml"), yaml).unwrap();
 
-        // Should fall back to embedded library since no match.
+        // With a local workflow catalog present, the effective workflow set is local-only.
         let (transitions, kind) = resolve_active_state_info_with_local(
             &workflows_dir,
             "calypso-default-feature-workflow",
             "write-failing-tests",
         );
-        assert!(kind.is_some(), "expected embedded library fallback");
-        assert!(!transitions.is_empty() || kind.is_some());
+        assert!(kind.is_none(), "expected no embedded fallback");
+        assert!(
+            transitions.is_empty(),
+            "expected no transitions without a local match"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
