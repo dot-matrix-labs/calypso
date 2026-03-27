@@ -1,21 +1,21 @@
-use calypso_cli::app::{
+use calypso_cli::{BuildInfo, render_help, render_version};
+use calypso_web::run_webview;
+use nightshift_core::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
     run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
     run_keys_list, run_keys_list_json, run_keys_revoke, run_keys_rotate, run_state_status_json,
     run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
     run_workflows_validate,
 };
-use calypso_cli::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
-use calypso_cli::feature_start::{FeatureStartRequest, run_feature_start};
-use calypso_cli::init::{
+use nightshift_core::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
+use nightshift_core::feature_start::{FeatureStartRequest, run_feature_start};
+use nightshift_core::init::{
     HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
     render_init_status, run_init_interactive, run_init_step,
 };
-use calypso_cli::operator_surface::OperatorSurface;
-use calypso_cli::state::RepositoryState;
-use calypso_cli::template::TemplateSet;
-use calypso_cli::{BuildInfo, render_help, render_version};
-use calypso_web::run_webview;
+use nightshift_core::operator_surface::OperatorSurface;
+use nightshift_core::state::RepositoryState;
+use nightshift_core::template::TemplateSet;
 
 fn build_info() -> BuildInfo<'static> {
     const VERSION: &str = concat!(
@@ -799,9 +799,11 @@ fn run_claude_session(state_path: &str, role: &str) {
 }
 
 fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&std::path::Path>) {
-    use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-    use calypso_cli::execution::ExecutionConfig;
-    use calypso_cli::template::{load_embedded_template_set, load_template_set_with_state_machine};
+    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+    use nightshift_core::execution::ExecutionConfig;
+    use nightshift_core::template::{
+        load_embedded_template_set, load_template_set_with_state_machine,
+    };
 
     let template = match flow_override {
         Some(path) => load_template_set_with_state_machine(path).unwrap_or_else(|_| {
@@ -856,9 +858,9 @@ fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&s
 
 /// Run a workflow selected from the effective catalog through the shared interpreter.
 fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
-    use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
     use calypso_workflow_exec::{StepOutcome, WorkflowInterpreter};
     use calypso_workflows::{StateKind, WorkflowCatalog};
+    use nightshift_core::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
 
     let catalog = WorkflowCatalog::load(cwd);
     let interp = match WorkflowInterpreter::from_catalog(&catalog) {
@@ -1044,13 +1046,13 @@ fn workflow_agent_prompt(
 }
 
 fn run_state_machine_step(state_path: &std::path::Path) {
-    use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-    use calypso_cli::execution::ExecutionConfig;
-    use calypso_cli::pinned_prompt::{
+    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+    use nightshift_core::execution::ExecutionConfig;
+    use nightshift_core::pinned_prompt::{
         Confirmation, PinnedPrompt, format_initial_prompt, format_transition_prompt,
     };
-    use calypso_cli::state::RepositoryState;
-    use calypso_cli::template::load_embedded_template_set;
+    use nightshift_core::state::RepositoryState;
+    use nightshift_core::template::load_embedded_template_set;
 
     let template = load_embedded_template_set().expect("embedded templates should be valid");
     let driver = StateMachineDriver {
