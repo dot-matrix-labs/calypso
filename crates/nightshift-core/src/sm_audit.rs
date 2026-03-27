@@ -19,7 +19,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use crate::blueprint_workflows::{BlueprintWorkflow, BlueprintWorkflowLibrary, StateKind};
+use crate::blueprint_workflows::{BlueprintWorkflow, StateKind, WorkflowCatalog};
 use crate::template::{self, TemplateSet};
 
 // ── Audit result types ──────────────────────────────────────────────────────
@@ -128,22 +128,7 @@ pub fn run_structural_audit() -> StateMachineAudit {
     let mut findings = Vec::new();
 
     // 1) Parse all embedded workflows into a lookup map
-    let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        match BlueprintWorkflowLibrary::parse(yaml) {
-            Ok(wf) => {
-                workflows.insert(stem.to_string(), wf);
-            }
-            Err(e) => {
-                findings.push(AuditFinding {
-                    severity: AuditSeverity::Error,
-                    source: (*stem).to_string(),
-                    message: format!("failed to parse blueprint workflow: {e}"),
-                    suggestion: None,
-                });
-            }
-        }
-    }
+    let workflows = parse_catalog_workflows(&WorkflowCatalog::embedded(), &mut findings);
 
     // 2) Walk the workflow graph from all entry points
     let entry_roots = entry_point_roots(&workflows);
@@ -484,37 +469,50 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
 
     // 1) Audit blueprint workflows — validate that all embedded workflows parse cleanly
     if !is_hello_world {
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            if let Err(e) = BlueprintWorkflowLibrary::parse(yaml) {
+        let catalog = WorkflowCatalog::load(repo_root);
+        let workflows = parse_catalog_workflows(&catalog, &mut findings);
+
+        for (name, wf) in &workflows {
+            audit_blueprint_workflow(name, wf, repo_root, &available_gha_files, &mut findings);
+        }
+
+        // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
+        if let Ok(template) = template::load_embedded_template_set() {
+            audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
+        }
+
+        // 3) Unified workflow graph walk — reachability, dead branches, handoffs
+        // Skipped in hello_world mode to avoid auditing unused blueprints.
+        let entry_roots = entry_point_roots(&workflows);
+        audit_workflow_graph(&entry_roots, &workflows, &mut findings);
+    }
+
+    StateMachineAudit { findings }
+}
+
+fn parse_catalog_workflows(
+    catalog: &WorkflowCatalog,
+    findings: &mut Vec<AuditFinding>,
+) -> BTreeMap<String, BlueprintWorkflow> {
+    let mut workflows = BTreeMap::new();
+
+    for entry in catalog.entries() {
+        match entry.parse() {
+            Ok(wf) => {
+                workflows.insert(entry.handle.name.clone(), wf);
+            }
+            Err(e) => {
                 findings.push(AuditFinding {
                     severity: AuditSeverity::Error,
-                    source: (*stem).to_string(),
-                    message: format!("failed to parse blueprint workflow: {e}"),
+                    source: entry.handle.display_name().to_string(),
+                    message: format!("failed to parse workflow: {e}"),
                     suggestion: None,
                 });
             }
         }
     }
 
-    // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
-    if !is_hello_world && let Ok(template) = template::load_embedded_template_set() {
-        audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
-    }
-
-    // 3) Unified workflow graph walk — reachability, dead branches, handoffs
-    // Skipped in hello_world mode to avoid auditing unused blueprints.
-    if !is_hello_world {
-        let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
-                workflows.insert(stem.to_string(), wf);
-            }
-        }
-        let entry_roots = entry_point_roots(&workflows);
-        audit_workflow_graph(&entry_roots, &workflows, &mut findings);
-    }
-
-    StateMachineAudit { findings }
+    workflows
 }
 
 /// Scan `.github/workflows/` and return a map of filename → parsed `GhaWorkflow`.
