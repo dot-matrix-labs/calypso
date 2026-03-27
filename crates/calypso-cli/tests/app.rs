@@ -591,6 +591,56 @@ fn run_status_surfaces_gh_error_in_output_when_pr_lookup_fails() {
 }
 
 #[test]
+fn run_status_uses_local_template_override_when_no_state_file_exists() {
+    let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
+    let repo_root = init_git_repo("feature/test-local-template-status");
+
+    std::fs::write(
+        repo_root.join("calypso-state-machine.yml"),
+        r#"
+initial_state: new
+states:
+  - new
+  - implementation
+gate_groups:
+  - id: local-policy
+    label: Local Policy
+    gates:
+      - id: local-ready
+        label: Local readiness gate
+        task: local-agent
+"#,
+    )
+    .expect("state machine override should write");
+    std::fs::write(
+        repo_root.join("calypso-agents.yml"),
+        r#"
+tasks:
+  - name: local-agent
+    kind: agent
+    role: implementer
+"#,
+    )
+    .expect("agents override should write");
+    std::fs::write(
+        repo_root.join("calypso-prompts.yml"),
+        r#"
+prompts:
+  local-agent: |
+    Follow the local template override.
+"#,
+    )
+    .expect("prompts override should write");
+
+    let output = run_status(&repo_root).expect("run_status should succeed");
+
+    assert!(output.contains("Local Policy"));
+    assert!(output.contains("Local readiness gate"));
+
+    std::fs::remove_dir_all(repo_root).expect("repo should be removed");
+}
+
+#[test]
 fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_json() {
     let _lock = EXEC_LOCK.write().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-pr-malformed");
