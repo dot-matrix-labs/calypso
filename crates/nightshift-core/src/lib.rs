@@ -27,7 +27,7 @@ pub mod telemetry;
 pub mod template;
 pub mod workflows;
 pub use calypso_workflow_exec as interpreter;
-pub use calypso_workflows as blueprint_workflows;
+pub use calypso_workflows as workflow_definitions;
 pub mod interpreter_scheduler;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +90,7 @@ Commands:
   template validate   Validate the local workflow template
   workflows list      List effective workflow names for the project directory
   workflows show <name>
-                      Print the raw YAML for the named blueprint workflow
+                      Print the raw YAML for the named workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
   webview             Start a local HTTP server (port 7373) with live state UI

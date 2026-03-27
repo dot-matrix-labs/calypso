@@ -16,7 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use calypso_workflows::{BlueprintWorkflow, StateConfig, StateKind, WorkflowCatalog};
+use calypso_workflows::{StateConfig, StateKind, Workflow, WorkflowCatalog};
 
 // ── Entry points ─────────────────────────────────────────────────────────────
 
@@ -129,7 +129,7 @@ pub enum StepOutcome {
 
 /// Registry of all loaded workflow definitions.
 pub struct WorkflowRegistry {
-    workflows: BTreeMap<String, BlueprintWorkflow>,
+    workflows: BTreeMap<String, Workflow>,
 }
 
 impl WorkflowRegistry {
@@ -151,7 +151,7 @@ impl WorkflowRegistry {
     }
 
     /// Look up a workflow by name.
-    pub fn get(&self, name: &str) -> Option<&BlueprintWorkflow> {
+    pub fn get(&self, name: &str) -> Option<&Workflow> {
         self.workflows.get(name)
     }
 

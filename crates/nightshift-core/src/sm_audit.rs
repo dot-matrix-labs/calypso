@@ -19,8 +19,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use crate::blueprint_workflows::{BlueprintWorkflow, StateKind, WorkflowCatalog};
 use crate::template::{self, TemplateSet};
+use crate::workflow_definitions::{NextSpec, StateKind, Workflow, WorkflowCatalog};
 
 // ── Audit result types ──────────────────────────────────────────────────────
 
@@ -149,7 +149,7 @@ pub fn run_structural_audit() -> StateMachineAudit {
 
 /// Returns the names of all top-level entry point workflows — those that are
 /// not exclusively used as sub-workflows by other workflows.
-fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&str> {
+fn entry_point_roots(workflows: &BTreeMap<String, Workflow>) -> Vec<&str> {
     // Collect all sub-workflow names referenced by kind: workflow states.
     let mut sub_names: BTreeSet<&str> = BTreeSet::new();
     for wf in workflows.values() {
@@ -186,7 +186,7 @@ fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&st
 /// After walking, flags any workflow files that were never reached as orphans.
 fn audit_workflow_graph(
     roots: &[&str],
-    workflows: &BTreeMap<String, BlueprintWorkflow>,
+    workflows: &BTreeMap<String, Workflow>,
     findings: &mut Vec<AuditFinding>,
 ) {
     // BFS through workflow references, seeded from all entry points
@@ -222,7 +222,7 @@ fn audit_workflow_graph(
                         source: wf_name.to_string(),
                         message: format!(
                             "state '{state_name}' references workflow '{sub_wf_name}' \
-                             which is not in the embedded workflow library"
+                             which is not in the embedded workflow catalog"
                         ),
                         suggestion: None,
                     });
@@ -274,8 +274,8 @@ fn audit_workflow_handoff(
     parent_wf: &str,
     parent_state: &str,
     sub_wf_name: &str,
-    parent_next: Option<&crate::blueprint_workflows::NextSpec>,
-    sub_wf: &BlueprintWorkflow,
+    parent_next: Option<&NextSpec>,
+    sub_wf: &Workflow,
     findings: &mut Vec<AuditFinding>,
 ) {
     // Collect terminal state names from the sub-workflow
@@ -334,7 +334,7 @@ fn audit_workflow_handoff(
 /// 2. Every non-terminal state can reach at least one terminal state (no dead branches)
 ///
 /// A state is terminal if its `kind` is `Terminal` or it has no `next` spec.
-fn audit_reachability(stem: &str, wf: &BlueprintWorkflow, findings: &mut Vec<AuditFinding>) {
+fn audit_reachability(stem: &str, wf: &Workflow, findings: &mut Vec<AuditFinding>) {
     let initial_state = match &wf.initial_state {
         Some(s) => s.as_str(),
         None => return, // No initial_state means no state machine graph to audit
@@ -493,7 +493,7 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
 fn parse_catalog_workflows(
     catalog: &WorkflowCatalog,
     findings: &mut Vec<AuditFinding>,
-) -> BTreeMap<String, BlueprintWorkflow> {
+) -> BTreeMap<String, Workflow> {
     let mut workflows = BTreeMap::new();
 
     for entry in catalog.entries() {
@@ -570,6 +570,23 @@ fn common_char_count(a: &str, b: &str) -> usize {
     let a_chars: BTreeSet<char> = a.chars().collect();
     let b_chars: BTreeSet<char> = b.chars().collect();
     a_chars.intersection(&b_chars).count()
+}
+
+/// Audit a single blueprint workflow for reference integrity.
+///
+/// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
+/// no longer exist. Validation focuses on workflow-level `uses:` references
+/// for `kind: workflow` states and check reference integrity.
+fn audit_blueprint_workflow(
+    stem: &str,
+    wf: &Workflow,
+    _repo_root: &Path,
+    _available_gha_files: &BTreeMap<String, GhaWorkflow>,
+    findings: &mut Vec<AuditFinding>,
+) {
+    // Orphan/dangling check detection (checks map is empty in GHA format,
+    // but retained for backward compatibility with test workflows).
+    audit_check_references(stem, wf, findings);
 }
 
 /// Validate a single workflow file reference (existence + name match).
@@ -651,6 +668,60 @@ fn validate_job_keys(
                         gha.jobs.join(", ")
                     }
                 ),
+                suggestion: None,
+            });
+        }
+    }
+}
+
+/// Audit orphan and dangling check references within a blueprint workflow.
+fn audit_check_references(stem: &str, wf: &Workflow, findings: &mut Vec<AuditFinding>) {
+    let defined_checks: BTreeSet<&str> = wf.checks.keys().map(|k| k.as_str()).collect();
+
+    // Collect all check names referenced by states
+    let mut referenced_checks: BTreeSet<&str> = BTreeSet::new();
+    for state_cfg in wf.states.values() {
+        if let Some(checks) = &state_cfg.checks {
+            for check in checks {
+                referenced_checks.insert(check.as_str());
+            }
+        }
+        // Also count checks referenced via completion criteria
+        if let Some(completion) = &state_cfg.completion {
+            if let Some(all_of) = &completion.all_of {
+                for item in all_of {
+                    referenced_checks.insert(item.as_str());
+                }
+            }
+            if let Some(any_of) = &completion.any_of {
+                for item in any_of {
+                    referenced_checks.insert(item.as_str());
+                }
+            }
+        }
+    }
+
+    // Dangling: referenced by a state but not defined in `checks`
+    for check_ref in &referenced_checks {
+        if !defined_checks.contains(*check_ref) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Error,
+                source: stem.to_string(),
+                message: format!(
+                    "check '{check_ref}' is referenced by a state but not defined in the checks map"
+                ),
+                suggestion: Some(format!("add '{check_ref}' to the checks section")),
+            });
+        }
+    }
+
+    // Orphan: defined in `checks` but not referenced by any state
+    for defined in &defined_checks {
+        if !referenced_checks.contains(*defined) {
+            findings.push(AuditFinding {
+                severity: AuditSeverity::Warning,
+                source: stem.to_string(),
+                message: format!("check '{defined}' is defined but not referenced by any state"),
                 suggestion: None,
             });
         }
@@ -949,6 +1020,67 @@ mod tests {
     }
 
     #[test]
+    fn audit_detects_orphan_checks() {
+        let wf_yaml = r#"
+version: 1
+name: test-workflow
+initial_state: start
+states:
+  start:
+    kind: agent
+    completion:
+      all_of:
+        - check-a
+checks:
+  check-a:
+    kind: deterministic
+  check-orphan:
+    kind: deterministic
+"#;
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_check_references("test-wf", &wf, &mut findings);
+
+        let orphans: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not referenced"))
+            .collect();
+        assert_eq!(orphans.len(), 1);
+        assert!(orphans[0].message.contains("check-orphan"));
+        assert_eq!(orphans[0].severity, AuditSeverity::Warning);
+    }
+
+    #[test]
+    fn audit_detects_dangling_check_references() {
+        let wf_yaml = r#"
+version: 1
+name: test-workflow
+initial_state: start
+states:
+  start:
+    kind: agent
+    completion:
+      all_of:
+        - check-a
+        - check-nonexistent
+checks:
+  check-a:
+    kind: deterministic
+"#;
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let mut findings = Vec::new();
+        audit_check_references("test-wf", &wf, &mut findings);
+
+        let dangling: Vec<_> = findings
+            .iter()
+            .filter(|f| f.message.contains("not defined"))
+            .collect();
+        assert_eq!(dangling.len(), 1);
+        assert!(dangling[0].message.contains("check-nonexistent"));
+        assert_eq!(dangling[0].severity, AuditSeverity::Error);
+    }
+
+    #[test]
     fn suggest_filename_finds_substring_match() {
         let mut available = BTreeMap::new();
         available.insert(
@@ -1037,7 +1169,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1069,7 +1201,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1095,7 +1227,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1136,7 +1268,7 @@ states:
   aborted:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1152,7 +1284,7 @@ states:
     fn workflow_graph_detects_orphan_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(
+        let root: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: root
@@ -1168,7 +1300,7 @@ states:
         )
         .unwrap();
 
-        let orphan: BlueprintWorkflow = serde_yaml::from_str(
+        let orphan: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: orphan-wf
@@ -1202,7 +1334,7 @@ states:
     fn workflow_graph_detects_missing_sub_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(
+        let root: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: root
@@ -1227,7 +1359,7 @@ states:
 
         let missing: Vec<_> = findings
             .iter()
-            .filter(|f| f.message.contains("not in the embedded workflow library"))
+            .filter(|f| f.message.contains("not in the embedded workflow catalog"))
             .collect();
         assert_eq!(missing.len(), 1);
         assert!(missing[0].message.contains("nonexistent"));
@@ -1237,7 +1369,7 @@ states:
     fn workflow_graph_detects_handoff_mismatch() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(
+        let parent: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: parent
@@ -1256,7 +1388,7 @@ states:
         )
         .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(
+        let child: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: child
@@ -1302,7 +1434,7 @@ states:
     fn workflow_graph_valid_handoff_no_errors() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(
+        let parent: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: parent
@@ -1321,7 +1453,7 @@ states:
         )
         .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(
+        let child: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: child
@@ -1354,7 +1486,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_on_map() {
-        use crate::blueprint_workflows::NextSpec;
+        use crate::workflow_definitions::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  ok: state-a\n  fail: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1365,7 +1497,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_top_level_keys() {
-        use crate::blueprint_workflows::NextSpec;
+        use crate::workflow_definitions::NextSpec;
         let yaml: serde_yaml::Value = serde_yaml::from_str(
             "on_success: state-a\non_failure: state-b\non_rejection: state-c\n",
         )
@@ -1378,7 +1510,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_on_map_keys() {
-        use crate::blueprint_workflows::NextSpec;
+        use crate::workflow_definitions::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  done: state-a\n  aborted: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1389,7 +1521,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_top_level() {
-        use crate::blueprint_workflows::NextSpec;
+        use crate::workflow_definitions::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on_success: state-a\non_failure: state-b\n").unwrap();
         let spec = NextSpec(yaml);

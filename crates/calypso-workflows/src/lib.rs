@@ -36,10 +36,10 @@ const CALYPSO_SAVE_STATE: &str =
 
 // ── Library ──────────────────────────────────────────────────────────────────
 
-/// Static registry of all embedded `calypso-*.yaml` blueprint workflow files.
-pub struct BlueprintWorkflowLibrary;
+/// Static registry of all embedded `calypso-*.yaml` workflow files.
+pub struct EmbeddedWorkflowLibrary;
 
-impl BlueprintWorkflowLibrary {
+impl EmbeddedWorkflowLibrary {
     /// Returns all embedded workflows as `(filename_stem, raw_yaml)` pairs.
     pub fn list() -> &'static [(&'static str, &'static str)] {
         &[
@@ -70,17 +70,17 @@ impl BlueprintWorkflowLibrary {
             .map(|(_, yaml)| *yaml)
     }
 
-    /// Parse a raw GHA YAML string into a [`BlueprintWorkflow`].
+    /// Parse a raw GHA YAML string into a [`Workflow`].
     ///
     /// This parses the GitHub Actions format and derives the state machine
     /// representation (states, transitions, kinds) from the GHA structure.
-    pub fn parse(yaml: &str) -> Result<BlueprintWorkflow, serde_yaml::Error> {
+    pub fn parse(yaml: &str) -> Result<Workflow, serde_yaml::Error> {
         let raw: GhaWorkflowRaw = serde_yaml::from_str(yaml)?;
-        Ok(BlueprintWorkflow::from_gha(raw))
+        Ok(Workflow::from_gha(raw))
     }
 }
 
-pub type WorkflowDocument = BlueprintWorkflow;
+pub type WorkflowDocument = Workflow;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkflowSource {
@@ -116,7 +116,7 @@ pub struct WorkflowCatalogEntry {
 
 impl WorkflowCatalogEntry {
     pub fn parse(&self) -> Result<WorkflowDocument, serde_yaml::Error> {
-        BlueprintWorkflowLibrary::parse(&self.yaml)
+        EmbeddedWorkflowLibrary::parse(&self.yaml)
     }
 }
 
@@ -157,7 +157,7 @@ impl WorkflowCatalog {
     }
 
     pub fn embedded() -> Self {
-        let entries = BlueprintWorkflowLibrary::list()
+        let entries = EmbeddedWorkflowLibrary::list()
             .iter()
             .map(|(stem, yaml)| WorkflowCatalogEntry {
                 handle: WorkflowHandle {
@@ -278,7 +278,7 @@ struct GhaStepRaw {
 /// - `schedule` is extracted from `on: schedule:`
 /// - Transitions are derived from `needs:` + `if:` conditions
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BlueprintWorkflow {
+pub struct Workflow {
     pub name: Option<String>,
     pub initial_state: Option<String>,
     pub schedule: Option<ScheduleConfig>,
@@ -289,7 +289,7 @@ pub struct BlueprintWorkflow {
     pub states: HashMap<String, StateConfig>,
 }
 
-impl BlueprintWorkflow {
+impl Workflow {
     /// Parse the `jobs:` value into an ordered list of (name, GhaJobRaw).
     fn parse_jobs(jobs_val: &serde_yaml::Value) -> Vec<(String, GhaJobRaw)> {
         let Some(mapping) = jobs_val.as_mapping() else {
@@ -386,7 +386,7 @@ impl BlueprintWorkflow {
             );
         }
 
-        BlueprintWorkflow {
+        Workflow {
             name,
             initial_state,
             schedule,
@@ -876,8 +876,8 @@ mod tests {
 
     #[test]
     fn all_embedded_workflows_parse_successfully() {
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let result = BlueprintWorkflowLibrary::parse(yaml);
+        for (stem, yaml) in EmbeddedWorkflowLibrary::list() {
+            let result = EmbeddedWorkflowLibrary::parse(yaml);
             assert!(
                 result.is_ok(),
                 "failed to parse workflow '{stem}': {:?}",
@@ -888,25 +888,25 @@ mod tests {
 
     #[test]
     fn get_returns_yaml_for_known_stem() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-planning");
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-planning");
         assert!(yaml.is_some(), "expected to find calypso-planning");
         assert!(yaml.unwrap().contains("calypso-planning"));
     }
 
     #[test]
     fn get_returns_none_for_unknown_stem() {
-        assert!(BlueprintWorkflowLibrary::get("does-not-exist").is_none());
+        assert!(EmbeddedWorkflowLibrary::get("does-not-exist").is_none());
     }
 
     #[test]
     fn list_contains_all_ten_workflows() {
-        assert_eq!(BlueprintWorkflowLibrary::list().len(), 10);
+        assert_eq!(EmbeddedWorkflowLibrary::list().len(), 10);
     }
 
     #[test]
     fn default_feature_workflow_has_expected_initial_state() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         assert_eq!(
             wf.initial_state.as_deref(),
             Some("create-worktree"),
@@ -916,8 +916,8 @@ mod tests {
 
     #[test]
     fn default_feature_workflow_states_are_populated() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         assert!(
             !wf.states.is_empty(),
             "expected at least one state in the feature workflow"
@@ -926,8 +926,8 @@ mod tests {
 
     #[test]
     fn default_feature_workflow_has_workflow_kind_states() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let impl_loop = wf.states.get("implementation-loop").unwrap();
         assert_eq!(impl_loop.kind, Some(StateKind::Workflow));
         assert_eq!(
@@ -938,8 +938,8 @@ mod tests {
 
     #[test]
     fn next_spec_target_for_resolves_on_success() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let state = wf.states.get("write-failing-tests").unwrap();
         let next = state.next.as_ref().unwrap();
         assert_eq!(
@@ -951,8 +951,8 @@ mod tests {
 
     #[test]
     fn next_spec_target_for_resolves_on_failure() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let state = wf.states.get("write-failing-tests").unwrap();
         let next = state.next.as_ref().unwrap();
         assert_eq!(
@@ -964,16 +964,16 @@ mod tests {
 
     #[test]
     fn orchestrator_has_schedule() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         assert!(wf.schedule.is_some(), "expected schedule on orchestrator");
         assert_eq!(wf.schedule.unwrap().cron, "0 */5 * * * *");
     }
 
     #[test]
     fn release_request_has_trigger() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-release-request").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-release-request").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         assert!(wf.trigger.is_some(), "expected trigger on release-request");
         assert_eq!(
             wf.trigger.as_ref().unwrap().event.as_deref(),
@@ -983,8 +983,8 @@ mod tests {
 
     #[test]
     fn terminal_states_are_detected() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let done = wf.states.get("done").unwrap();
         assert_eq!(done.kind, Some(StateKind::Terminal));
         let aborted = wf.states.get("aborted").unwrap();
@@ -993,8 +993,8 @@ mod tests {
 
     #[test]
     fn agent_states_have_role_and_cost() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let fetch = wf.states.get("fetch-open-issues").unwrap();
         assert_eq!(fetch.kind, Some(StateKind::Agent));
         assert_eq!(fetch.role.as_deref(), Some("planner"));
@@ -1003,16 +1003,16 @@ mod tests {
 
     #[test]
     fn github_poller_states_detected() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-pr-review-merge").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-pr-review-merge").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let check_pr = wf.states.get("check-pr-structure").unwrap();
         assert_eq!(check_pr.kind, Some(StateKind::Github));
     }
 
     #[test]
     fn human_states_detected() {
-        let yaml = BlueprintWorkflowLibrary::get("calypso-implementation-loop").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-implementation-loop").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let req = wf.states.get("request-clarification").unwrap();
         assert_eq!(req.kind, Some(StateKind::Human));
     }

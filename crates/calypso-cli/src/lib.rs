@@ -71,7 +71,7 @@ Commands:
   template validate   Validate the local workflow template
   workflows list      List effective workflow names for the project directory
   workflows show <name>
-                      Print the raw YAML for the named blueprint workflow
+                      Print the raw YAML for the named workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
   keys list           List all managed keys with metadata
