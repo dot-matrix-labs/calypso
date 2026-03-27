@@ -221,11 +221,19 @@ impl WorkflowRegistry {
                     description: schedule.description.clone(),
                 });
             } else if let Some(trigger) = &wf.trigger {
-                entries.push(EntryPoint::EventTriggered {
-                    workflow: name.clone(),
-                    event: trigger.event.clone().unwrap_or_default(),
-                    pattern: trigger.pattern.clone(),
-                });
+                if let Some(event) = &trigger.event {
+                    entries.push(EntryPoint::EventTriggered {
+                        workflow: name.clone(),
+                        event: event.clone(),
+                        pattern: trigger.pattern.clone(),
+                    });
+                } else {
+                    entries.push(EntryPoint::UserAction {
+                        workflow: name.clone(),
+                        description: None,
+                        prompt: None,
+                    });
+                }
             } else {
                 let initial_cfg = wf.initial_state.as_deref().and_then(|s| wf.states.get(s));
                 let initial_kind = initial_cfg.and_then(|c| c.kind.clone());
@@ -750,28 +758,28 @@ mod tests {
     }
 
     #[test]
-    fn deployment_request_is_event_triggered() {
+    fn deployment_request_is_user_action() {
         let interp = WorkflowInterpreter::new().unwrap();
         let entry = interp
             .entry_points()
             .into_iter()
-            .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-deployment-request"));
+            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-deployment-request"));
         assert!(
             entry.is_some(),
-            "expected calypso-deployment-request as EventTriggered"
+            "expected calypso-deployment-request as UserAction"
         );
     }
 
     #[test]
-    fn feature_request_is_event_triggered() {
+    fn feature_request_is_user_action() {
         let interp = WorkflowInterpreter::new().unwrap();
         let entry = interp
             .entry_points()
             .into_iter()
-            .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-feature-request"));
+            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-feature-request"));
         assert!(
             entry.is_some(),
-            "expected calypso-feature-request as EventTriggered"
+            "expected calypso-feature-request as UserAction"
         );
     }
 
