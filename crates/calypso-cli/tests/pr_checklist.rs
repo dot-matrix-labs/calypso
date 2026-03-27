@@ -1,6 +1,6 @@
-use calypso_cli::pr_checklist::{seed_pr_body, update_pr_body};
-use calypso_cli::state::{Gate, GateGroup, GateStatus};
-use calypso_cli::template::TemplateSet;
+use nightshift_core::pr_checklist::{seed_pr_body, update_pr_body};
+use nightshift_core::state::{Gate, GateGroup, GateStatus};
+use nightshift_core::template::TemplateSet;
 
 fn minimal_template() -> TemplateSet {
     let sm = r#"

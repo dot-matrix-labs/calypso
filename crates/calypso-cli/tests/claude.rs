@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_cli::claude::{
+use nightshift_core::claude::{
     ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext, parse_clarification, parse_outcome,
 };
 

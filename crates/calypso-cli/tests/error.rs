@@ -1,4 +1,4 @@
-use calypso_cli::error::{CalypsoError, Recoverability, codes, redact, register_secret};
+use nightshift_core::error::{CalypsoError, Recoverability, codes, redact, register_secret};
 
 // ---------------------------------------------------------------------------
 // Error category constructors — correct codes

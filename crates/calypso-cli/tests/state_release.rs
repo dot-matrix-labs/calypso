@@ -1,4 +1,4 @@
-use calypso_cli::state::{
+use nightshift_core::state::{
     DeploymentRecord, DeploymentState, DeploymentTransitionError, FeatureState, FeatureType,
     PullRequestRef, ReleaseRecord, ReleaseState, ReleaseTransitionError, RepositoryIdentity,
     RepositoryState, SchedulingMeta, WorkflowState,

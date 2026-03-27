@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_cli::state::{
+use nightshift_core::state::{
     AgentSession, AgentSessionStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus,
     PullRequestRef, RepositoryIdentity, RepositoryState, SchedulingMeta, SessionOutput,
     SessionOutputStream, WorkflowState,

@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_cli::driver::{DriverMode, DriverStepResult, SessionExecutor, StateMachineDriver};
-use calypso_cli::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
-use calypso_cli::state::{
+use nightshift_core::driver::{DriverMode, DriverStepResult, SessionExecutor, StateMachineDriver};
+use nightshift_core::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
+use nightshift_core::state::{
     FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
 };
-use calypso_cli::template::TemplateSet;
+use nightshift_core::template::TemplateSet;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

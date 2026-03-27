@@ -1,4 +1,3 @@
-use calypso_cli::{BuildInfo, render_help, render_version};
 use calypso_web::run_webview;
 use nightshift_core::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
@@ -16,6 +15,85 @@ use nightshift_core::init::{
 use nightshift_core::operator_surface::OperatorSurface;
 use nightshift_core::state::RepositoryState;
 use nightshift_core::template::TemplateSet;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct BuildInfo<'a> {
+    version: &'a str,
+    git_hash: &'a str,
+    build_time: &'a str,
+    git_tags: &'a str,
+}
+
+fn render_version(info: BuildInfo<'_>) -> String {
+    format!(
+        "calypso-cli {} git:{} built:{} tags:{}",
+        info.version, info.git_hash, info.build_time, info.git_tags
+    )
+}
+
+fn render_help(info: BuildInfo<'_>) -> String {
+    format!(
+        "\
+calypso-cli {}
+
+Usage:
+  calypso [OPTIONS] [path] [COMMAND]
+
+Options:
+  -p, --path <dir>    Project directory (default: current working directory)
+  --select-flow       Interactively pick a workflow with a manual or cron entry point
+  -h, --help          Show this help output
+  -v, --version       Show build version information
+  -v, -vv             Verbosity: -v = info, -vv = debug (default: debug)
+  --json              Emit JSON-lines instead of human-readable text
+
+Positional:
+  [path]              Project directory (alternative to --path)
+
+Commands:
+  (none)              Drive the state machine for the project directory
+  --step              Drive the state machine one step at a time
+  doctor              Check local prerequisites and environment
+  doctor --verbose    Show detailed remediation steps for failing checks
+  doctor --json       Output doctor results as JSON (exit 1 if any failing)
+  doctor --fix        Apply auto-fixes for all failing checks
+  doctor --fix <id>   Apply an available fix for a specific doctor check
+  status              Render the feature status for the project directory
+  state               Alias for `state status`
+  state --json        Alias for `state status --json`
+  state status        Show a human-readable summary of .calypso/repository-state.json
+  state status --json Output state status as JSON
+  state show          Print the current state file as raw JSON
+  agents              Show active agent sessions
+  agents --json       Output agent sessions as JSON
+  init                Initialise a repository for Calypso
+  init --reinit       Re-initialise an already-initialised repository
+  init --json         Initialise and output results as JSON
+  init --hello-world  Initialise with a minimalist hello-world example
+  init --status       Show current init state machine progress
+  init --step <step>  Manually trigger a specific init step
+  init --refresh      Refresh/overwrite GitHub Actions workflow files
+  init --org <org> --repo <name>
+                      Create upstream GitHub remote during init
+  dev-status          Show the current development lifecycle phase
+  dev-status --json   Output development lifecycle phase as JSON
+  feature-start <id> --worktree-base <path>
+                      Create a feature branch, worktree, draft PR, and state file
+  template validate   Validate the local workflow template
+  workflows list      List effective workflow names for the project directory
+  workflows show <name>
+                      Print the raw YAML for the named workflow
+  workflows validate <name>
+                      Parse the named workflow and report OK or the parse error
+  keys list           List all managed keys with metadata
+  keys list --json    List managed keys as JSON
+  keys rotate <name>  Rotate the named key (generates new material, archives old)
+  keys revoke <name>  Revoke the named key (marks it unusable)
+
+Git hash: {}  Built: {}  Tags: {}",
+        info.version, info.git_hash, info.build_time, info.git_tags
+    )
+}
 
 fn build_info() -> BuildInfo<'static> {
     const VERSION: &str = concat!(
@@ -1013,10 +1091,7 @@ fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
 }
 
 /// Build the Claude prompt for an agent state in a workflow.
-fn workflow_agent_prompt(
-    state_name: &str,
-    cfg: &calypso_workflows::StateConfig,
-) -> String {
+fn workflow_agent_prompt(state_name: &str, cfg: &calypso_workflows::StateConfig) -> String {
     let task = cfg
         .prompt
         .as_deref()
@@ -1129,7 +1204,10 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_path_flag, extract_select_flow_flag, looks_like_path};
+    use super::{
+        BuildInfo, extract_path_flag, extract_select_flow_flag, looks_like_path, render_help,
+        render_version,
+    };
 
     #[test]
     fn looks_like_path_recognises_dot_relative() {
@@ -1248,7 +1326,51 @@ mod tests {
         assert!(remaining.is_empty());
     }
 
+    #[test]
+    fn version_output_contains_required_build_metadata() {
+        let output = render_version(sample_info());
+
+        assert!(output.contains("0.1.0+abc123"), "missing semver+hash");
+        assert!(output.contains("abc123"), "missing git hash");
+        assert!(output.contains("2026-03-13T12:00:00Z"), "missing timestamp");
+        assert!(output.contains("v0.1.0"), "missing git tag");
+    }
+
+    #[test]
+    fn version_output_is_a_single_line() {
+        let output = render_version(sample_info());
+        assert_eq!(output.lines().count(), 1, "version output must be one line");
+    }
+
+    #[test]
+    fn help_output_exposes_version_information() {
+        let output = render_help(sample_info());
+
+        assert!(output.contains("calypso-cli"));
+        assert!(output.contains("0.1.0+abc123"));
+        assert!(output.contains("Git hash: abc123"));
+        assert!(output.contains("Commands:"));
+        assert!(output.contains("--path"));
+        assert!(output.contains("-h, --help"));
+    }
+
+    #[test]
+    fn help_output_documents_json_flag() {
+        let output = render_help(sample_info());
+
+        assert!(output.contains("--json"), "missing --json flag");
+    }
+
     fn s(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn sample_info() -> BuildInfo<'static> {
+        BuildInfo {
+            version: "0.1.0+abc123",
+            git_hash: "abc123",
+            build_time: "2026-03-13T12:00:00Z",
+            git_tags: "v0.1.0",
+        }
     }
 }

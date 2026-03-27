@@ -3,13 +3,13 @@
 //!   2. `calypso state status --json`  (Feature 2)
 //!   3. `calypso agents --json`  (Feature 3)
 
-use calypso_cli::app::{
+use nightshift_core::app::{
     agents_json_report, doctor_json_report, render_agents, state_status_json_report,
 };
-use calypso_cli::doctor::{
+use nightshift_core::doctor::{
     DoctorCheck, DoctorCheckId, DoctorCheckScope, DoctorReport, DoctorStatus,
 };
-use calypso_cli::state::{
+use nightshift_core::state::{
     AgentSession, AgentSessionStatus, FeatureState, Gate, GateGroup, GateStatus, PullRequestRef,
     RepositoryState, SessionOutput, SessionOutputStream, WorkflowState,
 };
@@ -90,9 +90,9 @@ fn minimal_feature_state() -> FeatureState {
             pending_follow_ups: vec![],
             terminal_outcome: None,
         }],
-        feature_type: calypso_cli::state::FeatureType::Feat,
+        feature_type: nightshift_core::state::FeatureType::Feat,
         roles: vec![],
-        scheduling: calypso_cli::state::SchedulingMeta::default(),
+        scheduling: nightshift_core::state::SchedulingMeta::default(),
         artifact_refs: vec![],
         transcript_refs: vec![],
         clarification_history: vec![],
@@ -311,7 +311,7 @@ fn state_status_json_missing_state_file_returns_error() {
     // Ensure the directory does NOT have a state file.
     let _ = std::fs::remove_dir_all(&tmp);
 
-    let result = calypso_cli::app::run_state_status_json(&tmp);
+    let result = nightshift_core::app::run_state_status_json(&tmp);
     assert!(
         result.is_err(),
         "missing state file should produce an error"
@@ -327,13 +327,13 @@ fn state_status_json_missing_state_file_returns_error() {
 // Feature 2b — state status integration tests against a fixture state file
 // ---------------------------------------------------------------------------
 
-fn fixture_repository_state() -> calypso_cli::state::RepositoryState {
-    calypso_cli::state::RepositoryState {
+fn fixture_repository_state() -> nightshift_core::state::RepositoryState {
+    nightshift_core::state::RepositoryState {
         version: 1,
         repo_id: "test-repo".to_string(),
         current_feature: minimal_feature_state(),
         schema_version: 2,
-        identity: calypso_cli::state::RepositoryIdentity::default(),
+        identity: nightshift_core::state::RepositoryIdentity::default(),
         providers: vec![],
         releases: vec![],
         deployments: vec![],
@@ -353,7 +353,7 @@ fn state_status_json_fixture_file_round_trip() {
         .save_to_path(&tmp.join(".calypso/repository-state.json"))
         .expect("save fixture");
 
-    let result = calypso_cli::app::run_state_status_json(&tmp);
+    let result = nightshift_core::app::run_state_status_json(&tmp);
     assert!(result.is_ok(), "should load fixture state file");
 
     let json = result.unwrap();
@@ -381,7 +381,7 @@ fn state_status_plain_fixture_file_contains_expected_lines() {
         .save_to_path(&tmp.join(".calypso/repository-state.json"))
         .expect("save fixture");
 
-    let result = calypso_cli::app::run_state_status_plain(&tmp);
+    let result = nightshift_core::app::run_state_status_plain(&tmp);
     assert!(result.is_ok(), "should load fixture state file");
 
     let output = result.unwrap();
@@ -449,7 +449,7 @@ fn agents_json_missing_state_file_returns_error() {
     let tmp = std::env::temp_dir().join("calypso-test-no-agents-state");
     let _ = std::fs::remove_dir_all(&tmp);
 
-    let result = calypso_cli::app::run_agents_json(&tmp);
+    let result = nightshift_core::app::run_agents_json(&tmp);
     assert!(
         result.is_err(),
         "missing state file should produce an error"

@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::{LazyLock, Mutex, RwLock};
 
-use calypso_cli::app::{
+use nightshift_core::app::{
     CommandOutput, FixAttemptResult, gate_status_label, missing_pull_request_evidence,
     missing_pull_request_ref, parse_pull_request_ref, render_feature_status, render_fix_results,
     resolve_current_branch, resolve_current_pull_request_with_program, resolve_repo_root,
@@ -18,7 +18,7 @@ static EXEC_LOCK: LazyLock<RwLock<()>> = LazyLock::new(|| RwLock::new(()));
 
 static PATH_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
-use calypso_cli::state::{
+use nightshift_core::state::{
     EvidenceStatus, FeatureState, FeatureType, Gate, GateGroup, GateStatus, GithubMergeability,
     GithubPullRequestSnapshot, GithubReviewStatus, PullRequestRef, SchedulingMeta, WorkflowState,
 };
@@ -361,7 +361,7 @@ fn render_feature_status_includes_github_error_when_snapshot_is_unavailable() {
 
 #[test]
 fn render_feature_status_labels_all_github_review_and_mergeability_variants() {
-    use calypso_cli::state::EvidenceStatus;
+    use nightshift_core::state::EvidenceStatus;
 
     // ReviewRequired → "review-required"
     let mut feature = feature_with_gate_statuses(&[GateStatus::Passing]);
@@ -853,8 +853,8 @@ fn run_doctor_json_returns_json_string() {
 #[test]
 fn state_status_json_report_builds_from_feature_state() {
     let feature = feature_with_gate_statuses(&[
-        calypso_cli::state::GateStatus::Passing,
-        calypso_cli::state::GateStatus::Failing,
+        nightshift_core::state::GateStatus::Passing,
+        nightshift_core::state::GateStatus::Failing,
     ]);
     let report = state_status_json_report(&feature);
     assert_eq!(report.feature_id, "feature");

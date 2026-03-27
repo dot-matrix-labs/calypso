@@ -7,11 +7,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_cli::feature_start::{
+use nightshift_core::feature_start::{
     FeatureStartEnvironment, FeatureStartError, FeatureStartRequest, HostFeatureStartEnvironment,
     derive_feature_branch_name, start_feature,
 };
-use calypso_cli::state::{PullRequestRef, RepositoryState};
+use nightshift_core::state::{PullRequestRef, RepositoryState};
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PATH_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();
@@ -659,7 +659,7 @@ fn feature_start_error_display_covers_all_variants() {
             .contains("I/O error")
     );
 
-    let runtime_error = calypso_cli::runtime::RuntimeError::MissingRepositoryName;
+    let runtime_error = nightshift_core::runtime::RuntimeError::MissingRepositoryName;
     assert!(
         FeatureStartError::Runtime(runtime_error)
             .to_string()
@@ -833,7 +833,7 @@ fn run_feature_start_delegates_to_host_environment() {
                 allow_non_main: false,
             };
 
-            let result = calypso_cli::feature_start::run_feature_start(&repo_root, &request)
+            let result = nightshift_core::feature_start::run_feature_start(&repo_root, &request)
                 .expect("run_feature_start should succeed");
 
             assert_eq!(result.branch, "feat/run-feature-start");

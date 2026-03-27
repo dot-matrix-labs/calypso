@@ -1,8 +1,8 @@
-use calypso_cli::github::{
+use nightshift_core::github::{
     GithubCheckId, GithubEnvironment, GithubMergeability, GithubPullRequestSnapshot,
     GithubReviewStatus, collect_github_report, parse_pull_request_view_json,
 };
-use calypso_cli::state::{EvidenceStatus, PullRequestRef};
+use nightshift_core::state::{EvidenceStatus, PullRequestRef};
 
 struct FakeGithubEnvironment {
     snapshot: Result<GithubPullRequestSnapshot, String>,
@@ -24,9 +24,9 @@ impl GithubEnvironment for FakeGithubEnvironment {
     fn pull_request_snapshot(
         &self,
         _pull_request: &PullRequestRef,
-    ) -> Result<GithubPullRequestSnapshot, calypso_cli::github::GithubSnapshotError> {
+    ) -> Result<GithubPullRequestSnapshot, nightshift_core::github::GithubSnapshotError> {
         self.snapshot.clone().map_err(|error| {
-            calypso_cli::github::GithubSnapshotError::UnsupportedValue {
+            nightshift_core::github::GithubSnapshotError::UnsupportedValue {
                 field: "gh",
                 value: error,
             }
@@ -63,35 +63,35 @@ fn github_report_collects_expected_statuses() {
 
     assert_eq!(
         report.checks[0],
-        calypso_cli::github::GithubCheck {
+        nightshift_core::github::GithubCheck {
             id: GithubCheckId::PullRequestExists,
             status: EvidenceStatus::Passing,
         }
     );
     assert_eq!(
         report.checks[1],
-        calypso_cli::github::GithubCheck {
+        nightshift_core::github::GithubCheck {
             id: GithubCheckId::PullRequestReadyForReview,
             status: EvidenceStatus::Passing,
         }
     );
     assert_eq!(
         report.checks[2],
-        calypso_cli::github::GithubCheck {
+        nightshift_core::github::GithubCheck {
             id: GithubCheckId::PullRequestChecksGreen,
             status: EvidenceStatus::Passing,
         }
     );
     assert_eq!(
         report.checks[3],
-        calypso_cli::github::GithubCheck {
+        nightshift_core::github::GithubCheck {
             id: GithubCheckId::PullRequestReviewApproved,
             status: EvidenceStatus::Passing,
         }
     );
     assert_eq!(
         report.checks[4],
-        calypso_cli::github::GithubCheck {
+        nightshift_core::github::GithubCheck {
             id: GithubCheckId::PullRequestMergeable,
             status: EvidenceStatus::Passing,
         }
@@ -326,7 +326,7 @@ fn gh_pr_view_parser_rejects_missing_check_conclusion() {
 #[test]
 fn github_snapshot_error_missing_field_formats_message() {
     let error =
-        calypso_cli::github::GithubSnapshotError::MissingField("gh command failed to spawn");
+        nightshift_core::github::GithubSnapshotError::MissingField("gh command failed to spawn");
     assert_eq!(error.to_string(), "gh command failed to spawn");
 }
 

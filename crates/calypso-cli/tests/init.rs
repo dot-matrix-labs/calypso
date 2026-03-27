@@ -5,13 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use calypso_cli::init::{
+use nightshift_core::init::{
     InitEnvironment, InitError, InitProgress, InitRequest, InitStep, RepoInitStatus, WORKFLOW_CI,
     WORKFLOW_MERGE_QUEUE, WORKFLOW_PR_CHECKLIST, WORKFLOW_PR_CONFLICTS, WORKFLOW_PR_DEPENDS_ON,
     WORKFLOW_PR_ISSUE_CHECKLIST, WORKFLOW_PR_SINGLE_ISSUE, detect_repo_status, init_repository,
     refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
-use calypso_cli::state::RepositoryState;
+use nightshift_core::state::RepositoryState;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -416,7 +416,7 @@ fn real_init_creates_files_and_executable_hook() {
     let dir = unique_tmpdir("real-init");
     make_git_repo_with_github_remote(&dir);
 
-    use calypso_cli::init::{HostInitEnvironment, init_repository};
+    use nightshift_core::init::{HostInitEnvironment, init_repository};
     let request = InitRequest {
         repo_path: dir.clone(),
         provider: Some("claude".to_string()),
@@ -464,7 +464,7 @@ fn real_init_state_machine_audit_passes() {
     std::fs::create_dir_all(&dir).expect("tmpdir creation");
     make_git_repo_with_github_remote(&dir);
 
-    use calypso_cli::init::HostInitEnvironment;
+    use nightshift_core::init::HostInitEnvironment;
     let request = InitRequest {
         repo_path: dir.clone(),
         provider: Some("claude".to_string()),
@@ -505,7 +505,7 @@ fn real_init_state_machine_audit_passes() {
     );
 
     // Run state machine audit — must report zero errors
-    let result = calypso_cli::sm_audit::run_audit(&dir, false);
+    let result = nightshift_core::sm_audit::run_audit(&dir, false);
     assert_eq!(
         result.error_count(),
         0,
@@ -519,7 +519,7 @@ fn real_init_state_machine_audit_passes() {
 #[test]
 fn real_init_non_git_dir_returns_error() {
     let dir = unique_tmpdir("not-git");
-    use calypso_cli::init::{HostInitEnvironment, init_repository};
+    use nightshift_core::init::{HostInitEnvironment, init_repository};
     let request = InitRequest {
         repo_path: dir.clone(),
         provider: None,
@@ -539,7 +539,7 @@ fn real_init_non_git_dir_returns_error() {
 fn real_init_non_github_remote_returns_error() {
     let dir = unique_tmpdir("non-github");
     make_git_repo_with_custom_remote(&dir, "https://gitlab.com/org/repo.git");
-    use calypso_cli::init::{HostInitEnvironment, init_repository};
+    use nightshift_core::init::{HostInitEnvironment, init_repository};
     let request = InitRequest {
         repo_path: dir.clone(),
         provider: None,
@@ -559,7 +559,7 @@ fn real_init_non_github_remote_returns_error() {
 fn real_reinit_without_flag_fails_with_allow_reinit_succeeds() {
     let dir = unique_tmpdir("reinit");
     make_git_repo_with_github_remote(&dir);
-    use calypso_cli::init::{HostInitEnvironment, init_repository};
+    use nightshift_core::init::{HostInitEnvironment, init_repository};
 
     let request = InitRequest {
         repo_path: dir.clone(),

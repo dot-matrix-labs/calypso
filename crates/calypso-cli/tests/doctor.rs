@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use calypso_cli::doctor::{
+use nightshift_core::doctor::{
     DoctorCheckId, DoctorCheckScope, DoctorEnvironment, DoctorStatus, collect_doctor_report,
 };
 
@@ -120,7 +120,9 @@ impl DoctorEnvironment for FakeEnvironment {
     }
 }
 
-fn status_map(report: &calypso_cli::doctor::DoctorReport) -> BTreeMap<DoctorCheckId, DoctorStatus> {
+fn status_map(
+    report: &nightshift_core::doctor::DoctorReport,
+) -> BTreeMap<DoctorCheckId, DoctorStatus> {
     report
         .checks
         .iter()
@@ -129,9 +131,9 @@ fn status_map(report: &calypso_cli::doctor::DoctorReport) -> BTreeMap<DoctorChec
 }
 
 fn check_for(
-    report: &calypso_cli::doctor::DoctorReport,
+    report: &nightshift_core::doctor::DoctorReport,
     id: DoctorCheckId,
-) -> &calypso_cli::doctor::DoctorCheck {
+) -> &nightshift_core::doctor::DoctorCheck {
     report
         .checks
         .iter()
@@ -296,7 +298,7 @@ fn doctor_report_render_includes_actionable_fix_for_missing_workflows() {
         repo_root,
     );
 
-    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+    let rendered = nightshift_core::doctor::render_doctor_report(&report);
 
     assert!(rendered.contains("required-workflows-present"));
     assert!(rendered.contains(
@@ -306,13 +308,13 @@ fn doctor_report_render_includes_actionable_fix_for_missing_workflows() {
 
 #[test]
 fn doctor_fix_is_populated_for_failing_checks() {
-    use calypso_cli::doctor::DoctorFix;
+    use nightshift_core::doctor::DoctorFix;
 
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
 
     for check in &report.checks {
-        if check.status == calypso_cli::doctor::DoctorStatus::Passing {
+        if check.status == nightshift_core::doctor::DoctorStatus::Passing {
             assert!(
                 check.fix.is_none(),
                 "passing check {:?} should not have a fix",
@@ -356,7 +358,7 @@ fn doctor_fix_is_populated_for_failing_checks() {
 
 #[test]
 fn apply_fix_returns_instructions_for_manual_fix() {
-    use calypso_cli::doctor::{DoctorFix, apply_fix};
+    use nightshift_core::doctor::{DoctorFix, apply_fix};
 
     let fix = DoctorFix::Manual {
         instructions: "Install gh from https://cli.github.com".to_string(),
@@ -372,7 +374,7 @@ fn apply_fix_returns_instructions_for_manual_fix() {
 
 #[test]
 fn doctor_github_remote_fix_uses_gh_user_and_dirname_when_user_is_known() {
-    use calypso_cli::doctor::DoctorFix;
+    use nightshift_core::doctor::DoctorFix;
 
     let repo_root = Path::new("/tmp/myproject");
     let report = collect_doctor_report(
@@ -394,7 +396,7 @@ fn doctor_github_remote_fix_uses_gh_user_and_dirname_when_user_is_known() {
 
 #[test]
 fn doctor_github_remote_fix_falls_back_to_manual_when_no_user() {
-    use calypso_cli::doctor::DoctorFix;
+    use nightshift_core::doctor::DoctorFix;
 
     let repo_root = Path::new("/tmp/myproject");
     let report = collect_doctor_report(
@@ -414,7 +416,7 @@ fn doctor_github_remote_fix_falls_back_to_manual_when_no_user() {
 
 #[test]
 fn doctor_workflow_fix_is_a_sequence_with_write_and_git_steps() {
-    use calypso_cli::doctor::DoctorFix;
+    use nightshift_core::doctor::DoctorFix;
 
     let repo_root = Path::new("/tmp/myproject");
     let report = collect_doctor_report(
@@ -448,7 +450,7 @@ fn doctor_workflow_fix_is_a_sequence_with_write_and_git_steps() {
 
 #[test]
 fn render_doctor_report_verbose_shows_auto_fix_for_gh_auth() {
-    use calypso_cli::doctor::render_doctor_report_verbose;
+    use nightshift_core::doctor::render_doctor_report_verbose;
 
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
@@ -545,7 +547,7 @@ fn doctor_report_has_failures_excludes_warnings() {
 fn doctor_report_render_shows_warn_for_advisory_checks() {
     let repo_root = Path::new("/tmp/calypso");
     let report = collect_doctor_report(&FakeEnvironment::default(), repo_root);
-    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+    let rendered = nightshift_core::doctor::render_doctor_report(&report);
 
     assert!(
         rendered.contains("[WARN] codex-installed"),

@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use calypso_cli::telemetry::{CorrelationContext, Event, EventKind, EventStream, LogLevel, Logger};
+use nightshift_core::telemetry::{
+    CorrelationContext, Event, EventKind, EventStream, LogLevel, Logger,
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -177,7 +179,7 @@ fn secret_field_is_redacted() {
 #[test]
 fn log_event_macro_emits_entry_with_fields() {
     let (logger, buf) = logger_with_buf(LogLevel::Info);
-    calypso_cli::log_event!(logger, LogLevel::Info, "macro test", "key" => "value");
+    nightshift_core::log_event!(logger, LogLevel::Info, "macro test", "key" => "value");
     let output = buf.into_string();
     let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
     assert_eq!(entry["message"], "macro test");
@@ -309,7 +311,7 @@ fn entry_builder_field_json_inserts_arbitrary_value() {
 #[test]
 fn log_event_macro_multiple_fields() {
     let (logger, buf) = logger_with_buf(LogLevel::Info);
-    calypso_cli::log_event!(
+    nightshift_core::log_event!(
         logger,
         LogLevel::Info,
         "multi-field macro",
@@ -327,7 +329,7 @@ fn log_event_macro_multiple_fields() {
 #[test]
 fn log_event_macro_no_fields() {
     let (logger, buf) = logger_with_buf(LogLevel::Info);
-    calypso_cli::log_event!(logger, LogLevel::Info, "bare message");
+    nightshift_core::log_event!(logger, LogLevel::Info, "bare message");
     let output = buf.into_string();
     let entry: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
     assert_eq!(entry["message"], "bare message");
