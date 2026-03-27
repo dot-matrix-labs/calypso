@@ -13,6 +13,7 @@ pub mod headless_persist;
 pub mod headless_sm;
 pub mod headless_sm_driver;
 pub mod init;
+pub mod interpreter_scheduler;
 pub mod keys;
 pub mod operator_surface;
 pub mod pinned_prompt;
@@ -26,9 +27,6 @@ pub mod state;
 pub mod telemetry;
 pub mod template;
 pub mod workflows;
-pub use calypso_workflow_exec as interpreter;
-pub use calypso_workflows as workflow_definitions;
-pub mod interpreter_scheduler;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {

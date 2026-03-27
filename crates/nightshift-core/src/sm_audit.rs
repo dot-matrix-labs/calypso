@@ -19,8 +19,9 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
+use calypso_workflows::{NextSpec, StateKind, Workflow, WorkflowCatalog};
+
 use crate::template::{self, TemplateSet};
-use crate::workflow_definitions::{NextSpec, StateKind, Workflow, WorkflowCatalog};
 
 // ── Audit result types ──────────────────────────────────────────────────────
 
@@ -1486,7 +1487,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_on_map() {
-        use crate::workflow_definitions::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  ok: state-a\n  fail: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1497,7 +1498,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_top_level_keys() {
-        use crate::workflow_definitions::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value = serde_yaml::from_str(
             "on_success: state-a\non_failure: state-b\non_rejection: state-c\n",
         )
@@ -1510,7 +1511,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_on_map_keys() {
-        use crate::workflow_definitions::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  done: state-a\n  aborted: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1521,7 +1522,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_top_level() {
-        use crate::workflow_definitions::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on_success: state-a\non_failure: state-b\n").unwrap();
         let spec = NextSpec(yaml);

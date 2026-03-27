@@ -28,9 +28,9 @@
 use std::collections::BTreeMap;
 use std::time::Duration;
 
-use crate::interpreter::{EntryPoint, WorkflowInterpreter, WorkflowPosition, next_fire_in};
 use crate::signal::ShutdownSignal;
 use crate::telemetry::{Component, LogEvent, LogLevel, Logger};
+use calypso_workflow_exec::{EntryPoint, WorkflowInterpreter, WorkflowPosition, next_fire_in};
 
 // ── Scheduler mode ────────────────────────────────────────────────────────────
 

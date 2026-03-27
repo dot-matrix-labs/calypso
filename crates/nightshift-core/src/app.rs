@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use calypso_workflows::WorkflowCatalog;
 use serde::Deserialize;
 
 use crate::doctor::{
@@ -774,7 +775,7 @@ pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 /// Return a newline-separated list of all effective workflow names for the repository.
 pub fn run_workflows_list(cwd: &Path) -> String {
-    crate::workflow_definitions::WorkflowCatalog::load(cwd)
+    WorkflowCatalog::load(cwd)
         .entries()
         .iter()
         .map(|entry| entry.handle.display_name())
@@ -784,7 +785,7 @@ pub fn run_workflows_list(cwd: &Path) -> String {
 
 /// Return the raw YAML content for a named workflow, or an error message.
 pub fn run_workflows_show(cwd: &Path, name: &str) -> Result<String, String> {
-    crate::workflow_definitions::WorkflowCatalog::load(cwd)
+    WorkflowCatalog::load(cwd)
         .find(name)
         .map(|entry| entry.yaml.clone())
         .ok_or_else(|| format!("workflow not found: {name}"))
@@ -792,7 +793,7 @@ pub fn run_workflows_show(cwd: &Path, name: &str) -> Result<String, String> {
 
 /// Parse the named workflow and return `Ok("OK")` or `Err(parse_error_string)`.
 pub fn run_workflows_validate(cwd: &Path, name: &str) -> Result<String, String> {
-    let catalog = crate::workflow_definitions::WorkflowCatalog::load(cwd);
+    let catalog = WorkflowCatalog::load(cwd);
     let entry = catalog
         .find(name)
         .ok_or_else(|| format!("workflow not found: {name}"))?;

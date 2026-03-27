@@ -10,6 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
+use calypso_workflows::{StateKind, WorkflowCatalog};
 use serde_json::Value;
 
 // ── Embedded HTML page ────────────────────────────────────────────────────────
@@ -185,8 +186,6 @@ fn read_state_json(cwd: &Path) -> String {
 
 /// Return all effective workflows as a JSON array of `{ name, yaml }` objects.
 fn read_workflows_json(cwd: &Path) -> String {
-    use nightshift_core::workflow_definitions::WorkflowCatalog;
-
     let entries: Vec<Value> = WorkflowCatalog::load(cwd)
         .entries()
         .iter()
@@ -228,8 +227,6 @@ fn read_json_file(path: &Path) -> Option<Value> {
 
 /// Collect all effective workflows that declare a `schedule.cron` field.
 fn collect_cron_workflows(cwd: &Path) -> Vec<Value> {
-    use nightshift_core::workflow_definitions::WorkflowCatalog;
-
     let mut result = Vec::new();
     for entry in WorkflowCatalog::load(cwd).entries() {
         if let Ok(wf) = entry.parse()
@@ -263,13 +260,11 @@ fn resolve_active_state_info(
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
-    use nightshift_core::workflow_definitions::WorkflowCatalog;
-
     resolve_active_state_info_from_catalog(&WorkflowCatalog::embedded(), workflow_name, state_name)
 }
 
 fn resolve_active_state_info_from_catalog(
-    catalog: &nightshift_core::workflow_definitions::WorkflowCatalog,
+    catalog: &WorkflowCatalog,
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
@@ -287,7 +282,6 @@ fn resolve_active_state_info_from_catalog(
     };
 
     let kind = state.kind.as_ref().map(|k| {
-        use nightshift_core::workflow_definitions::StateKind;
         match k {
             StateKind::Deterministic => "deterministic",
             StateKind::Agent => "agent",
@@ -311,9 +305,7 @@ fn resolve_active_state_info_from_catalog(
     (transitions, kind)
 }
 
-fn workflow_catalog_for_workflows_dir(
-    workflows_dir: &Path,
-) -> nightshift_core::workflow_definitions::WorkflowCatalog {
+fn workflow_catalog_for_workflows_dir(workflows_dir: &Path) -> WorkflowCatalog {
     let repo_root = workflows_dir
         .parent()
         .and_then(|path| {
@@ -322,8 +314,8 @@ fn workflow_catalog_for_workflows_dir(
         .and_then(Path::parent);
 
     match repo_root {
-        Some(repo_root) => nightshift_core::workflow_definitions::WorkflowCatalog::load(repo_root),
-        None => nightshift_core::workflow_definitions::WorkflowCatalog::embedded(),
+        Some(repo_root) => WorkflowCatalog::load(repo_root),
+        None => WorkflowCatalog::embedded(),
     }
 }
 
