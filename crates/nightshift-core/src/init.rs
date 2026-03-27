@@ -9,12 +9,6 @@ use crate::state::{DevelopmentState, RepositoryIdentity, RepositoryState};
 use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
 
 // ---------------------------------------------------------------------------
-// Re-export for external consumers
-// ---------------------------------------------------------------------------
-
-pub use crate::blueprint_workflows::BlueprintWorkflowLibrary;
-
-// ---------------------------------------------------------------------------
 // Init state machine
 // ---------------------------------------------------------------------------
 
