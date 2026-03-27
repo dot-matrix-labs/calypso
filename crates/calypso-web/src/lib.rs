@@ -168,7 +168,7 @@ fn read_state_json(cwd: &Path) -> String {
         active_workflow_name.as_deref(),
         active_state_name.as_deref(),
     ) {
-        resolve_active_state_info_with_local(&calypso_dir.join("workflows"), wf_name, state_name)
+        resolve_active_state_info(cwd, wf_name, state_name)
     } else {
         (vec![], None)
     };
@@ -242,25 +242,16 @@ fn collect_cron_workflows(cwd: &Path) -> Vec<Value> {
     result
 }
 
-fn resolve_active_state_info_with_local(
-    workflows_dir: &Path,
+fn resolve_active_state_info(
+    repo_root: &Path,
     workflow_name: &str,
     state_name: &str,
 ) -> (Vec<String>, Option<String>) {
     resolve_active_state_info_from_catalog(
-        &workflow_catalog_for_workflows_dir(workflows_dir),
+        &WorkflowCatalog::load(repo_root),
         workflow_name,
         state_name,
     )
-}
-
-/// Given a workflow name and state name, return (transitions, kind) for that state.
-#[cfg_attr(not(test), allow(dead_code))]
-fn resolve_active_state_info(
-    workflow_name: &str,
-    state_name: &str,
-) -> (Vec<String>, Option<String>) {
-    resolve_active_state_info_from_catalog(&WorkflowCatalog::embedded(), workflow_name, state_name)
 }
 
 fn resolve_active_state_info_from_catalog(
@@ -303,20 +294,6 @@ fn resolve_active_state_info_from_catalog(
         .unwrap_or_default();
 
     (transitions, kind)
-}
-
-fn workflow_catalog_for_workflows_dir(workflows_dir: &Path) -> WorkflowCatalog {
-    let repo_root = workflows_dir
-        .parent()
-        .and_then(|path| {
-            (path.file_name().and_then(|name| name.to_str()) == Some(".calypso")).then_some(path)
-        })
-        .and_then(Path::parent);
-
-    match repo_root {
-        Some(repo_root) => WorkflowCatalog::load(repo_root),
-        None => WorkflowCatalog::embedded(),
-    }
 }
 
 // ── Worktree-local path used only in tests ────────────────────────────────────
@@ -485,35 +462,40 @@ mod tests {
 
     #[test]
     fn resolve_active_state_info_returns_empty_for_unknown_workflow() {
-        let (transitions, kind) = resolve_active_state_info("no-such-workflow", "some-state");
+        let (transitions, kind) =
+            resolve_active_state_info(&std::env::temp_dir(), "no-such-workflow", "some-state");
         assert!(transitions.is_empty());
         assert!(kind.is_none());
     }
 
     #[test]
     fn resolve_active_state_info_returns_empty_for_unknown_state() {
-        let (transitions, kind) =
-            resolve_active_state_info("calypso-default-feature-workflow", "no-such-state");
+        let (transitions, kind) = resolve_active_state_info(
+            &std::env::temp_dir(),
+            "calypso-default-feature-workflow",
+            "no-such-state",
+        );
         assert!(transitions.is_empty());
         assert!(kind.is_none());
     }
 
     #[test]
     fn resolve_active_state_info_returns_kind_for_known_state() {
-        let (_transitions, kind) =
-            resolve_active_state_info("calypso-default-feature-workflow", "write-failing-tests");
+        let (_transitions, kind) = resolve_active_state_info(
+            &std::env::temp_dir(),
+            "calypso-default-feature-workflow",
+            "write-failing-tests",
+        );
         assert!(kind.is_some(), "expected a kind for write-failing-tests");
     }
 
-    // ── resolve_active_state_info_with_local tests ───────────────────────────
+    // ── resolve_active_state_info tests with local catalogs ──────────────────
 
     #[test]
-    fn resolve_active_state_info_with_local_falls_back_to_embedded_when_no_local_dir() {
+    fn resolve_active_state_info_falls_back_to_embedded_when_no_local_dir() {
         let tmp = std::env::temp_dir().join("calypso-webview-local-no-dir");
-        let workflows_dir = tmp.join("no-such-dir");
-        // No local dir — should fall back to embedded library.
-        let (_transitions, kind) = resolve_active_state_info_with_local(
-            &workflows_dir,
+        let (_transitions, kind) = resolve_active_state_info(
+            &tmp,
             "calypso-default-feature-workflow",
             "write-failing-tests",
         );
@@ -521,7 +503,7 @@ mod tests {
     }
 
     #[test]
-    fn resolve_active_state_info_with_local_matches_local_yml_file() {
+    fn resolve_active_state_info_matches_local_yml_file() {
         let tmp = std::env::temp_dir().join("calypso-webview-local-yml");
         let workflows_dir = tmp.join(".calypso").join("workflows");
         std::fs::create_dir_all(&workflows_dir).unwrap();
@@ -555,8 +537,7 @@ jobs:
 "#;
         std::fs::write(workflows_dir.join("my-local-workflow.yml"), yaml).unwrap();
 
-        let (transitions, kind) =
-            resolve_active_state_info_with_local(&workflows_dir, "my-local-workflow", "review");
+        let (transitions, kind) = resolve_active_state_info(&tmp, "my-local-workflow", "review");
         assert_eq!(kind.as_deref(), Some("human"));
         assert!(
             transitions.contains(&"approve".to_string()),
@@ -566,7 +547,7 @@ jobs:
     }
 
     #[test]
-    fn resolve_active_state_info_with_local_does_not_fallback_when_local_catalog_exists() {
+    fn resolve_active_state_info_does_not_fallback_when_local_catalog_exists() {
         let tmp = std::env::temp_dir().join("calypso-webview-local-skip");
         let workflows_dir = tmp.join(".calypso").join("workflows");
         std::fs::create_dir_all(&workflows_dir).unwrap();
@@ -578,8 +559,8 @@ jobs:
         std::fs::write(workflows_dir.join("other-workflow.yml"), yaml).unwrap();
 
         // With a local workflow catalog present, the effective workflow set is local-only.
-        let (transitions, kind) = resolve_active_state_info_with_local(
-            &workflows_dir,
+        let (transitions, kind) = resolve_active_state_info(
+            &tmp,
             "calypso-default-feature-workflow",
             "write-failing-tests",
         );
@@ -607,7 +588,7 @@ jobs:
     // ── StateKind variants and parse-error path ───────────────────────────────
 
     #[test]
-    fn resolve_active_state_info_with_local_covers_state_kind_variants() {
+    fn resolve_active_state_info_covers_state_kind_variants() {
         use std::time::{SystemTime, UNIX_EPOCH};
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -624,11 +605,11 @@ jobs:
         let yaml = "name: kind-test\non:\n  workflow_dispatch:\njobs:\n  s1:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        run: echo s1\n        shell: bash\n  s2:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: do work\n  s3:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-github-poller\n        with:\n          checks: '[]'\n";
         std::fs::write(workflows_dir.join("kind-test.yml"), yaml).unwrap();
 
-        let (_, k1) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s1");
+        let (_, k1) = resolve_active_state_info(&tmp, "kind-test", "s1");
         assert_eq!(k1.as_deref(), Some("deterministic"));
-        let (_, k2) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s2");
+        let (_, k2) = resolve_active_state_info(&tmp, "kind-test", "s2");
         assert_eq!(k2.as_deref(), Some("agent"));
-        let (_, k3) = resolve_active_state_info_with_local(&workflows_dir, "kind-test", "s3");
+        let (_, k3) = resolve_active_state_info(&tmp, "kind-test", "s3");
         assert_eq!(k3.as_deref(), Some("github"));
 
         let _ = std::fs::remove_dir_all(&tmp);
