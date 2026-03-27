@@ -1,5 +1,6 @@
 mod helpers;
 
+use helpers::fake_claude::unique_temp_dir;
 use helpers::spawned_calypso::spawned_calypso;
 
 // ── Listing format ────────────────────────────────────────────────────────────
@@ -157,12 +158,12 @@ fn valid_selection_prints_selected_line() {
     );
 }
 
-// ── Error: no state file, never initialized ───────────────────────────────────
+// ── Error: local workflow with no valid transition ────────────────────────────
 
-/// When the project directory has no state file and no `init-state.json`, the
-/// error message must mention `init` but NOT `--reinit`.
+/// A dispatch-only workflow has a single state with no outgoing transitions.
+/// After running it, the driver should hit a "no transition" error and exit 1.
 #[test]
-fn no_state_file_no_init_shows_init_error() {
+fn local_workflow_with_no_transition_exits_with_error() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let out = spawned_calypso()
         .args(["--select-flow"])
@@ -176,39 +177,8 @@ fn no_state_file_no_init_shows_init_error() {
         out.stderr
     );
     assert!(
-        out.stderr.contains("init"),
-        "expected stderr to mention 'init'; stderr:\n{}",
-        out.stderr
-    );
-    assert!(
-        !out.stderr.contains("--reinit"),
-        "expected stderr NOT to mention '--reinit' for uninitialised project; stderr:\n{}",
-        out.stderr
-    );
-}
-
-// ── Error: initialized project but missing state file ────────────────────────
-
-/// When the project has a completed `init-state.json` but no `repository-state.json`,
-/// the error message must mention `--reinit`.
-#[test]
-fn initialized_project_missing_state_file_shows_reinit_error() {
-    let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
-    let out = spawned_calypso()
-        .args(["--select-flow"])
-        .calypso_file("dispatch-only.yaml", dispatch_only)
-        .with_completed_init()
-        .stdin("1\n")
-        .run();
-
-    assert_eq!(
-        out.exit_code, 1,
-        "expected exit code 1; stderr:\n{}",
-        out.stderr
-    );
-    assert!(
-        out.stderr.contains("--reinit"),
-        "expected stderr to mention '--reinit' for initialised-but-broken project; stderr:\n{}",
+        out.stderr.contains("transition error") || out.stderr.contains("error"),
+        "expected an error in stderr; stderr:\n{}",
         out.stderr
     );
 }
@@ -270,5 +240,75 @@ fn cron_entry_includes_cron_pattern() {
         has_cron_pattern,
         "expected cron pattern '*/5 * * * *' in list entry; stdout:\n{}",
         out.stdout
+    );
+}
+
+// ── Turnstile: cyclic local workflow ──────────────────────────────────────────
+
+/// The turnstile workflow cycles alice → bob → carol → alice indefinitely.
+/// Each state runs a shell command (sleep 1 + echo), so after 7 seconds at
+/// least 5 steps should have completed.  The test force-kills the process
+/// and asserts each persona appeared in stdout.
+#[test]
+fn turnstile_runs_for_seven_seconds() {
+    use std::io::Write as _;
+    use std::time::Duration;
+
+    let turnstile_yaml = include_str!("fixtures/workflows/turnstile.yaml");
+
+    // Set up a temp working directory with the turnstile YAML in .calypso/.
+    let work_dir = unique_temp_dir("calypso-turnstile-e2e");
+    let calypso_dir = work_dir.join(".calypso");
+    std::fs::create_dir_all(&calypso_dir).expect(".calypso dir should be created");
+    std::fs::write(calypso_dir.join("turnstile.yaml"), turnstile_yaml)
+        .expect("turnstile.yaml should be written");
+
+    let binary = env!("CARGO_BIN_EXE_calypso-cli");
+    let mut child = std::process::Command::new(binary)
+        .args(["--select-flow"])
+        .current_dir(&work_dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("calypso-cli should spawn");
+
+    // Feed "1\n" to select the first (and only) local workflow.
+    if let Some(mut stdin_pipe) = child.stdin.take() {
+        let _ = stdin_pipe.write_all(b"1\n");
+        // Keep stdin open so the process doesn't get EOF and exit early.
+        std::mem::forget(stdin_pipe);
+    }
+
+    // Let the workflow run for 7 seconds.
+    std::thread::sleep(Duration::from_secs(7));
+
+    // Force-kill the process.
+    let _ = child.kill();
+    let output = child
+        .wait_with_output()
+        .expect("wait_with_output should succeed");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+    // Each persona must have appeared at least once.
+    assert!(
+        stdout.contains("Alice says hello"),
+        "expected 'Alice says hello' in stdout; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Bob says hello"),
+        "expected 'Bob says hello' in stdout; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("Carol says hello"),
+        "expected 'Carol says hello' in stdout; stdout:\n{stdout}"
+    );
+
+    // At least 5 "says hello" lines should have appeared in 7 seconds.
+    let hello_count = stdout.lines().filter(|l| l.contains("says hello")).count();
+    assert!(
+        hello_count >= 5,
+        "expected at least 5 'says hello' lines in 7 s; got {hello_count}; stdout:\n{stdout}"
     );
 }

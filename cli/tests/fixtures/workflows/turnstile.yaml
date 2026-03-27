@@ -1,0 +1,37 @@
+name: turnstile
+on:
+  workflow_dispatch: null
+jobs:
+  alice:
+    needs: carol
+    if: "needs.carol.outputs.event == 'on_pass'"
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          COUNT=$(cat .turnstile-counter 2>/dev/null || echo 0)
+          COUNT=$((COUNT + 1))
+          printf '%s\n' "$COUNT" > .turnstile-counter
+          echo "Alice says hello (step $COUNT)"
+          sleep 1
+  bob:
+    needs: alice
+    if: "needs.alice.outputs.event == 'on_pass'"
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          COUNT=$(cat .turnstile-counter 2>/dev/null || echo 0)
+          COUNT=$((COUNT + 1))
+          printf '%s\n' "$COUNT" > .turnstile-counter
+          echo "Bob says hello (step $COUNT)"
+          sleep 1
+  carol:
+    needs: bob
+    if: "needs.bob.outputs.event == 'on_pass'"
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          COUNT=$(cat .turnstile-counter 2>/dev/null || echo 0)
+          COUNT=$((COUNT + 1))
+          printf '%s\n' "$COUNT" > .turnstile-counter
+          echo "Carol says hello (step $COUNT)"
+          sleep 1
