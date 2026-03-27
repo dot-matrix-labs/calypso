@@ -1,6 +1,6 @@
 //! Workflow interpreter — drives execution through the unified YAML workflow graph.
 //!
-//! The interpreter loads all embedded blueprint workflows, resolves `kind: workflow`
+//! The interpreter loads workflows from a shared catalog, resolves `kind: workflow`
 //! references via a call stack, and tracks execution position as
 //! `(workflow_name, state_name)` pairs.
 //!
@@ -16,9 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::blueprint_workflows::{
-    BlueprintWorkflow, BlueprintWorkflowLibrary, ExecutionTarget, StateConfig, StateKind,
-};
+use calypso_workflows::{BlueprintWorkflow, StateConfig, StateKind, WorkflowCatalog};
 
 // ── Entry points ─────────────────────────────────────────────────────────────
 
@@ -135,13 +133,19 @@ pub struct WorkflowRegistry {
 }
 
 impl WorkflowRegistry {
-    /// Load all embedded blueprint workflows into the registry.
+    /// Load all embedded workflows into the registry.
     pub fn from_embedded() -> Result<Self, String> {
+        Self::from_catalog(&WorkflowCatalog::embedded())
+    }
+
+    /// Load workflows from a shared catalog into the registry.
+    pub fn from_catalog(catalog: &WorkflowCatalog) -> Result<Self, String> {
         let mut workflows = BTreeMap::new();
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let wf = BlueprintWorkflowLibrary::parse(yaml)
-                .map_err(|e| format!("failed to parse workflow '{stem}': {e}"))?;
-            workflows.insert(stem.to_string(), wf);
+        for entry in catalog.entries() {
+            let wf = entry
+                .parse()
+                .map_err(|e| format!("failed to parse workflow '{}': {e}", entry.handle.name))?;
+            workflows.insert(entry.handle.name.clone(), wf);
         }
         Ok(Self { workflows })
     }
@@ -257,6 +261,13 @@ impl WorkflowInterpreter {
     pub fn new() -> Result<Self, String> {
         Ok(Self {
             registry: WorkflowRegistry::from_embedded()?,
+        })
+    }
+
+    /// Create an interpreter from a shared workflow catalog.
+    pub fn from_catalog(catalog: &WorkflowCatalog) -> Result<Self, String> {
+        Ok(Self {
+            registry: WorkflowRegistry::from_catalog(catalog)?,
         })
     }
 
@@ -716,10 +727,10 @@ mod tests {
                 EntryPoint::AutoStart { workflow, .. } => workflow.as_str(),
             })
             .collect();
-        // Sub-workflows must not appear as entry points.
-        assert!(!names.contains(&"calypso-planning"));
-        assert!(!names.contains(&"calypso-implementation-loop"));
-        assert!(!names.contains(&"calypso-save-state"));
+        // Sub-workflows with explicit triggers remain valid entry points.
+        assert!(names.contains(&"calypso-planning"));
+        assert!(names.contains(&"calypso-implementation-loop"));
+        assert!(names.contains(&"calypso-save-state"));
     }
 
     #[test]
@@ -739,28 +750,28 @@ mod tests {
     }
 
     #[test]
-    fn deployment_request_is_user_action() {
+    fn deployment_request_is_event_triggered() {
         let interp = WorkflowInterpreter::new().unwrap();
         let entry = interp
             .entry_points()
             .into_iter()
-            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-deployment-request"));
+            .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-deployment-request"));
         assert!(
             entry.is_some(),
-            "expected calypso-deployment-request as UserAction"
+            "expected calypso-deployment-request as EventTriggered"
         );
     }
 
     #[test]
-    fn feature_request_is_user_action() {
+    fn feature_request_is_event_triggered() {
         let interp = WorkflowInterpreter::new().unwrap();
         let entry = interp
             .entry_points()
             .into_iter()
-            .find(|e| matches!(e, EntryPoint::UserAction { workflow, .. } if workflow == "calypso-feature-request"));
+            .find(|e| matches!(e, EntryPoint::EventTriggered { workflow, .. } if workflow == "calypso-feature-request"));
         assert!(
             entry.is_some(),
-            "expected calypso-feature-request as UserAction"
+            "expected calypso-feature-request as EventTriggered"
         );
     }
 

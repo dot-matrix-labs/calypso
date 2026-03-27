@@ -6,6 +6,7 @@ build = "build.rs"
 
 [dependencies]
 calypso-templates = { path = "../calypso-templates" }
+calypso-workflow-exec = { path = "../calypso-workflow-exec" }
 calypso-workflows = { path = "../calypso-workflows" }
 crossterm = "0.26.1"
 regex-lite = "0.1"

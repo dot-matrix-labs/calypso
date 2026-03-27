@@ -86,6 +86,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "calypso-workflow-exec"
+version = "0.1.0"
+dependencies = [
+ "calypso-workflows",
+ "chrono",
+ "cron",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "calypso-workflows"
 version = "0.1.0"
 dependencies = [
@@ -399,6 +410,7 @@ dependencies = [
 name = "nightshift-core"
 version = "0.1.0"
 dependencies = [
+ "calypso-workflow-exec",
  "calypso-workflows",
  "chrono",
  "cron",

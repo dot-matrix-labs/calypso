@@ -340,11 +340,8 @@ fn main() {
             let state_path = project_dir.join(".calypso").join("repository-state.json");
             let flow = resolve_select_flow(select_flow, project_dir);
             match flow {
-                Some(SelectedFlow::Blueprint(stem)) => {
-                    run_blueprint_workflow_auto(&stem, project_dir);
-                }
-                Some(SelectedFlow::LocalFile(local_path)) => {
-                    run_local_blueprint_workflow_auto(&local_path, project_dir);
+                Some(SelectedFlow::Workflow(name)) => {
+                    run_workflow_auto(&name, project_dir);
                 }
                 None => {
                     if state_path.exists() {
@@ -371,13 +368,8 @@ fn main() {
             // the interactive selector is shown even on an uninitialised project directory.
             let flow = resolve_select_flow(select_flow, &cwd);
             match flow {
-                Some(SelectedFlow::Blueprint(stem)) => {
-                    // Calypso blueprint workflows run via WorkflowInterpreter — no state
-                    // file required.
-                    run_blueprint_workflow_auto(&stem, &cwd);
-                }
-                Some(SelectedFlow::LocalFile(path)) => {
-                    run_local_blueprint_workflow_auto(&path, &cwd);
+                Some(SelectedFlow::Workflow(name)) => {
+                    run_workflow_auto(&name, &cwd);
                 }
                 None => {
                     if state_path.exists() {
@@ -408,10 +400,8 @@ fn extract_select_flow_flag(args: &[String]) -> (bool, Vec<String>) {
 
 /// The result of an interactive workflow selection.
 enum SelectedFlow {
-    /// An embedded calypso blueprint workflow (GHA-format YAML, run by `WorkflowInterpreter`).
-    Blueprint(String),
-    /// A local YAML file in `.calypso/` (may be `TemplateSet` or GHA format).
-    LocalFile(std::path::PathBuf),
+    /// A workflow selected from the effective catalog.
+    Workflow(String),
 }
 
 /// When `--select-flow` was requested, interactively list blueprint workflows that have a
@@ -430,10 +420,8 @@ fn resolve_select_flow(select_flow: bool, cwd: &std::path::Path) -> Option<Selec
 struct FlowEntry {
     /// Human-readable label: `initial_state (trigger_type) -- filename.yaml`
     label: String,
-    /// Stem used to look up embedded YAML (None for local files).
-    stem: Option<String>,
-    /// Path to the workflow file (None for embedded-only entries).
-    path: Option<std::path::PathBuf>,
+    /// Catalog workflow name used by the executor registry.
+    workflow_name: String,
 }
 
 /// Enumerate entrypoint workflows and prompt the user to pick one.
@@ -442,7 +430,7 @@ struct FlowEntry {
 /// trigger in its `on:` block.  Each (file, trigger-type) pair becomes a separate list entry
 /// so that a file with both triggers appears twice.
 fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> {
-    use calypso_cli::blueprint_workflows::{WorkflowCatalog, WorkflowSource};
+    use calypso_cli::blueprint_workflows::WorkflowCatalog;
     use std::io::{BufRead, Write};
 
     // ── 1. Collect candidates ─────────────────────────────────────────────────
@@ -463,27 +451,13 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> 
         if let Some(ref sched) = wf.schedule {
             entries.push(FlowEntry {
                 label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                stem: match entry.handle.source {
-                    WorkflowSource::Embedded => Some(entry.handle.name.clone()),
-                    WorkflowSource::LocalFile(_) => None,
-                },
-                path: match &entry.handle.source {
-                    WorkflowSource::Embedded => None,
-                    WorkflowSource::LocalFile(path) => Some(path.clone()),
-                },
+                workflow_name: entry.handle.name.clone(),
             });
         }
         if wf.trigger.is_some() {
             entries.push(FlowEntry {
                 label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                stem: match entry.handle.source {
-                    WorkflowSource::Embedded => Some(entry.handle.name.clone()),
-                    WorkflowSource::LocalFile(_) => None,
-                },
-                path: match &entry.handle.source {
-                    WorkflowSource::Embedded => None,
-                    WorkflowSource::LocalFile(path) => Some(path.clone()),
-                },
+                workflow_name: entry.handle.name.clone(),
             });
         }
     }
@@ -521,11 +495,7 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> 
     let selected = &entries[choice - 1];
     println!("Selected: {}", selected.label);
 
-    match (&selected.stem, &selected.path) {
-        (Some(stem), _) => Some(SelectedFlow::Blueprint(stem.clone())),
-        (None, Some(p)) => Some(SelectedFlow::LocalFile(p.clone())),
-        (None, None) => None,
-    }
+    Some(SelectedFlow::Workflow(selected.workflow_name.clone()))
 }
 
 /// Strip `-p`/`--path <dir>` from `args` and return the path (if present) plus the remaining args.
@@ -884,167 +854,22 @@ fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&s
     }
 }
 
-/// Run a local GHA-format YAML file as a blueprint workflow inline (no `WorkflowInterpreter`).
-///
-/// Parses the file as a `BlueprintWorkflow`, starts from `initial_state`, and loops through
-/// states using `cfg.next.target_for(event)` for transitions.  Handles `Deterministic`,
-/// `Agent`, `Human`, `Terminal`, and `Github` state kinds.
-fn run_local_blueprint_workflow_auto(path: &std::path::Path, cwd: &std::path::Path) {
-    use calypso_cli::blueprint_workflows::{BlueprintWorkflowLibrary, StateKind};
-    use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
-
-    let yaml = match std::fs::read_to_string(path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("error: cannot read {}: {e}", path.display());
-            std::process::exit(1);
-        }
-    };
-    let wf = match BlueprintWorkflowLibrary::parse(&yaml) {
-        Ok(w) => w,
-        Err(e) => {
-            eprintln!("error: cannot parse {}: {e}", path.display());
-            std::process::exit(1);
-        }
-    };
-
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("workflow");
-    let mut state_name = match wf.initial_state.clone() {
-        Some(s) => s,
-        None => {
-            eprintln!("error: workflow '{}' has no initial_state", name);
-            std::process::exit(1);
-        }
-    };
-
-    println!("Starting local workflow: {name}");
-
-    let session = ClaudeSession::new(ClaudeConfig::default());
-    let context = SessionContext {
-        working_directory: Some(cwd.to_string_lossy().into_owned()),
-    };
-
-    loop {
-        let cfg = match wf.states.get(&state_name) {
-            Some(c) => c.clone(),
-            None => {
-                eprintln!("error: state '{state_name}' not found in workflow '{name}'");
-                std::process::exit(1);
-            }
-        };
-
-        let event: String = match &cfg.kind {
-            Some(StateKind::Terminal) | None => {
-                println!("→ {state_name} (done)");
-                break;
-            }
-            Some(StateKind::Agent) => {
-                println!("→ {state_name}");
-                let prompt = blueprint_agent_prompt(&state_name, &cfg);
-                match session.invoke(&prompt, &context, None) {
-                    Ok(ClaudeOutcome::Ok {
-                        suggested_next_state,
-                        summary,
-                        ..
-                    }) => {
-                        println!("  {summary}");
-                        suggested_next_state.unwrap_or_else(|| "on_success".to_string())
-                    }
-                    Ok(ClaudeOutcome::Nok { reason, .. }) => {
-                        eprintln!("  step failed: {reason}");
-                        "on_failure".to_string()
-                    }
-                    Ok(ClaudeOutcome::Aborted { reason }) => {
-                        eprintln!("  aborted: {reason}");
-                        std::process::exit(1);
-                    }
-                    Err(e) => {
-                        eprintln!("  provider error: {e}");
-                        std::process::exit(1);
-                    }
-                }
-            }
-            Some(StateKind::Human) => {
-                println!("→ {state_name} (human gate)");
-                if let Some(p) = &cfg.prompt {
-                    println!("{p}");
-                }
-                let available = cfg
-                    .next
-                    .as_ref()
-                    .map(|n| n.all_event_keys().join(", "))
-                    .unwrap_or_default();
-                if !available.is_empty() {
-                    println!("Available responses: {available}");
-                }
-                use std::io::{BufRead, Write};
-                print!("Enter event: ");
-                std::io::stdout().flush().ok();
-                std::io::stdin()
-                    .lock()
-                    .lines()
-                    .next()
-                    .and_then(|l| l.ok())
-                    .map(|l| l.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .unwrap_or_else(|| "abort".to_string())
-            }
-            Some(StateKind::Deterministic) => {
-                println!("→ {state_name} (deterministic)");
-                if let Some(cmd) = &cfg.command {
-                    let ok = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(cmd)
-                        .current_dir(cwd)
-                        .status()
-                        .is_ok_and(|s| s.success());
-                    if ok { "on_pass" } else { "on_fail" }.to_string()
-                } else {
-                    "on_pass".to_string()
-                }
-            }
-            Some(StateKind::Github) => {
-                println!(
-                    "→ {state_name} (note: this state normally runs via GitHub Actions hosted runners; skipping in local mode)"
-                );
-                "on_pass".to_string()
-            }
-            _ => "on_complete".to_string(),
-        };
-
-        match cfg.next.as_ref().and_then(|n| n.target_for(&event)) {
-            Some(next) => {
-                state_name = next.to_string();
-            }
-            None => {
-                eprintln!("transition error: no transition from '{state_name}' on '{event}'");
-                std::process::exit(1);
-            }
-        }
-    }
-}
-
-/// Run a calypso blueprint workflow (GHA-format YAML) through the `WorkflowInterpreter`.
-///
-/// Blueprint workflows are calypso's native orchestration format — they use GitHub Actions YAML
-/// syntax as their storage format but are executed **locally** by the interpreter.  This is
-/// distinct from `run_state_machine_auto` which drives the `TemplateSet`-format state machine.
-fn run_blueprint_workflow_auto(stem: &str, cwd: &std::path::Path) {
+/// Run a workflow selected from the effective catalog through the shared interpreter.
+fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
     use calypso_cli::blueprint_workflows::StateKind;
+    use calypso_cli::blueprint_workflows::WorkflowCatalog;
     use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
     use calypso_cli::interpreter::{StepOutcome, WorkflowInterpreter};
 
-    let interp = match WorkflowInterpreter::new() {
+    let catalog = WorkflowCatalog::load(cwd);
+    let interp = match WorkflowInterpreter::from_catalog(&catalog) {
         Ok(i) => i,
         Err(e) => {
             eprintln!("error: failed to load workflow registry: {e}");
             std::process::exit(1);
         }
     };
-    let mut exec = match interp.start(stem) {
+    let mut exec = match interp.start(workflow_name) {
         Ok(e) => e,
         Err(e) => {
             eprintln!("error: {e}");
@@ -1052,7 +877,7 @@ fn run_blueprint_workflow_auto(stem: &str, cwd: &std::path::Path) {
         }
     };
 
-    println!("Starting blueprint workflow: {stem}");
+    println!("Starting workflow: {workflow_name}");
 
     let session = ClaudeSession::new(ClaudeConfig::default());
     let context = SessionContext {
