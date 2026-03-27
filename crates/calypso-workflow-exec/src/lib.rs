@@ -133,11 +133,6 @@ pub struct WorkflowRegistry {
 }
 
 impl WorkflowRegistry {
-    /// Load all embedded workflows into the registry.
-    pub fn from_embedded() -> Result<Self, String> {
-        Self::from_catalog(&WorkflowCatalog::embedded())
-    }
-
     /// Load workflows from a shared catalog into the registry.
     pub fn from_catalog(catalog: &WorkflowCatalog) -> Result<Self, String> {
         let mut workflows = BTreeMap::new();
@@ -265,13 +260,6 @@ pub struct WorkflowInterpreter {
 }
 
 impl WorkflowInterpreter {
-    /// Create a new interpreter with all embedded workflows loaded.
-    pub fn new() -> Result<Self, String> {
-        Ok(Self {
-            registry: WorkflowRegistry::from_embedded()?,
-        })
-    }
-
     /// Create an interpreter from a shared workflow catalog.
     pub fn from_catalog(catalog: &WorkflowCatalog) -> Result<Self, String> {
         Ok(Self {
@@ -666,12 +654,23 @@ pub fn detect_legacy_local_workflows(repo_root: &Path) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calypso_workflows::WorkflowCatalog;
+
+    fn embedded_registry() -> WorkflowRegistry {
+        WorkflowRegistry::from_catalog(&WorkflowCatalog::embedded())
+            .expect("embedded workflow catalog should load")
+    }
+
+    fn embedded_interpreter() -> WorkflowInterpreter {
+        WorkflowInterpreter::from_catalog(&WorkflowCatalog::embedded())
+            .expect("embedded workflow catalog should load")
+    }
 
     // ── Registry & startup ───────────────────────────────────────────────────
 
     #[test]
     fn registry_loads_all_embedded_workflows() {
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         assert!(registry.get("calypso-orchestrator-startup").is_some());
         assert!(registry.get("calypso-planning").is_some());
         assert!(registry.get("calypso-default-feature-workflow").is_some());
@@ -681,7 +680,7 @@ mod tests {
 
     #[test]
     fn start_orchestrator_at_initial_state() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let exec = interp.start("calypso-orchestrator-startup").unwrap();
         assert_eq!(exec.position.workflow, "calypso-orchestrator-startup");
         assert_eq!(exec.position.state, "scan-work-queue");
@@ -690,7 +689,7 @@ mod tests {
 
     #[test]
     fn start_any_workflow_by_name() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let exec = interp.start("calypso-planning").unwrap();
         assert_eq!(exec.position.workflow, "calypso-planning");
         assert!(!exec.position.state.is_empty());
@@ -699,7 +698,7 @@ mod tests {
 
     #[test]
     fn start_unknown_workflow_returns_error() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         assert!(interp.start("does-not-exist").is_err());
     }
 
@@ -707,7 +706,7 @@ mod tests {
 
     #[test]
     fn sub_workflow_names_excludes_top_level_workflows() {
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         let subs = registry.sub_workflow_names();
         // These are called by other workflows — they are sub-workflows.
         assert!(subs.contains("calypso-planning"));
@@ -724,7 +723,7 @@ mod tests {
 
     #[test]
     fn entry_points_excludes_pure_sub_workflows() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entries = interp.entry_points();
         let names: Vec<&str> = entries
             .iter()
@@ -743,7 +742,7 @@ mod tests {
 
     #[test]
     fn release_request_is_event_triggered() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entry = interp
             .entry_points()
             .into_iter()
@@ -759,7 +758,7 @@ mod tests {
 
     #[test]
     fn deployment_request_is_user_action() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entry = interp
             .entry_points()
             .into_iter()
@@ -772,7 +771,7 @@ mod tests {
 
     #[test]
     fn feature_request_is_user_action() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entry = interp
             .entry_points()
             .into_iter()
@@ -785,7 +784,7 @@ mod tests {
 
     #[test]
     fn orchestrator_startup_is_cron_scheduled() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entry = interp
             .entry_points()
             .into_iter()
@@ -813,7 +812,7 @@ mod tests {
 
     #[test]
     fn advance_to_non_workflow_state() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → idle (on no-pending-tasks)
@@ -824,7 +823,7 @@ mod tests {
 
     #[test]
     fn advance_enters_sub_workflow() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → dispatch-planning (enters calypso-planning)
@@ -844,7 +843,7 @@ mod tests {
 
     #[test]
     fn advance_enters_development_sub_workflow() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → assign-phase-issues
@@ -865,7 +864,7 @@ mod tests {
 
     #[test]
     fn terminal_at_root_returns_terminal() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // scan-work-queue → idle
@@ -878,7 +877,7 @@ mod tests {
 
     #[test]
     fn invalid_event_returns_error() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
         let outcome = interp.advance(&mut exec, "nonexistent-event");
         assert!(matches!(outcome, StepOutcome::Error(_)));
@@ -886,7 +885,7 @@ mod tests {
 
     #[test]
     fn sub_workflow_terminal_pops_call_stack() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // Enter planning sub-workflow
@@ -919,7 +918,7 @@ mod tests {
 
     #[test]
     fn current_kind_returns_state_kind() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let exec = interp.start("calypso-orchestrator-startup").unwrap();
         assert_eq!(interp.current_kind(&exec), Some(StateKind::Agent));
     }
@@ -944,7 +943,7 @@ mod tests {
     #[test]
     fn nested_workflow_depth_two() {
         // orchestrator → feature-workflow → implementation-loop
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let mut exec = interp.start("calypso-orchestrator-startup").unwrap();
 
         // Enter development path

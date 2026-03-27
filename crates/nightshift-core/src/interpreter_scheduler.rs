@@ -358,6 +358,7 @@ pub fn initial_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calypso_workflows::WorkflowCatalog;
     use std::fs;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -416,6 +417,11 @@ mod tests {
         ));
         fs::create_dir_all(&path).expect("temp repo dir should be created");
         path
+    }
+
+    fn embedded_interpreter() -> WorkflowInterpreter {
+        WorkflowInterpreter::from_catalog(&WorkflowCatalog::embedded())
+            .expect("embedded workflow catalog should load")
     }
 
     // ── Single-pass mode ─────────────────────────────────────────────────────
@@ -525,7 +531,7 @@ mod tests {
 
     #[test]
     fn initial_position_returns_correct_state() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let pos = initial_position(&interp, "calypso-orchestrator-startup");
         assert!(pos.is_some());
         let pos = pos.unwrap();
@@ -535,7 +541,7 @@ mod tests {
 
     #[test]
     fn initial_position_returns_none_for_unknown_workflow() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let pos = initial_position(&interp, "does-not-exist");
         assert!(pos.is_none());
     }
@@ -546,7 +552,7 @@ mod tests {
     fn log_entry_points_includes_cron_event_user_auto_kinds() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entries = interp.entry_points();
 
         log_entry_points(&logger, &entries);
