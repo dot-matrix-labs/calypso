@@ -292,11 +292,11 @@ Next overall step outside PR #19:
 
 ## Phase 4.6: Doctor state machine audit (#123)
 
-Doctor should audit the state machine and blueprint workflows for correctness by cross-referencing all GHA workflow references against the actual `.github/workflows/` directory.
+Doctor should audit the state machine and Calypso workflows for correctness by cross-referencing all GHA workflow references against the actual `.github/workflows/` directory.
 
 ### Phase 4.6.1: Reference integrity
 
-- [ ] Collect all `workflow:` paths from blueprint workflow checks, `ci_workflows`, `github_actions.current_required`, and policy gate `paths`.
+- [ ] Collect all `workflow:` paths from workflow checks, `ci_workflows`, `github_actions.current_required`, and policy gate `paths`.
 - [ ] Verify each referenced file exists on disk relative to repo root.
 - [ ] When a file is missing, scan `.github/workflows/` for the closest filename match and suggest it.
 
@@ -314,8 +314,8 @@ Doctor should audit the state machine and blueprint workflows for correctness by
 
 ### Phase 4.6.4: Drift detection
 
-- [ ] Compare last-modified timestamps of referenced GHA workflow files vs. blueprint workflow YAML.
-- [ ] Emit a non-blocking warning when GHA files are newer than the referencing blueprint YAML.
+- [ ] Compare last-modified timestamps of referenced GHA workflow files vs. Calypso workflow YAML.
+- [ ] Emit a non-blocking warning when GHA files are newer than the referencing workflow YAML.
 
 ### Phase 4.6.5: Integration
 

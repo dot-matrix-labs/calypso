@@ -58,7 +58,7 @@ jobs:
           changed="$(git diff --name-only "$base" "$head")"
           echo "$changed"
 
-          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-quality\.yml$)' <<<"$changed"; then
+          if grep -Eq '^(crates/calypso-cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-quality\.yml$)' <<<"$changed"; then
             echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust_relevant=false" >> "$GITHUB_OUTPUT"

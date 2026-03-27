@@ -56,7 +56,7 @@ jobs:
 
           changed="$(git diff --name-only "$base" "$head")"
 
-          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/init-test\.yml$)' <<<"$changed"; then
+          if grep -Eq '^(crates/calypso-cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/init-test\.yml$)' <<<"$changed"; then
             echo "init_relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "init_relevant=false" >> "$GITHUB_OUTPUT"
