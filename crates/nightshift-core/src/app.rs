@@ -772,27 +772,32 @@ pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-/// Return a newline-separated list of all embedded blueprint workflow name stems.
-pub fn run_workflows_list() -> String {
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::list()
+/// Return a newline-separated list of all effective workflow names for the repository.
+pub fn run_workflows_list(cwd: &Path) -> String {
+    crate::blueprint_workflows::WorkflowCatalog::load(cwd)
+        .entries()
         .iter()
-        .map(|(stem, _)| *stem)
+        .map(|entry| entry.handle.display_name())
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// Return the raw YAML content for a named workflow, or an error message.
-pub fn run_workflows_show(name: &str) -> Result<String, String> {
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::get(name)
-        .map(|yaml| yaml.to_string())
+pub fn run_workflows_show(cwd: &Path, name: &str) -> Result<String, String> {
+    crate::blueprint_workflows::WorkflowCatalog::load(cwd)
+        .find(name)
+        .map(|entry| entry.yaml.clone())
         .ok_or_else(|| format!("workflow not found: {name}"))
 }
 
 /// Parse the named workflow and return `Ok("OK")` or `Err(parse_error_string)`.
-pub fn run_workflows_validate(name: &str) -> Result<String, String> {
-    let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(name)
+pub fn run_workflows_validate(cwd: &Path, name: &str) -> Result<String, String> {
+    let catalog = crate::blueprint_workflows::WorkflowCatalog::load(cwd);
+    let entry = catalog
+        .find(name)
         .ok_or_else(|| format!("workflow not found: {name}"))?;
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::parse(yaml)
+    entry
+        .parse()
         .map(|_| "OK".to_string())
         .map_err(|e| e.to_string())
 }

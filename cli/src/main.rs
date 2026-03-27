@@ -271,11 +271,11 @@ fn main() {
         }
         // calypso workflows list
         [command, subcommand] if command == "workflows" && subcommand == "list" => {
-            println!("{}", run_workflows_list());
+            println!("{}", run_workflows_list(&cwd));
         }
         // calypso workflows show <name>
         [command, subcommand, name] if command == "workflows" && subcommand == "show" => {
-            match run_workflows_show(name) {
+            match run_workflows_show(&cwd, name) {
                 Ok(yaml) => print!("{yaml}"),
                 Err(error) => {
                     eprintln!("workflows show error: {error}");
@@ -285,7 +285,7 @@ fn main() {
         }
         // calypso workflows validate <name>
         [command, subcommand, name] if command == "workflows" && subcommand == "validate" => {
-            match run_workflows_validate(name) {
+            match run_workflows_validate(&cwd, name) {
                 Ok(message) => println!("{message}"),
                 Err(error) => {
                     eprintln!("{error}");
@@ -442,7 +442,7 @@ struct FlowEntry {
 /// trigger in its `on:` block.  Each (file, trigger-type) pair becomes a separate list entry
 /// so that a file with both triggers appears twice.
 fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> {
-    use calypso_cli::blueprint_workflows::BlueprintWorkflowLibrary;
+    use calypso_cli::blueprint_workflows::{WorkflowCatalog, WorkflowSource};
     use std::io::{BufRead, Write};
 
     // ── 1. Collect candidates ─────────────────────────────────────────────────
@@ -451,87 +451,48 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> 
     // embedded blueprint library entries follow as fallbacks.
 
     let mut entries: Vec<FlowEntry> = Vec::new();
+    let catalog = WorkflowCatalog::load(cwd);
 
-    // Local workflow files in {cwd}/.calypso/ — listed first.
-    let calypso_dir = cwd.join(".calypso");
-    if calypso_dir.is_dir()
-        && let Ok(read_dir) = std::fs::read_dir(&calypso_dir)
-    {
-        let mut local_paths: Vec<_> = read_dir
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| {
-                matches!(
-                    p.extension().and_then(|e| e.to_str()),
-                    Some("yml") | Some("yaml")
-                )
-            })
-            .collect();
-        local_paths.sort();
+    for entry in catalog.entries() {
+        let Ok(wf) = entry.parse() else {
+            continue;
+        };
+        let filename = entry.handle.file_name.clone();
+        let entry_name = wf.initial_state.as_deref().unwrap_or(&filename).to_string();
 
-        for path in local_paths {
-            let Ok(yaml) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let Ok(wf) = BlueprintWorkflowLibrary::parse(&yaml) else {
-                continue;
-            };
-            let filename = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            let entry_name = wf.initial_state.as_deref().unwrap_or(&filename).to_string();
-
-            if let Some(ref sched) = wf.schedule {
-                entries.push(FlowEntry {
-                    label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                    stem: None,
-                    path: Some(path.clone()),
-                });
-            }
-            if wf.trigger.is_some() {
-                entries.push(FlowEntry {
-                    label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                    stem: None,
-                    path: Some(path.clone()),
-                });
-            }
+        if let Some(ref sched) = wf.schedule {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                stem: match entry.handle.source {
+                    WorkflowSource::Embedded => Some(entry.handle.name.clone()),
+                    WorkflowSource::LocalFile(_) => None,
+                },
+                path: match &entry.handle.source {
+                    WorkflowSource::Embedded => None,
+                    WorkflowSource::LocalFile(path) => Some(path.clone()),
+                },
+            });
         }
-    }
-
-    // Embedded blueprint workflows — shown only when the project has no local workflows.
-    // Local files override the embedded library so the user sees a project-specific list.
-    if entries.is_empty() {
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
-                continue;
-            };
-            let filename = format!("{stem}.yaml");
-            let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
-
-            if let Some(ref sched) = wf.schedule {
-                entries.push(FlowEntry {
-                    label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                    stem: Some(stem.to_string()),
-                    path: None,
-                });
-            }
-            if wf.trigger.is_some() {
-                entries.push(FlowEntry {
-                    label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                    stem: Some(stem.to_string()),
-                    path: None,
-                });
-            }
+        if wf.trigger.is_some() {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                stem: match entry.handle.source {
+                    WorkflowSource::Embedded => Some(entry.handle.name.clone()),
+                    WorkflowSource::LocalFile(_) => None,
+                },
+                path: match &entry.handle.source {
+                    WorkflowSource::Embedded => None,
+                    WorkflowSource::LocalFile(path) => Some(path.clone()),
+                },
+            });
         }
     }
 
     if entries.is_empty() {
         eprintln!(
             "No entrypoint workflows found (no workflow_dispatch or cron triggers).\n\
-             Embedded library has {count} workflow(s) — none have user-facing entry points.",
-            count = BlueprintWorkflowLibrary::list().len()
+             Catalog has {count} workflow(s) — none have user-facing entry points.",
+            count = catalog.len()
         );
         return None;
     }

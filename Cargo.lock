@@ -78,19 +78,19 @@ dependencies = [
 ]
 
 [[package]]
-name = "calypso-templates"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_yaml",
-]
-
-[[package]]
 name = "calypso-web"
 version = "0.1.0"
 dependencies = [
  "nightshift-core",
  "serde_json",
+]
+
+[[package]]
+name = "calypso-workflows"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -399,7 +399,7 @@ dependencies = [
 name = "nightshift-core"
 version = "0.1.0"
 dependencies = [
- "calypso-templates",
+ "calypso-workflows",
  "chrono",
  "cron",
  "crossterm",

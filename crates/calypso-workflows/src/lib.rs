@@ -1,13 +1,11 @@
-//! Embedded blueprint workflow YAML files from the calypso-blueprint submodule.
-//!
-//! This module provides compile-time access to all `calypso-*.yaml` workflow files
-//! in GitHub Actions YAML format. Use [`BlueprintWorkflowLibrary`] to enumerate,
-//! look up, and parse them.
+//! Workflow parsing and cataloging for Calypso's GHA-shaped workflow format.
 //!
 //! The GHA format uses `jobs:` instead of `states:`, with transitions expressed via
 //! `needs:` + `outputs:` + `if:` conditions rather than `next:` specs.
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -79,6 +77,150 @@ impl BlueprintWorkflowLibrary {
     pub fn parse(yaml: &str) -> Result<BlueprintWorkflow, serde_yaml::Error> {
         let raw: GhaWorkflowRaw = serde_yaml::from_str(yaml)?;
         Ok(BlueprintWorkflow::from_gha(raw))
+    }
+}
+
+pub type WorkflowDocument = BlueprintWorkflow;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkflowSource {
+    Embedded,
+    LocalFile(PathBuf),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowHandle {
+    pub name: String,
+    pub file_name: String,
+    pub source: WorkflowSource,
+}
+
+impl WorkflowHandle {
+    pub fn display_name(&self) -> &str {
+        match self.source {
+            WorkflowSource::Embedded => &self.name,
+            WorkflowSource::LocalFile(_) => &self.file_name,
+        }
+    }
+
+    pub fn matches_lookup(&self, lookup: &str) -> bool {
+        lookup == self.name || lookup == self.file_name
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowCatalogEntry {
+    pub handle: WorkflowHandle,
+    pub yaml: String,
+}
+
+impl WorkflowCatalogEntry {
+    pub fn parse(&self) -> Result<WorkflowDocument, serde_yaml::Error> {
+        BlueprintWorkflowLibrary::parse(&self.yaml)
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkflowCatalog {
+    entries: Vec<WorkflowCatalogEntry>,
+}
+
+impl WorkflowCatalog {
+    pub fn load(repo_root: &Path) -> Self {
+        let explicit_dir = repo_root.join(".calypso").join("workflows");
+        let local_entries = if explicit_dir.is_dir() {
+            Self::load_local_entries(&explicit_dir)
+        } else {
+            Vec::new()
+        };
+
+        if !local_entries.is_empty() {
+            return Self {
+                entries: local_entries,
+            };
+        }
+
+        let legacy_dir = repo_root.join(".calypso");
+        let legacy_entries = if legacy_dir.is_dir() {
+            Self::load_local_entries(&legacy_dir)
+        } else {
+            Vec::new()
+        };
+
+        if !legacy_entries.is_empty() {
+            return Self {
+                entries: legacy_entries,
+            };
+        }
+
+        Self::embedded()
+    }
+
+    pub fn embedded() -> Self {
+        let entries = BlueprintWorkflowLibrary::list()
+            .iter()
+            .map(|(stem, yaml)| WorkflowCatalogEntry {
+                handle: WorkflowHandle {
+                    name: (*stem).to_string(),
+                    file_name: format!("{stem}.yaml"),
+                    source: WorkflowSource::Embedded,
+                },
+                yaml: (*yaml).to_string(),
+            })
+            .collect();
+        Self { entries }
+    }
+
+    pub fn entries(&self) -> &[WorkflowCatalogEntry] {
+        &self.entries
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    pub fn find(&self, lookup: &str) -> Option<&WorkflowCatalogEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.handle.matches_lookup(lookup))
+    }
+
+    fn load_local_entries(dir: &Path) -> Vec<WorkflowCatalogEntry> {
+        let mut paths: Vec<PathBuf> = match fs::read_dir(dir) {
+            Ok(read_dir) => read_dir
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| {
+                    matches!(
+                        path.extension().and_then(|ext| ext.to_str()),
+                        Some("yml") | Some("yaml")
+                    )
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        paths.sort();
+
+        paths
+            .into_iter()
+            .filter_map(|path| {
+                let yaml = fs::read_to_string(&path).ok()?;
+                let file_name = path.file_name()?.to_str()?.to_string();
+                let stem = path.file_stem()?.to_str()?.to_string();
+                Some(WorkflowCatalogEntry {
+                    handle: WorkflowHandle {
+                        name: stem,
+                        file_name,
+                        source: WorkflowSource::LocalFile(path),
+                    },
+                    yaml,
+                })
+            })
+            .collect()
     }
 }
 

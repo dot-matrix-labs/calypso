@@ -1,5 +1,4 @@
 pub mod app;
-pub mod blueprint_workflows;
 pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
@@ -29,6 +28,7 @@ pub mod state;
 pub mod telemetry;
 pub mod template;
 pub mod workflows;
+pub use calypso_workflows as blueprint_workflows;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BuildInfo<'a> {
@@ -88,7 +88,7 @@ Commands:
   feature-start <id> --worktree-base <path>
                       Create a feature branch, worktree, draft PR, and state file
   template validate   Validate the local workflow template
-  workflows list      List all embedded blueprint workflow names
+  workflows list      List effective workflow names for the project directory
   workflows show <name>
                       Print the raw YAML for the named blueprint workflow
   workflows validate <name>
