@@ -339,31 +339,43 @@ fn main() {
             let project_dir = std::path::Path::new(path);
             let state_path = project_dir.join(".calypso").join("repository-state.json");
             let flow = resolve_select_flow(select_flow, project_dir);
-            if state_path.exists() {
-                run_state_machine_auto(&state_path, flow.as_deref());
-            } else if flow.is_some() {
-                let previously_initialized = InitProgress::load(project_dir)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|p| p.current_step.is_complete());
-                if previously_initialized {
-                    eprintln!(
-                        "error: project is initialised but state file is missing at {}\n\
-                         Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
-                        state_path.display(),
-                        project_dir.display()
-                    );
-                } else {
-                    eprintln!(
-                        "error: no state file found at {}\n\
-                         Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
-                        state_path.display(),
-                        project_dir.display()
-                    );
+            match flow {
+                Some(SelectedFlow::Blueprint(stem)) => {
+                    run_blueprint_workflow_auto(&stem, project_dir);
                 }
-                std::process::exit(1);
-            } else {
-                println!("{}", run_doctor(project_dir));
+                Some(SelectedFlow::LocalFile(local_path)) => {
+                    if state_path.exists() {
+                        run_state_machine_auto(&state_path, Some(&local_path));
+                    } else {
+                        let previously_initialized = InitProgress::load(project_dir)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|p| p.current_step.is_complete());
+                        if previously_initialized {
+                            eprintln!(
+                                "error: project is initialised but state file is missing at {}\n\
+                                 Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
+                                state_path.display(),
+                                project_dir.display()
+                            );
+                        } else {
+                            eprintln!(
+                                "error: no state file found at {}\n\
+                                 Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
+                                state_path.display(),
+                                project_dir.display()
+                            );
+                        }
+                        std::process::exit(1);
+                    }
+                }
+                None => {
+                    if state_path.exists() {
+                        run_state_machine_auto(&state_path, None);
+                    } else {
+                        println!("{}", run_doctor(project_dir));
+                    }
+                }
             }
         }
         // calypso --step — step mode: one step per Enter keypress
@@ -381,31 +393,45 @@ fn main() {
             // Resolve --select-flow before checking whether the state file exists so that
             // the interactive selector is shown even on an uninitialised project directory.
             let flow = resolve_select_flow(select_flow, &cwd);
-            if state_path.exists() {
-                run_state_machine_auto(&state_path, flow.as_deref());
-            } else if flow.is_some() {
-                let previously_initialized = InitProgress::load(&cwd)
-                    .ok()
-                    .flatten()
-                    .is_some_and(|p| p.current_step.is_complete());
-                if previously_initialized {
-                    eprintln!(
-                        "error: project is initialised but state file is missing at {}\n\
-                         Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
-                        state_path.display(),
-                        cwd.display()
-                    );
-                } else {
-                    eprintln!(
-                        "error: no state file found at {}\n\
-                         Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
-                        state_path.display(),
-                        cwd.display()
-                    );
+            match flow {
+                Some(SelectedFlow::Blueprint(stem)) => {
+                    // Calypso blueprint workflows run via WorkflowInterpreter — no state
+                    // file required.
+                    run_blueprint_workflow_auto(&stem, &cwd);
                 }
-                std::process::exit(1);
-            } else {
-                println!("{}", run_doctor(&cwd));
+                Some(SelectedFlow::LocalFile(path)) => {
+                    if state_path.exists() {
+                        run_state_machine_auto(&state_path, Some(&path));
+                    } else {
+                        let previously_initialized = InitProgress::load(&cwd)
+                            .ok()
+                            .flatten()
+                            .is_some_and(|p| p.current_step.is_complete());
+                        if previously_initialized {
+                            eprintln!(
+                                "error: project is initialised but state file is missing at {}\n\
+                                 Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
+                                state_path.display(),
+                                cwd.display()
+                            );
+                        } else {
+                            eprintln!(
+                                "error: no state file found at {}\n\
+                                 Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
+                                state_path.display(),
+                                cwd.display()
+                            );
+                        }
+                        std::process::exit(1);
+                    }
+                }
+                None => {
+                    if state_path.exists() {
+                        run_state_machine_auto(&state_path, None);
+                    } else {
+                        println!("{}", run_doctor(&cwd));
+                    }
+                }
             }
         }
         _ => println!("{}", render_help(info)),
@@ -426,12 +452,20 @@ fn extract_select_flow_flag(args: &[String]) -> (bool, Vec<String>) {
     (found, remaining)
 }
 
+/// The result of an interactive workflow selection.
+enum SelectedFlow {
+    /// An embedded calypso blueprint workflow (GHA-format YAML, run by `WorkflowInterpreter`).
+    Blueprint(String),
+    /// A local YAML file in `.calypso/` (may be `TemplateSet` or GHA format).
+    LocalFile(std::path::PathBuf),
+}
+
 /// When `--select-flow` was requested, interactively list blueprint workflows that have a
 /// `workflow_dispatch` or `cron` entry point plus any `.yml`/`.yaml` files found in
-/// `{cwd}/.calypso/`, then return the path of the selected file.
+/// `{cwd}/.calypso/`, then return the selected flow.
 ///
 /// Returns `None` if the flag was not set, the user cancelled, or no eligible workflows exist.
-fn resolve_select_flow(select_flow: bool, cwd: &std::path::Path) -> Option<std::path::PathBuf> {
+fn resolve_select_flow(select_flow: bool, cwd: &std::path::Path) -> Option<SelectedFlow> {
     if !select_flow {
         return None;
     }
@@ -453,39 +487,18 @@ struct FlowEntry {
 /// An "entrypoint workflow" is one with a `workflow_dispatch` (manual) or `cron` (scheduled)
 /// trigger in its `on:` block.  Each (file, trigger-type) pair becomes a separate list entry
 /// so that a file with both triggers appears twice.
-fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::PathBuf> {
+fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> {
     use calypso_cli::blueprint_workflows::BlueprintWorkflowLibrary;
     use std::io::{BufRead, Write};
 
     // ── 1. Collect candidates ─────────────────────────────────────────────────
+    //
+    // Local project files are listed first so they are easiest to reach;
+    // embedded blueprint library entries follow as fallbacks.
 
     let mut entries: Vec<FlowEntry> = Vec::new();
 
-    // Embedded blueprint workflows.
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
-            continue;
-        };
-        let filename = format!("{stem}.yaml");
-        let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
-
-        if let Some(ref sched) = wf.schedule {
-            entries.push(FlowEntry {
-                label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                stem: Some(stem.to_string()),
-                path: None,
-            });
-        }
-        if wf.trigger.is_some() {
-            entries.push(FlowEntry {
-                label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                stem: Some(stem.to_string()),
-                path: None,
-            });
-        }
-    }
-
-    // Local workflow files in {cwd}/.calypso/.
+    // Local workflow files in {cwd}/.calypso/ — listed first.
     let calypso_dir = cwd.join(".calypso");
     if calypso_dir.is_dir()
         && let Ok(read_dir) = std::fs::read_dir(&calypso_dir)
@@ -533,6 +546,30 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::Pat
         }
     }
 
+    // Embedded blueprint workflows — listed after local files.
+    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+        let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
+            continue;
+        };
+        let filename = format!("{stem}.yaml");
+        let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
+
+        if let Some(ref sched) = wf.schedule {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                stem: Some(stem.to_string()),
+                path: None,
+            });
+        }
+        if wf.trigger.is_some() {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                stem: Some(stem.to_string()),
+                path: None,
+            });
+        }
+    }
+
     if entries.is_empty() {
         eprintln!(
             "No entrypoint workflows found (no workflow_dispatch or cron triggers).\n\
@@ -566,16 +603,10 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::Pat
     let selected = &entries[choice - 1];
     println!("Selected: {}", selected.label);
 
-    match &selected.path {
-        Some(p) => Some(p.clone()),
-        None => {
-            // Embedded workflow: materialise to a temp file so callers get a PathBuf.
-            let stem = selected.stem.as_deref()?;
-            let yaml = BlueprintWorkflowLibrary::get(stem)?;
-            let tmp_path = std::env::temp_dir().join(format!("calypso-selected-flow-{stem}.yaml"));
-            std::fs::write(&tmp_path, yaml).ok()?;
-            Some(tmp_path)
-        }
+    match (&selected.stem, &selected.path) {
+        (Some(stem), _) => Some(SelectedFlow::Blueprint(stem.clone())),
+        (None, Some(p)) => Some(SelectedFlow::LocalFile(p.clone())),
+        (None, None) => None,
     }
 }
 
@@ -933,6 +964,198 @@ fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&s
             }
         }
     }
+}
+
+/// Run a calypso blueprint workflow (GHA-format YAML) through the `WorkflowInterpreter`.
+///
+/// Blueprint workflows are calypso's native orchestration format — they use GitHub Actions YAML
+/// syntax as their storage format but are executed **locally** by the interpreter.  This is
+/// distinct from `run_state_machine_auto` which drives the `TemplateSet`-format state machine.
+fn run_blueprint_workflow_auto(stem: &str, cwd: &std::path::Path) {
+    use calypso_cli::blueprint_workflows::StateKind;
+    use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
+    use calypso_cli::interpreter::{StepOutcome, WorkflowInterpreter};
+
+    let interp = match WorkflowInterpreter::new() {
+        Ok(i) => i,
+        Err(e) => {
+            eprintln!("error: failed to load workflow registry: {e}");
+            std::process::exit(1);
+        }
+    };
+    let mut exec = match interp.start(stem) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("error: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    println!("Starting blueprint workflow: {stem}");
+
+    let session = ClaudeSession::new(ClaudeConfig::default());
+    let context = SessionContext {
+        working_directory: Some(cwd.to_string_lossy().into_owned()),
+    };
+
+    loop {
+        let state_name = exec.position.state.clone();
+        let wf_name = exec.position.workflow.clone();
+        let cfg = match interp.current_state_config(&exec) {
+            Some(c) => c,
+            None => {
+                eprintln!("error: state '{state_name}' not found in workflow '{wf_name}'");
+                std::process::exit(1);
+            }
+        };
+
+        // Determine the event to fire after executing this state.
+        let event: String = match &cfg.kind {
+            Some(StateKind::Terminal) | None => {
+                println!("→ {state_name} (done)");
+                break;
+            }
+            Some(StateKind::Agent) => {
+                println!("→ {state_name}");
+                let prompt = blueprint_agent_prompt(&state_name, cfg);
+                match session.invoke(&prompt, &context, None) {
+                    Ok(ClaudeOutcome::Ok {
+                        suggested_next_state,
+                        summary,
+                        ..
+                    }) => {
+                        println!("  {summary}");
+                        suggested_next_state.unwrap_or_else(|| "on_success".to_string())
+                    }
+                    Ok(ClaudeOutcome::Nok { reason, .. }) => {
+                        eprintln!("  step failed: {reason}");
+                        "on_failure".to_string()
+                    }
+                    Ok(ClaudeOutcome::Aborted { reason }) => {
+                        eprintln!("  aborted: {reason}");
+                        std::process::exit(1);
+                    }
+                    Err(e) => {
+                        eprintln!("  provider error: {e}");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Some(StateKind::Human) => {
+                println!("→ {state_name} (human gate)");
+                if let Some(p) = &cfg.prompt {
+                    println!("{p}");
+                }
+                let available = cfg
+                    .next
+                    .as_ref()
+                    .map(|n| n.all_event_keys().join(", "))
+                    .unwrap_or_default();
+                if !available.is_empty() {
+                    println!("Available responses: {available}");
+                }
+                use std::io::{BufRead, Write};
+                print!("Enter event: ");
+                std::io::stdout().flush().ok();
+                std::io::stdin()
+                    .lock()
+                    .lines()
+                    .next()
+                    .and_then(|l| l.ok())
+                    .map(|l| l.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "abort".to_string())
+            }
+            Some(StateKind::Deterministic) => {
+                println!("→ {state_name} (deterministic)");
+                if let Some(cmd) = &cfg.command {
+                    let ok = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(cmd)
+                        .current_dir(cwd)
+                        .status()
+                        .is_ok_and(|s| s.success());
+                    if ok { "on_pass" } else { "on_fail" }.to_string()
+                } else {
+                    "on_pass".to_string()
+                }
+            }
+            Some(StateKind::Github) => {
+                // GitHub-Actions-hosted states cannot run locally; skip with a note.
+                println!(
+                    "→ {state_name} (note: this state normally runs via GitHub Actions hosted runners; skipping in local mode)"
+                );
+                "on_pass".to_string()
+            }
+            _ => {
+                // Workflow-delegation and other kinds are handled by the interpreter
+                // automatically when we call advance(); just supply a generic event.
+                "on_complete".to_string()
+            }
+        };
+
+        match interp.advance(&mut exec, &event) {
+            StepOutcome::Advanced(_) => {
+                // exec.position is already updated; continue the loop.
+            }
+            StepOutcome::EnteredSubWorkflow { child, .. } => {
+                println!(
+                    "  → entering sub-workflow: {} at {}",
+                    child.workflow, child.state
+                );
+            }
+            StepOutcome::ReturnedToParent {
+                terminal_state,
+                parent,
+            } => {
+                println!(
+                    "  → sub-workflow complete ({terminal_state}), returned to {}",
+                    parent.state
+                );
+            }
+            StepOutcome::Terminal(pos) => {
+                println!("→ {} (terminal: workflow complete)", pos.state);
+                break;
+            }
+            StepOutcome::Error(e) => {
+                eprintln!("transition error: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+/// Build the Claude prompt for an agent state in a blueprint workflow.
+fn blueprint_agent_prompt(
+    state_name: &str,
+    cfg: &calypso_cli::blueprint_workflows::StateConfig,
+) -> String {
+    let task = cfg
+        .prompt
+        .as_deref()
+        .unwrap_or("Complete your assigned task.");
+    let role = cfg.role.as_deref().unwrap_or("agent");
+    let events = cfg
+        .next
+        .as_ref()
+        .map(|n| n.all_event_keys().join(", "))
+        .unwrap_or_default();
+    let events_section = if events.is_empty() {
+        String::new()
+    } else {
+        format!("\nAvailable outcome events (set `suggested_next_state` to one): {events}\n")
+    };
+    format!(
+        "You are the `{role}` agent at workflow state `{state_name}`.\n\n\
+         {task}\n\
+         {events_section}\n\
+         When complete, emit exactly one outcome marker on its own line:\n\
+           [CALYPSO:OK]{{\"summary\":\"...\",\"artifact_refs\":[],\"suggested_next_state\":\"<event>\"}}\n\
+           [CALYPSO:NOK]{{\"summary\":\"...\",\"reason\":\"...\"}}\n\
+           [CALYPSO:ABORTED]{{\"reason\":\"...\"}}\n\
+         If you need clarification from the operator, emit:\n\
+           [CALYPSO:CLARIFICATION]<your question here>"
+    )
 }
 
 fn run_state_machine_step(state_path: &std::path::Path) {

@@ -74,14 +74,19 @@ fn dispatch_only_workflow_appears_exactly_once() {
         .stdin("1\n")
         .run();
 
+    // Count only numbered list entries (e.g. "  1) greet (workflow_dispatch) -- dispatch-only.yaml"),
+    // not the "Selected: ..." confirmation line which may also mention the filename.
     let count = out
         .stdout
         .lines()
-        .filter(|l| l.contains("dispatch-only.yaml"))
+        .filter(|l| {
+            let t = l.trim();
+            t.contains("dispatch-only.yaml") && t.starts_with(|c: char| c.is_ascii_digit())
+        })
         .count();
     assert_eq!(
         count, 1,
-        "dispatch-only.yaml should appear exactly once; stdout:\n{}",
+        "dispatch-only.yaml should appear exactly once in the list; stdout:\n{}",
         out.stdout
     );
 }
