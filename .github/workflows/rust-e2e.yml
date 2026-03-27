@@ -99,3 +99,8 @@ jobs:
         if: needs.changes.outputs.rust_relevant == 'true'
         working-directory: cli
         run: cargo test-e2e
+
+      - name: Run select-flow end-to-end tests
+        if: needs.changes.outputs.rust_relevant == 'true'
+        working-directory: cli
+        run: cargo test-select-flow

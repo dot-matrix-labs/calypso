@@ -18,6 +18,12 @@ pub struct SpawnedCalypsoBuilder {
     args: Vec<String>,
     prepend_path: Option<PathBuf>,
     state_file_json: Option<String>,
+    /// Text fed to the process over stdin (e.g. a menu selection number).
+    stdin_input: Option<String>,
+    /// Extra files written into `.calypso/` before spawn: (filename, content).
+    extra_calypso_files: Vec<(String, String)>,
+    /// Content for `.calypso/init-state.json` (simulates a completed init).
+    init_state_json: Option<String>,
 }
 
 impl SpawnedCalypsoBuilder {
@@ -26,6 +32,9 @@ impl SpawnedCalypsoBuilder {
             args: vec![],
             prepend_path: None,
             state_file_json: None,
+            stdin_input: None,
+            extra_calypso_files: vec![],
+            init_state_json: None,
         }
     }
 
@@ -49,6 +58,46 @@ impl SpawnedCalypsoBuilder {
         self
     }
 
+    /// Feed `input` to the process over stdin (e.g. `"7\n"` for a menu selection).
+    pub fn stdin(mut self, input: impl Into<String>) -> Self {
+        self.stdin_input = Some(input.into());
+        self
+    }
+
+    /// Write a file to `.calypso/<name>` before spawning (e.g. a workflow YAML).
+    pub fn calypso_file(
+        mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) -> Self {
+        self.extra_calypso_files.push((name.into(), content.into()));
+        self
+    }
+
+    /// Write a completed `init-state.json` to `.calypso/`, simulating a
+    /// project that has been initialised but may be missing a state file.
+    pub fn with_completed_init(mut self) -> Self {
+        self.init_state_json = Some(
+            r#"{
+  "current_step": "complete",
+  "repo_path": "/tmp/calypso-test/",
+  "github_org": null,
+  "github_repo": null,
+  "completed_steps": [
+    "prompt-directory",
+    "create-git-repo",
+    "create-upstream",
+    "scaffold-github-actions",
+    "configure-local",
+    "verify-setup"
+  ],
+  "hello_world": false
+}"#
+            .to_string(),
+        );
+        self
+    }
+
     /// Run the binary and return its output.
     pub fn run(self) -> CalypsoOutput {
         let work_dir = unique_temp_dir("calypso-e2e-workdir");
@@ -61,6 +110,18 @@ impl SpawnedCalypsoBuilder {
 
         if let Some(json) = &self.state_file_json {
             std::fs::write(&state_path, json).expect("state file should be written");
+        }
+
+        // Write completed init-state.json if requested.
+        if let Some(ref json) = self.init_state_json {
+            std::fs::write(calypso_dir.join("init-state.json"), json)
+                .expect("init-state.json should be written");
+        }
+
+        // Write extra calypso files (e.g. workflow YAMLs for select-flow tests).
+        for (name, content) in &self.extra_calypso_files {
+            std::fs::write(calypso_dir.join(name), content)
+                .expect("extra calypso file should be written");
         }
 
         // Substitute {STATE_FILE} placeholder in args with the actual path.
@@ -88,12 +149,28 @@ impl SpawnedCalypsoBuilder {
         };
 
         let binary = env!("CARGO_BIN_EXE_calypso-cli");
-        let output = Command::new(binary)
+        let mut child = Command::new(binary)
             .args(&args)
             .current_dir(&work_dir)
             .env("PATH", &path_val)
-            .output()
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .expect("calypso-cli should spawn");
+
+        // Feed stdin input before waiting, so interactive prompts can be answered.
+        if let Some(ref input) = self.stdin_input {
+            use std::io::Write as _;
+            if let Some(mut stdin_pipe) = child.stdin.take() {
+                let _ = stdin_pipe.write_all(input.as_bytes());
+                // Drop closes the pipe, signalling EOF to the child.
+            }
+        }
+
+        let output = child
+            .wait_with_output()
+            .expect("calypso-cli should complete");
 
         let stdout = String::from_utf8(output.stdout).expect("stdout should be valid UTF-8");
         let stderr = String::from_utf8(output.stderr).expect("stderr should be valid UTF-8");

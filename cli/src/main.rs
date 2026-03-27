@@ -42,7 +42,10 @@ fn main() {
     let cwd = path_override
         .unwrap_or_else(|| std::env::current_dir().expect("current directory should resolve"));
 
-    let args = args_after_path;
+    // Strip --select-flow from args before dispatching.
+    let (select_flow, args_after_select_flow) = extract_select_flow_flag(&args_after_path);
+
+    let args = args_after_select_flow;
 
     match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
@@ -335,8 +338,30 @@ fn main() {
         [path] if looks_like_path(path) => {
             let project_dir = std::path::Path::new(path);
             let state_path = project_dir.join(".calypso").join("repository-state.json");
+            let flow = resolve_select_flow(select_flow, project_dir);
             if state_path.exists() {
-                run_state_machine_auto(&state_path);
+                run_state_machine_auto(&state_path, flow.as_deref());
+            } else if flow.is_some() {
+                let previously_initialized = InitProgress::load(project_dir)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|p| p.current_step.is_complete());
+                if previously_initialized {
+                    eprintln!(
+                        "error: project is initialised but state file is missing at {}\n\
+                         Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
+                        state_path.display(),
+                        project_dir.display()
+                    );
+                } else {
+                    eprintln!(
+                        "error: no state file found at {}\n\
+                         Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
+                        state_path.display(),
+                        project_dir.display()
+                    );
+                }
+                std::process::exit(1);
             } else {
                 println!("{}", run_doctor(project_dir));
             }
@@ -353,13 +378,216 @@ fn main() {
         // calypso — no args: drive state machine if initialized, else show doctor output
         [] => {
             let state_path = cwd.join(".calypso").join("repository-state.json");
+            // Resolve --select-flow before checking whether the state file exists so that
+            // the interactive selector is shown even on an uninitialised project directory.
+            let flow = resolve_select_flow(select_flow, &cwd);
             if state_path.exists() {
-                run_state_machine_auto(&state_path);
+                run_state_machine_auto(&state_path, flow.as_deref());
+            } else if flow.is_some() {
+                let previously_initialized = InitProgress::load(&cwd)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|p| p.current_step.is_complete());
+                if previously_initialized {
+                    eprintln!(
+                        "error: project is initialised but state file is missing at {}\n\
+                         Run `calypso --path {} init --reinit` to repair, then re-run with --select-flow.",
+                        state_path.display(),
+                        cwd.display()
+                    );
+                } else {
+                    eprintln!(
+                        "error: no state file found at {}\n\
+                         Run `calypso --path {} init` to initialise this project, then re-run with --select-flow.",
+                        state_path.display(),
+                        cwd.display()
+                    );
+                }
+                std::process::exit(1);
             } else {
                 println!("{}", run_doctor(&cwd));
             }
         }
         _ => println!("{}", render_help(info)),
+    }
+}
+
+/// Strip `--select-flow` from `args` and return whether the flag was present plus the remaining args.
+fn extract_select_flow_flag(args: &[String]) -> (bool, Vec<String>) {
+    let mut remaining = Vec::new();
+    let mut found = false;
+    for arg in args {
+        if arg == "--select-flow" {
+            found = true;
+        } else {
+            remaining.push(arg.clone());
+        }
+    }
+    (found, remaining)
+}
+
+/// When `--select-flow` was requested, interactively list blueprint workflows that have a
+/// `workflow_dispatch` or `cron` entry point plus any `.yml`/`.yaml` files found in
+/// `{cwd}/.calypso/`, then return the path of the selected file.
+///
+/// Returns `None` if the flag was not set, the user cancelled, or no eligible workflows exist.
+fn resolve_select_flow(
+    select_flow: bool,
+    cwd: &std::path::Path,
+) -> Option<std::path::PathBuf> {
+    if !select_flow {
+        return None;
+    }
+    select_workflow_interactively(cwd)
+}
+
+/// One selectable entry in the interactive flow list.
+struct FlowEntry {
+    /// Human-readable label: `initial_state (trigger_type) -- filename.yaml`
+    label: String,
+    /// Stem used to look up embedded YAML (None for local files).
+    stem: Option<String>,
+    /// Path to the workflow file (None for embedded-only entries).
+    path: Option<std::path::PathBuf>,
+}
+
+/// Enumerate entrypoint workflows and prompt the user to pick one.
+///
+/// An "entrypoint workflow" is one with a `workflow_dispatch` (manual) or `cron` (scheduled)
+/// trigger in its `on:` block.  Each (file, trigger-type) pair becomes a separate list entry
+/// so that a file with both triggers appears twice.
+fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::PathBuf> {
+    use calypso_cli::blueprint_workflows::BlueprintWorkflowLibrary;
+    use std::io::{BufRead, Write};
+
+    // ── 1. Collect candidates ─────────────────────────────────────────────────
+
+    let mut entries: Vec<FlowEntry> = Vec::new();
+
+    // Embedded blueprint workflows.
+    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+        let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) else {
+            continue;
+        };
+        let filename = format!("{stem}.yaml");
+        let entry_name = wf
+            .initial_state
+            .as_deref()
+            .unwrap_or(stem)
+            .to_string();
+
+        if let Some(ref sched) = wf.schedule {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                stem: Some(stem.to_string()),
+                path: None,
+            });
+        }
+        if wf.trigger.is_some() {
+            entries.push(FlowEntry {
+                label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                stem: Some(stem.to_string()),
+                path: None,
+            });
+        }
+    }
+
+    // Local workflow files in {cwd}/.calypso/.
+    let calypso_dir = cwd.join(".calypso");
+    if calypso_dir.is_dir() {
+        if let Ok(read_dir) = std::fs::read_dir(&calypso_dir) {
+            let mut local_paths: Vec<_> = read_dir
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    matches!(
+                        p.extension().and_then(|e| e.to_str()),
+                        Some("yml") | Some("yaml")
+                    )
+                })
+                .collect();
+            local_paths.sort();
+
+            for path in local_paths {
+                let Ok(yaml) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let Ok(wf) = BlueprintWorkflowLibrary::parse(&yaml) else {
+                    continue;
+                };
+                let filename = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let entry_name = wf
+                    .initial_state
+                    .as_deref()
+                    .unwrap_or(&filename)
+                    .to_string();
+
+                if let Some(ref sched) = wf.schedule {
+                    entries.push(FlowEntry {
+                        label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                        stem: None,
+                        path: Some(path.clone()),
+                    });
+                }
+                if wf.trigger.is_some() {
+                    entries.push(FlowEntry {
+                        label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                        stem: None,
+                        path: Some(path.clone()),
+                    });
+                }
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        eprintln!(
+            "No entrypoint workflows found (no workflow_dispatch or cron triggers).\n\
+             Embedded library has {count} workflow(s) — none have user-facing entry points.",
+            count = BlueprintWorkflowLibrary::list().len()
+        );
+        return None;
+    }
+
+    // ── 2. Display numbered list ───────────────────────────────────────────────
+
+    println!("Available workflows:");
+    for (i, entry) in entries.iter().enumerate() {
+        println!("  {}) {}", i + 1, entry.label);
+    }
+
+    // ── 3. Read user choice ────────────────────────────────────────────────────
+
+    print!("Select workflow [1-{}]: ", entries.len());
+    std::io::stdout().flush().ok();
+
+    let stdin = std::io::stdin();
+    let line = stdin.lock().lines().next()?.ok()?;
+    let choice: usize = line.trim().parse().ok()?;
+
+    if choice == 0 || choice > entries.len() {
+        eprintln!("Invalid selection.");
+        return None;
+    }
+
+    let selected = &entries[choice - 1];
+    println!("Selected: {}", selected.label);
+
+    match &selected.path {
+        Some(p) => Some(p.clone()),
+        None => {
+            // Embedded workflow: materialise to a temp file so callers get a PathBuf.
+            let stem = selected.stem.as_deref()?;
+            let yaml = BlueprintWorkflowLibrary::get(stem)?;
+            let tmp_path =
+                std::env::temp_dir().join(format!("calypso-selected-flow-{stem}.yaml"));
+            std::fs::write(&tmp_path, yaml).ok()?;
+            Some(tmp_path)
+        }
     }
 }
 
@@ -663,12 +891,28 @@ fn run_claude_session(state_path: &str, role: &str) {
     }
 }
 
-fn run_state_machine_auto(state_path: &std::path::Path) {
+fn run_state_machine_auto(
+    state_path: &std::path::Path,
+    flow_override: Option<&std::path::Path>,
+) {
     use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
     use calypso_cli::execution::ExecutionConfig;
-    use calypso_cli::template::load_embedded_template_set;
+    use calypso_cli::template::{load_embedded_template_set, load_template_set_with_state_machine};
 
-    let template = load_embedded_template_set().expect("embedded templates should be valid");
+    let template = match flow_override {
+        Some(path) => load_template_set_with_state_machine(path).unwrap_or_else(|_| {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("selected file");
+            eprintln!(
+                "note: {name} is a GitHub Actions workflow file; \
+                 running with the project's state machine template instead."
+            );
+            load_embedded_template_set().expect("embedded templates should be valid")
+        }),
+        None => load_embedded_template_set().expect("embedded templates should be valid"),
+    };
     let driver = StateMachineDriver {
         mode: DriverMode::Auto,
         state_path: state_path.to_path_buf(),
@@ -790,7 +1034,7 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_path_flag, looks_like_path};
+    use super::{extract_path_flag, extract_select_flow_flag, looks_like_path};
 
     #[test]
     fn looks_like_path_recognises_dot_relative() {
@@ -864,6 +1108,48 @@ mod tests {
     fn extract_path_flag_works_with_empty_args() {
         let (path, remaining) = extract_path_flag(&[]);
         assert!(path.is_none());
+        assert!(remaining.is_empty());
+    }
+
+    // ── extract_select_flow_flag ──────────────────────────────────────────────
+
+    #[test]
+    fn select_flow_flag_is_stripped_from_args() {
+        let args = s(&["--path", "/my/project", "--select-flow", "doctor"]);
+        let (_, after_path) = extract_path_flag(&args);
+        let (found, remaining) = extract_select_flow_flag(&after_path);
+        assert!(found, "expected --select-flow to be detected");
+        assert_eq!(remaining, s(&["doctor"]));
+    }
+
+    #[test]
+    fn select_flow_flag_absent_returns_false() {
+        let args = s(&["doctor", "--verbose"]);
+        let (found, remaining) = extract_select_flow_flag(&args);
+        assert!(!found);
+        assert_eq!(remaining, s(&["doctor", "--verbose"]));
+    }
+
+    #[test]
+    fn select_flow_flag_can_appear_anywhere_in_args() {
+        let args = s(&["--select-flow"]);
+        let (found, remaining) = extract_select_flow_flag(&args);
+        assert!(found);
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn select_flow_flag_does_not_consume_adjacent_args() {
+        let args = s(&["--select-flow", "status"]);
+        let (found, remaining) = extract_select_flow_flag(&args);
+        assert!(found);
+        assert_eq!(remaining, s(&["status"]));
+    }
+
+    #[test]
+    fn select_flow_flag_works_with_empty_args() {
+        let (found, remaining) = extract_select_flow_flag(&[]);
+        assert!(!found);
         assert!(remaining.is_empty());
     }
 

@@ -30,6 +30,7 @@ Usage:
 
 Options:
   -p, --path <dir>    Project directory (default: current working directory)
+  --select-flow       Interactively pick a workflow with a manual or cron entry point
   -h, --help          Show this help output
   -v, --version       Show build version information
   -v, -vv             Verbosity: -v = info, -vv = debug (default: debug)
