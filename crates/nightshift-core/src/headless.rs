@@ -174,9 +174,9 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     // 8. Enter orchestrator loop via the YAML workflow interpreter scheduler.
     //
     // The interpreter scheduler replaces the legacy StateMachineDriver as the
-    // source of truth for what to execute next.  It loads all embedded blueprint
-    // workflows, discovers entry points, and in daemon mode fires cron-scheduled
-    // workflows on their configured interval.
+    // source of truth for what to execute next. It loads the repository's
+    // effective workflow catalog, discovers entry points, and in daemon mode
+    // fires cron-scheduled workflows on their configured interval.
     //
     // For backward compatibility the legacy driver loop is preserved below and
     // used to actually execute agent steps once the scheduler fires.
@@ -188,7 +188,8 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         BTreeMap::new(),
     );
 
-    let scheduler_outcome = run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, logger);
+    let scheduler_outcome =
+        run_interpreter_scheduler(&repo_root, SchedulerMode::SinglePass, &shutdown, logger);
 
     // Map scheduler outcome to exit code and log the result.
     let exit_code = match scheduler_outcome {
