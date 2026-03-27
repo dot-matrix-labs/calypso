@@ -12,6 +12,7 @@ use nightshift_core::init::{
     refresh_workflows, run_init_interactive, scaffold_github_actions,
 };
 use nightshift_core::state::RepositoryState;
+use nightshift_core::workflows;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -1031,6 +1032,33 @@ fn refresh_workflows_overwrites_all_three_files() {
 
     let workflows = env.workflows_written.borrow();
     assert_eq!(workflows.len(), 13);
+}
+
+#[test]
+fn refresh_workflows_uses_canonical_cli_workflow_templates() {
+    let env = FakeEnv::default().with_github_remote();
+    let repo_path = PathBuf::from("/fake/refresh-canonical");
+
+    refresh_workflows(&repo_path, &env).expect("refresh should succeed");
+
+    let workflows = env.workflows_written.borrow();
+    let rust_quality = workflows
+        .iter()
+        .find(|(name, _)| name == "rust-quality.yml")
+        .expect("rust-quality.yml should be written");
+    assert_eq!(
+        rust_quality.1,
+        workflows::content_for("rust-quality.yml").expect("canonical rust-quality content"),
+    );
+
+    let release_cli = workflows
+        .iter()
+        .find(|(name, _)| name == "release-cli.yml")
+        .expect("release-cli.yml should be written");
+    assert_eq!(
+        release_cli.1,
+        workflows::content_for("release-cli.yml").expect("canonical release-cli content"),
+    );
 }
 
 // ── init progress persistence tests (real filesystem) ──────────────────────────

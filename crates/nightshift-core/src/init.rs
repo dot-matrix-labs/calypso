@@ -201,18 +201,6 @@ impl InitProgress {
 // GitHub Actions workflow templates — from calypso-blueprint examples
 // ---------------------------------------------------------------------------
 
-pub const WORKFLOW_RUST_QUALITY: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-quality.yml");
-pub const WORKFLOW_RUST_UNIT: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-unit.yml");
-pub const WORKFLOW_RUST_INTEGRATION: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-integration.yml");
-pub const WORKFLOW_RUST_E2E: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-e2e.yml");
-pub const WORKFLOW_RUST_COVERAGE: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/rust-coverage.yml");
-pub const WORKFLOW_RELEASE_CLI: &str =
-    include_str!("../../../calypso-blueprint/examples/github-workflows/release-cli.yml");
 pub const WORKFLOW_MERGE_QUEUE: &str =
     include_str!("../../../calypso-blueprint/examples/github-workflows/merge-queue.yml");
 pub const WORKFLOW_PR_ISSUE_CHECKLIST: &str =
@@ -1023,24 +1011,8 @@ pub fn refresh_workflows(
     repo_path: &Path,
     env: &impl InitEnvironment,
 ) -> Result<Vec<String>, InitError> {
-    let workflows = [
-        ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
-        ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
-        ("pr-issue-checklist.yml", WORKFLOW_PR_ISSUE_CHECKLIST),
-        ("pr-conflicts.yml", WORKFLOW_PR_CONFLICTS),
-        ("pr-single-issue.yml", WORKFLOW_PR_SINGLE_ISSUE),
-        ("ci.yml", WORKFLOW_CI),
-        ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
-        ("rust-unit.yml", WORKFLOW_RUST_UNIT),
-        ("rust-integration.yml", WORKFLOW_RUST_INTEGRATION),
-        ("rust-e2e.yml", WORKFLOW_RUST_E2E),
-        ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
-        ("release-cli.yml", WORKFLOW_RELEASE_CLI),
-        ("merge-queue.yml", WORKFLOW_MERGE_QUEUE),
-    ];
-
     let mut refreshed = Vec::new();
-    for (name, content) in &workflows {
+    for (name, content) in default_workflows() {
         env.write_workflow_file(repo_path, name, content)?;
         refreshed.push(name.to_string());
     }
@@ -1113,6 +1085,32 @@ fn current_timestamp() -> String {
     format!("{}Z", dur.as_secs())
 }
 
+fn canonical_workflow(filename: &'static str) -> (&'static str, &'static str) {
+    (
+        filename,
+        crate::workflows::content_for(filename)
+            .unwrap_or_else(|| panic!("missing canonical workflow template for {filename}")),
+    )
+}
+
+fn default_workflows() -> [(&'static str, &'static str); 13] {
+    [
+        ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
+        ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
+        ("pr-issue-checklist.yml", WORKFLOW_PR_ISSUE_CHECKLIST),
+        ("pr-conflicts.yml", WORKFLOW_PR_CONFLICTS),
+        ("pr-single-issue.yml", WORKFLOW_PR_SINGLE_ISSUE),
+        ("ci.yml", WORKFLOW_CI),
+        canonical_workflow("rust-quality.yml"),
+        canonical_workflow("rust-unit.yml"),
+        canonical_workflow("rust-integration.yml"),
+        canonical_workflow("rust-e2e.yml"),
+        canonical_workflow("rust-coverage.yml"),
+        canonical_workflow("release-cli.yml"),
+        ("merge-queue.yml", WORKFLOW_MERGE_QUEUE),
+    ]
+}
+
 /// Scaffold GitHub Actions workflow files into the repository.
 ///
 /// Creates `.github/workflows/` with the three core workflow files if they
@@ -1134,24 +1132,8 @@ pub fn scaffold_github_actions(
         }
         return Ok(vec![]);
     }
-    let workflows = [
-        ("pr-checklist.yml", WORKFLOW_PR_CHECKLIST),
-        ("pr-depends-on.yml", WORKFLOW_PR_DEPENDS_ON),
-        ("pr-issue-checklist.yml", WORKFLOW_PR_ISSUE_CHECKLIST),
-        ("pr-conflicts.yml", WORKFLOW_PR_CONFLICTS),
-        ("pr-single-issue.yml", WORKFLOW_PR_SINGLE_ISSUE),
-        ("ci.yml", WORKFLOW_CI),
-        ("rust-quality.yml", WORKFLOW_RUST_QUALITY),
-        ("rust-unit.yml", WORKFLOW_RUST_UNIT),
-        ("rust-integration.yml", WORKFLOW_RUST_INTEGRATION),
-        ("rust-e2e.yml", WORKFLOW_RUST_E2E),
-        ("rust-coverage.yml", WORKFLOW_RUST_COVERAGE),
-        ("release-cli.yml", WORKFLOW_RELEASE_CLI),
-        ("merge-queue.yml", WORKFLOW_MERGE_QUEUE),
-    ];
-
     let mut scaffolded = Vec::new();
-    for (name, content) in &workflows {
+    for (name, content) in default_workflows() {
         let workflow_path = repo_path.join(".github").join("workflows").join(name);
         if !env.path_exists(&workflow_path) {
             env.write_workflow_file(repo_path, name, content)?;
