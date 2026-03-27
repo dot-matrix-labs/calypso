@@ -339,8 +339,8 @@ Doctor should audit the state machine and blueprint workflows for correctness by
 
 Completed Codex adapter notes:
 
-- `cli/src/codex.rs` now owns subprocess launch, stdout/stderr streaming, provider session-id extraction, follow-up stdin routing, and terminal-status normalization.
-- `cli/src/state.rs` persists provider session IDs, captured output, and normalized terminal outcomes on `AgentSession`.
+- `crates/calypso-cli/src/codex.rs` now owns subprocess launch, stdout/stderr streaming, provider session-id extraction, follow-up stdin routing, and terminal-status normalization.
+- `crates/calypso-cli/src/state.rs` persists provider session IDs, captured output, and normalized terminal outcomes on `AgentSession`.
 - Runtime coverage includes command construction for real Codex CLI execution, output buffering, waiting-for-human detection, persisted snapshot mapping, and failed or aborted subprocess handling.
 
 ## Phase 6: TUI

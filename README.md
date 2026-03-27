@@ -208,7 +208,7 @@ All binaries and checksums are published to [GitHub Releases](https://github.com
 
 ## Documentation
 
-- [CLI Build Instructions](cli/README.md) — building and developing the Calypso CLI
+- [CLI Build Instructions](crates/calypso-cli/README.md) — building and developing the Calypso CLI
 - [Calypso Blueprint](calypso-blueprint/blueprints/calypso-blueprint.md) — full architecture and process standard
 - [Scaffold Task](calypso-blueprint/init/scaffold-task.md) — bootstrapping new Calypso projects
 - [Agent Communication](agent-communication.md) — how to write documents agents interpret reliably

@@ -22,7 +22,7 @@ echo "📂 Test Path: $TEST_PATH"
 echo "--------------------------------------------------------"
 
 # Navigate to the CLI directory
-cd "$REPO_ROOT/cli"
+cd "$REPO_ROOT/crates/calypso-cli"
 
 echo "📦 [1/2] Initializing Calypso..."
 # Pass all arguments to the init command

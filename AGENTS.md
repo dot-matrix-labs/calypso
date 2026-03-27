@@ -79,8 +79,8 @@ The bias is toward forward progress.
 
 Treat work as CLI-related if any of these are true:
 
-- the current working directory is `./cli`
-- the task mentions `cli/` paths
+- the current working directory is `./crates/calypso-cli`
+- the task mentions `crates/calypso-cli/` paths
 - the task is explicitly about the Calypso CLI
 
 For CLI work:

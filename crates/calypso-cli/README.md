@@ -9,10 +9,10 @@ The command-line interface for Calypso, built in Rust.
 
 ## Running
 
-`cargo run` works from both the repository root and the `cli/` directory — the workspace `Cargo.toml` at the repo root sets `default-members = ["cli"]` and the crate's `default-run = "calypso-cli"`, so no `--bin` flag is needed.
+`cargo run` works from both the repository root and the `crates/calypso-cli/` directory — the workspace `Cargo.toml` at the repo root sets `default-members = ["crates/calypso-cli"]` and the crate's `default-run = "calypso-cli"`, so no `--bin` flag is needed.
 
 ```sh
-# From the repository root or cli/ directory:
+# From the repository root or crates/calypso-cli/ directory:
 cargo run                        # launch TUI from current directory
 cargo run -- ./my-project        # launch TUI for a specific project directory
 cargo run -- /abs/path/to/proj   # absolute path also works
@@ -68,13 +68,13 @@ The binary will be at `target/release/calypso-cli`.
 
 To install globally:
 ```bash
-cargo install --path cli
+cargo install --path crates/calypso-cli
 ```
 
 ## Development
 
 The project defines cargo aliases in `.cargo/config.toml` for common tasks.
-All commands below should be run from the `cli/` directory.
+All commands below should be run from the `crates/calypso-cli/` directory.
 
 ### Testing
 
