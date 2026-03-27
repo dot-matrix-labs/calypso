@@ -8,6 +8,8 @@ default-run = "calypso-cli"
 [dependencies]
 nightshift-core = { path = "../nightshift-core" }
 calypso-web = { path = "../calypso-web" }
+calypso-workflows = { path = "../calypso-workflows" }
+calypso-workflow-exec = { path = "../calypso-workflow-exec" }
 # Direct dependencies still needed by integration tests or re-exported types
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

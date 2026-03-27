@@ -70,6 +70,8 @@ name = "calypso-cli"
 version = "0.1.0"
 dependencies = [
  "calypso-web",
+ "calypso-workflow-exec",
+ "calypso-workflows",
  "expectrl",
  "nightshift-core",
  "serde",

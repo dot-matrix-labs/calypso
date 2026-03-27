@@ -404,7 +404,7 @@ enum SelectedFlow {
     Workflow(String),
 }
 
-/// When `--select-flow` was requested, interactively list blueprint workflows that have a
+/// When `--select-flow` was requested, interactively list workflows that have a
 /// `workflow_dispatch` or `cron` entry point plus any `.yml`/`.yaml` files found in
 /// `{cwd}/.calypso/`, then return the selected flow.
 ///
@@ -430,7 +430,7 @@ struct FlowEntry {
 /// trigger in its `on:` block.  Each (file, trigger-type) pair becomes a separate list entry
 /// so that a file with both triggers appears twice.
 fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> {
-    use calypso_cli::workflow_definitions::WorkflowCatalog;
+    use calypso_workflows::WorkflowCatalog;
     use std::io::{BufRead, Write};
 
     // ── 1. Collect candidates ─────────────────────────────────────────────────
@@ -857,9 +857,8 @@ fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&s
 /// Run a workflow selected from the effective catalog through the shared interpreter.
 fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
     use calypso_cli::claude::{ClaudeConfig, ClaudeOutcome, ClaudeSession, SessionContext};
-    use calypso_cli::interpreter::{StepOutcome, WorkflowInterpreter};
-    use calypso_cli::workflow_definitions::StateKind;
-    use calypso_cli::workflow_definitions::WorkflowCatalog;
+    use calypso_workflow_exec::{StepOutcome, WorkflowInterpreter};
+    use calypso_workflows::{StateKind, WorkflowCatalog};
 
     let catalog = WorkflowCatalog::load(cwd);
     let interp = match WorkflowInterpreter::from_catalog(&catalog) {
@@ -903,7 +902,7 @@ fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
             }
             Some(StateKind::Agent) => {
                 println!("→ {state_name}");
-                let prompt = blueprint_agent_prompt(&state_name, cfg);
+                let prompt = workflow_agent_prompt(&state_name, cfg);
                 match session.invoke(&prompt, &context, None) {
                     Ok(ClaudeOutcome::Ok {
                         suggested_next_state,
@@ -1011,10 +1010,10 @@ fn run_workflow_auto(workflow_name: &str, cwd: &std::path::Path) {
     }
 }
 
-/// Build the Claude prompt for an agent state in a blueprint workflow.
-fn blueprint_agent_prompt(
+/// Build the Claude prompt for an agent state in a workflow.
+fn workflow_agent_prompt(
     state_name: &str,
-    cfg: &calypso_cli::workflow_definitions::StateConfig,
+    cfg: &calypso_workflows::StateConfig,
 ) -> String {
     let task = cfg
         .prompt
