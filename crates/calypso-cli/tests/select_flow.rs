@@ -117,9 +117,9 @@ fn call_only_workflow_does_not_appear() {
     );
 }
 
-// ── Embedded blueprint workflows ──────────────────────────────────────────────
+// ── Embedded workflows ───────────────────────────────────────────────────────
 
-/// The embedded blueprint library must contribute at least one entry with a
+/// The embedded workflow catalog must contribute at least one entry with a
 /// `workflow_dispatch` or `cron` trigger.
 #[test]
 fn embedded_workflows_appear_in_list() {
@@ -246,7 +246,7 @@ fn cron_entry_includes_cron_pattern() {
 // ── Local workflows override embedded defaults ────────────────────────────────
 
 /// When a project directory contains local workflow files in `.calypso/`, the
-/// selector must show ONLY those local files — no embedded blueprint entries.
+/// selector must show ONLY those local files — no embedded workflow entries.
 ///
 /// This also exercises the full setup path: create a fresh directory, insert
 /// `turnstile.yaml`, and verify the selector output.
@@ -268,7 +268,7 @@ fn local_workflows_override_embedded_defaults() {
         out.stdout
     );
 
-    // No embedded blueprint filenames may appear.
+    // No embedded workflow filenames may appear.
     for embedded in &[
         "calypso-orchestrator-startup.yaml",
         "calypso-planning.yaml",

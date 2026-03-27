@@ -271,7 +271,7 @@ struct GhaStepRaw {
 
 // ── Public workflow types ─────────────────────────────────────────────────────
 
-/// A blueprint workflow document parsed from GHA YAML.
+/// A Calypso workflow document parsed from GHA YAML.
 ///
 /// Each GHA job maps to one entry in `states`:
 /// - `initial_state` is the first job with no `needs:`

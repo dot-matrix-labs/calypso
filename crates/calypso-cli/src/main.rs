@@ -514,7 +514,7 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<SelectedFlow> 
     // ── 1. Collect candidates ─────────────────────────────────────────────────
     //
     // Local project files are listed first so they are easiest to reach;
-    // embedded blueprint library entries follow as fallbacks.
+    // embedded workflow catalog entries follow as fallbacks.
 
     let mut entries: Vec<FlowEntry> = Vec::new();
     let catalog = WorkflowCatalog::load(cwd);

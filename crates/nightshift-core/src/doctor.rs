@@ -863,7 +863,7 @@ fn failing_doctor_fix(
         // No automated fix for SM integrity — manual review required.
         DoctorCheckId::StateMachineIntegrity => Some(DoctorFix::Manual {
             instructions:
-                "Review the state machine audit output and correct workflow references in blueprint YAML files."
+                "Review the state machine audit output and correct workflow references in Calypso workflow YAML files."
                     .to_string(),
         }),
 

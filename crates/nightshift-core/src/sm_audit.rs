@@ -36,7 +36,7 @@ pub enum AuditSeverity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditFinding {
     pub severity: AuditSeverity,
-    /// Which blueprint workflow or template produced this finding.
+    /// Which workflow or template produced this finding.
     pub source: String,
     pub message: String,
     pub suggestion: Option<String>,
@@ -114,7 +114,7 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 /// Discovers all entry points (workflows that are not exclusively used as
 /// sub-workflows) and walks the graph from each one transitively. Validates:
 ///
-/// - All embedded blueprint workflows parse as valid YAML
+/// - All embedded workflows parse as valid YAML
 /// - Every workflow file is reachable from at least one entry point (no orphans)
 /// - Every state within each workflow is reachable from its `initial_state`
 /// - No dead branches: every non-terminal state can reach a terminal state
@@ -330,7 +330,7 @@ fn audit_workflow_handoff(
 
 // ── Reachability analysis ────────────────────────────────────────────────────
 
-/// Build a directed graph from a blueprint workflow and verify:
+/// Build a directed graph from a workflow definition and verify:
 /// 1. Every declared state is reachable from `initial_state` (forward reachability)
 /// 2. Every non-terminal state can reach at least one terminal state (no dead branches)
 ///
@@ -468,7 +468,7 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     // Scan .github/workflows/ for available GHA files
     let available_gha_files = scan_gha_directory(repo_root);
 
-    // 1) Audit blueprint workflows — validate that all embedded workflows parse cleanly
+    // 1) Audit workflows — skipped in hello_world mode
     if !is_hello_world {
         let catalog = WorkflowCatalog::load(repo_root);
         let workflows = parse_catalog_workflows(&catalog, &mut findings);
@@ -483,7 +483,7 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
         }
 
         // 3) Unified workflow graph walk — reachability, dead branches, handoffs
-        // Skipped in hello_world mode to avoid auditing unused blueprints.
+        // Skipped in hello_world mode to avoid auditing unused embedded workflows.
         let entry_roots = entry_point_roots(&workflows);
         audit_workflow_graph(&entry_roots, &workflows, &mut findings);
     }
@@ -573,7 +573,7 @@ fn common_char_count(a: &str, b: &str) -> usize {
     a_chars.intersection(&b_chars).count()
 }
 
-/// Audit a single blueprint workflow for reference integrity.
+/// Audit a single workflow definition for reference integrity.
 ///
 /// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
 /// no longer exist. Validation focuses on workflow-level `uses:` references
@@ -675,7 +675,7 @@ fn validate_job_keys(
     }
 }
 
-/// Audit orphan and dangling check references within a blueprint workflow.
+/// Audit orphan and dangling check references within a workflow definition.
 fn audit_check_references(stem: &str, wf: &Workflow, findings: &mut Vec<AuditFinding>) {
     let defined_checks: BTreeSet<&str> = wf.checks.keys().map(|k| k.as_str()).collect();
 
@@ -878,7 +878,7 @@ mod tests {
         let audit = run_audit(&repo_root, false);
 
         // Filter to only errors — there will be warnings for non-existent GHA files
-        // referenced by other blueprint workflows (deployment, release, etc.)
+        // referenced by other workflows (deployment, release, etc.)
         // but the key check here is that correct references don't produce errors
         // beyond the expected missing files from blueprint examples
         let template_errors: Vec<_> = audit
