@@ -386,13 +386,13 @@ fn feature_state_maps_agent_and_builtin_tasks_to_pending_and_failing_states() {
         .expect("pr gate should exist");
     assert_eq!(pr_gate.status, GateStatus::Pending);
 
-    let blueprint_gate = feature
+    let process_gate = feature
         .gate_groups
         .iter()
         .flat_map(|group| group.gates.iter())
-        .find(|gate| gate.id == "blueprint-policy-clean")
-        .expect("blueprint review gate should exist");
-    assert_eq!(blueprint_gate.status, GateStatus::Pending);
+        .find(|gate| gate.id == "process-policy-clean")
+        .expect("process review gate should exist");
+    assert_eq!(process_gate.status, GateStatus::Pending);
 }
 
 #[test]
@@ -471,7 +471,7 @@ fn feature_state_reports_blocking_gate_ids_after_evaluation() {
     let blocking = feature.blocking_gate_ids();
     // Known blocking gates given the evidence provided
     assert!(blocking.contains(&"pr-canonicalized".to_string()));
-    assert!(blocking.contains(&"blueprint-policy-clean".to_string()));
+    assert!(blocking.contains(&"process-policy-clean".to_string()));
     assert!(blocking.contains(&"feature-pr-reviewed".to_string()));
     assert!(blocking.contains(&"merge-drift-reviewed".to_string()));
     // Evidence-provided gates must not be blocking

@@ -172,7 +172,7 @@ A narrow domain-specific worker such as:
 - merge-readiness
 - documentation-merge
 - pr-editor
-- blueprint
+- process-review
 - github-workflows-doctor
 - release
 - expect-db-migration-issues
@@ -194,7 +194,7 @@ Representative specialized roles in the Calypso methodology include:
 - `merge-readiness`: checks compatibility with `main` and records merge issues
 - `documentation-merge`: performs semantic merges for text-heavy documents so machine-authored updates remain intelligible and consistent with surrounding editorial intent
 - `pr-editor`: treats the GitHub pull request as the canonical feature spec and quality-gate surface
-- `blueprint`: reviews agent transcripts and behavior for drift from blueprint docs, implementation docs, or command policy
+- `process-review`: reviews agent transcripts and behavior for drift from process docs, implementation docs, or command policy
 - `github-workflows-doctor`: validates that required GitHub workflow automation exists and triggers correctly
 - `release`: checks gate completion, merge readiness, and later release-tag readiness on `main`
 - `expect-db-migration-issues`: flags likely schema or migration drift risks early
@@ -910,7 +910,7 @@ The default Calypso template set should define a battle-tested baseline methodol
 - `workflow-files-present`
 - `pr-canonicalized`
 - `prd-impl-plan-reconciled`
-- `blueprint-policy-clean`
+- `process-policy-clean`
 - `merge-drift-reviewed`
 - `rust-quality-green`
 - `test-matrix-green`

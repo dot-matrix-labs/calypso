@@ -316,14 +316,14 @@ gate_groups:
 
   # Implementation gates — implementation → qa-validation
   # Producer: engineer implements features
-  # Validator: blueprint agent reviews for process conformance
+  # Validator: process-review agent reviews for process conformance
   - id: implementation
     label: Implementation
     gates:
-      - id: blueprint-policy-clean
-        label: Blueprint policy clean
-        task: blueprint-review
-        pr_checklist_label: Blueprint review completed — no drift detected
+      - id: process-policy-clean
+        label: Process policy clean
+        task: process-review
+        pr_checklist_label: Process review completed — no drift detected
         applies_to:
           - implementation
 
