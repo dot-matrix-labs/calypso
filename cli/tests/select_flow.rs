@@ -103,10 +103,7 @@ fn call_only_workflow_does_not_appear() {
         .stdin("1\n")
         .run();
 
-    let listed = out
-        .stdout
-        .lines()
-        .any(|l| l.contains("call-only.yaml"));
+    let listed = out.stdout.lines().any(|l| l.contains("call-only.yaml"));
     assert!(
         !listed,
         "call-only.yaml should not appear (no user entrypoint); stdout:\n{}",
@@ -120,14 +117,12 @@ fn call_only_workflow_does_not_appear() {
 /// `workflow_dispatch` or `cron` trigger.
 #[test]
 fn embedded_workflows_appear_in_list() {
-    let out = spawned_calypso()
-        .args(["--select-flow"])
-        .stdin("1\n")
-        .run();
+    let out = spawned_calypso().args(["--select-flow"]).stdin("1\n").run();
 
-    let has_embedded = out.stdout.lines().any(|l| {
-        l.contains("workflow_dispatch") || l.contains("cron:")
-    });
+    let has_embedded = out
+        .stdout
+        .lines()
+        .any(|l| l.contains("workflow_dispatch") || l.contains("cron:"));
     assert!(
         has_embedded,
         "expected at least one embedded workflow entry; stdout:\n{}",

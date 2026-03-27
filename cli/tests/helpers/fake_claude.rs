@@ -6,6 +6,8 @@
 //! guard.  When the guard is dropped the original `PATH` is restored and the
 //! temp directory is removed.
 
+#![allow(dead_code)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};

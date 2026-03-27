@@ -285,22 +285,22 @@ impl BlueprintWorkflow {
         }
 
         // Structured form: look for inputs.event with a hyphenated event descriptor.
-        if let Some(inputs) = dispatch.get("inputs") {
-            if let Some(event_input) = inputs.get("event") {
-                if let Some(event_desc) = event_input.get("description").and_then(|v| v.as_str()) {
-                    if event_desc.contains('-') && !event_desc.contains(' ') {
-                        return Some(TriggerConfig {
-                            event: Some(event_desc.to_string()),
-                            pattern: event_input
-                                .get("default")
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string()),
-                            branch_constraint: None,
-                            ci_entry: None,
-                        });
-                    }
-                }
-            }
+        if let Some(inputs) = dispatch.get("inputs")
+            && let Some(event_input) = inputs.get("event")
+            && let Some(event_desc) = event_input
+                .get("description")
+                .and_then(|v| v.as_str())
+                .filter(|d| d.contains('-') && !d.contains(' '))
+        {
+            return Some(TriggerConfig {
+                event: Some(event_desc.to_string()),
+                pattern: event_input
+                    .get("default")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+                branch_constraint: None,
+                ci_entry: None,
+            });
         }
 
         // workflow_dispatch key present but not null and no recognised inputs — still manual.

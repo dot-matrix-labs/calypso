@@ -431,10 +431,7 @@ fn extract_select_flow_flag(args: &[String]) -> (bool, Vec<String>) {
 /// `{cwd}/.calypso/`, then return the path of the selected file.
 ///
 /// Returns `None` if the flag was not set, the user cancelled, or no eligible workflows exist.
-fn resolve_select_flow(
-    select_flow: bool,
-    cwd: &std::path::Path,
-) -> Option<std::path::PathBuf> {
+fn resolve_select_flow(select_flow: bool, cwd: &std::path::Path) -> Option<std::path::PathBuf> {
     if !select_flow {
         return None;
     }
@@ -470,11 +467,7 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::Pat
             continue;
         };
         let filename = format!("{stem}.yaml");
-        let entry_name = wf
-            .initial_state
-            .as_deref()
-            .unwrap_or(stem)
-            .to_string();
+        let entry_name = wf.initial_state.as_deref().unwrap_or(stem).to_string();
 
         if let Some(ref sched) = wf.schedule {
             entries.push(FlowEntry {
@@ -494,52 +487,48 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::Pat
 
     // Local workflow files in {cwd}/.calypso/.
     let calypso_dir = cwd.join(".calypso");
-    if calypso_dir.is_dir() {
-        if let Ok(read_dir) = std::fs::read_dir(&calypso_dir) {
-            let mut local_paths: Vec<_> = read_dir
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| {
-                    matches!(
-                        p.extension().and_then(|e| e.to_str()),
-                        Some("yml") | Some("yaml")
-                    )
-                })
-                .collect();
-            local_paths.sort();
+    if calypso_dir.is_dir()
+        && let Ok(read_dir) = std::fs::read_dir(&calypso_dir)
+    {
+        let mut local_paths: Vec<_> = read_dir
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| {
+                matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("yml") | Some("yaml")
+                )
+            })
+            .collect();
+        local_paths.sort();
 
-            for path in local_paths {
-                let Ok(yaml) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(wf) = BlueprintWorkflowLibrary::parse(&yaml) else {
-                    continue;
-                };
-                let filename = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("")
-                    .to_string();
-                let entry_name = wf
-                    .initial_state
-                    .as_deref()
-                    .unwrap_or(&filename)
-                    .to_string();
+        for path in local_paths {
+            let Ok(yaml) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(wf) = BlueprintWorkflowLibrary::parse(&yaml) else {
+                continue;
+            };
+            let filename = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            let entry_name = wf.initial_state.as_deref().unwrap_or(&filename).to_string();
 
-                if let Some(ref sched) = wf.schedule {
-                    entries.push(FlowEntry {
-                        label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
-                        stem: None,
-                        path: Some(path.clone()),
-                    });
-                }
-                if wf.trigger.is_some() {
-                    entries.push(FlowEntry {
-                        label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
-                        stem: None,
-                        path: Some(path.clone()),
-                    });
-                }
+            if let Some(ref sched) = wf.schedule {
+                entries.push(FlowEntry {
+                    label: format!("{entry_name} (cron: {}) -- {filename}", sched.cron),
+                    stem: None,
+                    path: Some(path.clone()),
+                });
+            }
+            if wf.trigger.is_some() {
+                entries.push(FlowEntry {
+                    label: format!("{entry_name} (workflow_dispatch) -- {filename}"),
+                    stem: None,
+                    path: Some(path.clone()),
+                });
             }
         }
     }
@@ -583,8 +572,7 @@ fn select_workflow_interactively(cwd: &std::path::Path) -> Option<std::path::Pat
             // Embedded workflow: materialise to a temp file so callers get a PathBuf.
             let stem = selected.stem.as_deref()?;
             let yaml = BlueprintWorkflowLibrary::get(stem)?;
-            let tmp_path =
-                std::env::temp_dir().join(format!("calypso-selected-flow-{stem}.yaml"));
+            let tmp_path = std::env::temp_dir().join(format!("calypso-selected-flow-{stem}.yaml"));
             std::fs::write(&tmp_path, yaml).ok()?;
             Some(tmp_path)
         }
@@ -891,10 +879,7 @@ fn run_claude_session(state_path: &str, role: &str) {
     }
 }
 
-fn run_state_machine_auto(
-    state_path: &std::path::Path,
-    flow_override: Option<&std::path::Path>,
-) {
+fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&std::path::Path>) {
     use calypso_cli::driver::{DriverMode, DriverStepResult, StateMachineDriver};
     use calypso_cli::execution::ExecutionConfig;
     use calypso_cli::template::{load_embedded_template_set, load_template_set_with_state_machine};

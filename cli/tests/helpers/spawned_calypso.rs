@@ -26,6 +26,7 @@ pub struct SpawnedCalypsoBuilder {
     init_state_json: Option<String>,
 }
 
+#[allow(dead_code)]
 impl SpawnedCalypsoBuilder {
     fn new() -> Self {
         Self {
@@ -65,11 +66,7 @@ impl SpawnedCalypsoBuilder {
     }
 
     /// Write a file to `.calypso/<name>` before spawning (e.g. a workflow YAML).
-    pub fn calypso_file(
-        mut self,
-        name: impl Into<String>,
-        content: impl Into<String>,
-    ) -> Self {
+    pub fn calypso_file(mut self, name: impl Into<String>, content: impl Into<String>) -> Self {
         self.extra_calypso_files.push((name.into(), content.into()));
         self
     }
