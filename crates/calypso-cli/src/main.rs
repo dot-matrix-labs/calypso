@@ -423,7 +423,7 @@ fn main() {
                 }
                 None => {
                     if state_path.exists() {
-                        run_state_machine_auto(&state_path, None);
+                        run_state_machine_auto(project_dir, &state_path, None);
                     } else {
                         println!("{}", run_doctor(project_dir));
                     }
@@ -434,7 +434,7 @@ fn main() {
         [flag] if flag == "--step" => {
             let state_path = cwd.join(".calypso").join("repository-state.json");
             if state_path.exists() {
-                run_state_machine_step(&state_path);
+                run_state_machine_step(&cwd, &state_path);
             } else {
                 println!("{}", run_doctor(&cwd));
             }
@@ -451,7 +451,7 @@ fn main() {
                 }
                 None => {
                     if state_path.exists() {
-                        run_state_machine_auto(&state_path, None);
+                        run_state_machine_auto(&cwd, &state_path, None);
                     } else {
                         println!("{}", run_doctor(&cwd));
                     }
@@ -876,27 +876,51 @@ fn run_claude_session(state_path: &str, role: &str) {
     }
 }
 
-fn run_state_machine_auto(state_path: &std::path::Path, flow_override: Option<&std::path::Path>) {
-    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-    use nightshift_core::execution::ExecutionConfig;
+fn resolve_state_machine_template(
+    repo_root: &std::path::Path,
+    flow_override: Option<&std::path::Path>,
+) -> Result<(TemplateSet, Option<String>), nightshift_core::template::TemplateError> {
     use nightshift_core::template::{
-        load_embedded_template_set, load_template_set_with_state_machine,
+        load_template_set_with_state_machine, resolve_template_set_for_path,
     };
 
-    let template = match flow_override {
-        Some(path) => load_template_set_with_state_machine(path).unwrap_or_else(|_| {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("selected file");
-            eprintln!(
-                "note: {name} is a GitHub Actions workflow file; \
-                 running with the project's state machine template instead."
-            );
-            load_embedded_template_set().expect("embedded templates should be valid")
-        }),
-        None => load_embedded_template_set().expect("embedded templates should be valid"),
+    match flow_override {
+        Some(path) => match load_template_set_with_state_machine(path) {
+            Ok(template) => Ok((template, None)),
+            Err(_) => {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("selected file");
+                let note = format!(
+                    "note: {name} is a GitHub Actions workflow file; \
+                     running with the project's state machine template instead."
+                );
+                resolve_template_set_for_path(repo_root).map(|template| (template, Some(note)))
+            }
+        },
+        None => resolve_template_set_for_path(repo_root).map(|template| (template, None)),
+    }
+}
+
+fn run_state_machine_auto(
+    repo_root: &std::path::Path,
+    state_path: &std::path::Path,
+    flow_override: Option<&std::path::Path>,
+) {
+    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
+    use nightshift_core::execution::ExecutionConfig;
+
+    let (template, note) = match resolve_state_machine_template(repo_root, flow_override) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("template error: {error}");
+            std::process::exit(1);
+        }
     };
+    if let Some(note) = note {
+        eprintln!("{note}");
+    }
     let driver = StateMachineDriver {
         mode: DriverMode::Auto,
         state_path: state_path.to_path_buf(),
@@ -1120,16 +1144,21 @@ fn workflow_agent_prompt(state_name: &str, cfg: &calypso_workflows::StateConfig)
     )
 }
 
-fn run_state_machine_step(state_path: &std::path::Path) {
+fn run_state_machine_step(repo_root: &std::path::Path, state_path: &std::path::Path) {
     use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
     use nightshift_core::execution::ExecutionConfig;
     use nightshift_core::pinned_prompt::{
         Confirmation, PinnedPrompt, format_initial_prompt, format_transition_prompt,
     };
     use nightshift_core::state::RepositoryState;
-    use nightshift_core::template::load_embedded_template_set;
 
-    let template = load_embedded_template_set().expect("embedded templates should be valid");
+    let (template, _) = match resolve_state_machine_template(repo_root, None) {
+        Ok(result) => result,
+        Err(error) => {
+            eprintln!("template error: {error}");
+            std::process::exit(1);
+        }
+    };
     let driver = StateMachineDriver {
         mode: DriverMode::Step,
         state_path: state_path.to_path_buf(),
@@ -1206,8 +1235,41 @@ fn run_state_machine_step(state_path: &std::path::Path) {
 mod tests {
     use super::{
         BuildInfo, extract_path_flag, extract_select_flow_flag, looks_like_path, render_help,
-        render_version,
+        render_version, resolve_state_machine_template,
     };
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    const VALID_STATE_MACHINE: &str = r#"
+initial_state: local-start
+states:
+  - local-start
+  - done
+gate_groups:
+  - id: local-policy
+    label: Local Policy
+    gates:
+      - id: local-agent-gate
+        label: Local agent gate
+        task: local-agent
+"#;
+
+    const VALID_AGENTS: &str = r#"
+tasks:
+  - name: local-agent
+    kind: agent
+    role: implementer
+"#;
+
+    const VALID_PROMPTS: &str = r#"
+prompts:
+  local-agent: |
+    Execute the local workflow.
+"#;
+
+    static TEMPLATE_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn looks_like_path_recognises_dot_relative() {
@@ -1361,8 +1423,73 @@ mod tests {
         assert!(output.contains("--json"), "missing --json flag");
     }
 
+    #[test]
+    fn resolve_state_machine_template_prefers_repo_override_when_present() {
+        let repo_root = temp_template_dir();
+        write_override_templates(&repo_root);
+
+        let (template, note) = resolve_state_machine_template(&repo_root, None)
+            .expect("repo override template should load");
+
+        assert_eq!(template.state_machine.initial_state, "local-start");
+        assert!(note.is_none());
+
+        fs::remove_dir_all(repo_root).expect("temp template directory should be removed");
+    }
+
+    #[test]
+    fn resolve_state_machine_template_falls_back_to_repo_override_for_gha_workflow() {
+        let repo_root = temp_template_dir();
+        write_override_templates(&repo_root);
+
+        let workflow_path = repo_root.join(".calypso").join("workflows");
+        fs::create_dir_all(&workflow_path).expect("workflow directory should be created");
+        let gha_workflow = workflow_path.join("turnstile.yaml");
+        fs::write(
+            &gha_workflow,
+            "name: turnstile\non:\n  workflow_dispatch:\njobs:\n  open:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo open\n",
+        )
+        .expect("workflow fixture should write");
+
+        let (template, note) = resolve_state_machine_template(&repo_root, Some(&gha_workflow))
+            .expect("repo override template should load");
+
+        assert_eq!(template.state_machine.initial_state, "local-start");
+        assert_eq!(
+            note,
+            Some(
+                "note: turnstile.yaml is a GitHub Actions workflow file; running with the project's state machine template instead.".to_string()
+            )
+        );
+
+        fs::remove_dir_all(repo_root).expect("temp template directory should be removed");
+    }
+
     fn s(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn temp_template_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let counter = TEMPLATE_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "calypso-cli-main-template-test-{}-{unique}-{counter}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("temp template directory should be created");
+        path
+    }
+
+    fn write_override_templates(root: &Path) {
+        fs::write(root.join("calypso-state-machine.yml"), VALID_STATE_MACHINE)
+            .expect("state machine override should write");
+        fs::write(root.join("calypso-agents.yml"), VALID_AGENTS)
+            .expect("agents override should write");
+        fs::write(root.join("calypso-prompts.yml"), VALID_PROMPTS)
+            .expect("prompts override should write");
     }
 
     fn sample_info() -> BuildInfo<'static> {
