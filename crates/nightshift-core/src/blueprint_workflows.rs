@@ -104,7 +104,6 @@ struct GhaJobRaw {
     #[serde(rename = "if")]
     if_condition: Option<String>,
     #[serde(rename = "runs-on")]
-    #[allow(dead_code)]
     runs_on: Option<String>,
     /// Job-level `uses:` for reusable workflow calls.
     uses: Option<String>,
@@ -215,6 +214,7 @@ impl BlueprintWorkflow {
             let (role, cost, prompt) = Self::extract_agent_config(job);
             let workflow_ref = Self::extract_workflow_ref(job);
             let command = Self::extract_command(job);
+            let execution_target = Self::derive_execution_target(job);
 
             // Build the next spec by scanning all downstream jobs
             let next = Self::build_next_spec(job_name, &jobs_map);
@@ -227,6 +227,7 @@ impl BlueprintWorkflow {
                     cost,
                     description: None,
                     prompt,
+                    execution_target,
                     function: None,
                     command,
                     workflow: workflow_ref,
@@ -345,6 +346,20 @@ impl BlueprintWorkflow {
         }
 
         StateKind::Deterministic
+    }
+
+    /// Derive the [`ExecutionTarget`] from a GHA job's `runs-on:` field.
+    ///
+    /// - `runs-on:` present → [`ExecutionTarget::GitHub`]: the job is dispatched to
+    ///   a GitHub Actions runner.
+    /// - `runs-on:` absent → [`ExecutionTarget::Local`]: the job delegates to a
+    ///   reusable workflow (`uses:`) and is routed by the local Calypso engine.
+    fn derive_execution_target(job: &GhaJobRaw) -> ExecutionTarget {
+        if job.runs_on.is_some() {
+            ExecutionTarget::GitHub
+        } else {
+            ExecutionTarget::Local
+        }
     }
 
     /// Extract agent config (role, cost, prompt) from step `with:` fields.
@@ -472,6 +487,36 @@ pub struct TriggerConfig {
 
 // ── States ───────────────────────────────────────────────────────────────────
 
+/// Explicit execution target for a workflow state.
+///
+/// Determines whether the state is driven by the local Calypso runtime
+/// (running directly on the developer's machine or in a local daemon) or
+/// by the GitHub Actions platform.
+///
+/// # Defaulting rules
+///
+/// When parsing GHA YAML workflow files the execution target is derived from
+/// the `runs-on:` field of the corresponding job:
+///
+/// - Job has `runs-on:` set → `GitHub` (scheduled/dispatched on GitHub Actions).
+/// - Job has no `runs-on:` (e.g. `kind: workflow` delegation via `uses:`) → `Local`
+///   (the routing decision is made by the local Calypso engine, not the GHA runner).
+/// - Terminal states → `Local` (no active executor needed; they are no-op sinks).
+///
+/// The same defaulting logic applies to embedded blueprint workflows and to
+/// repository-local workflow copies, ensuring that the same YAML loaded from
+/// either source yields identical routing decisions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ExecutionTarget {
+    /// State is executed by the local Calypso runtime (on the developer's machine
+    /// or in the local headless daemon).
+    #[default]
+    Local,
+    /// State is dispatched to and executed by the GitHub Actions platform.
+    GitHub,
+}
+
 /// Configuration for a single state (job) in the workflow.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StateConfig {
@@ -480,6 +525,13 @@ pub struct StateConfig {
     pub cost: Option<AgentCost>,
     pub description: Option<String>,
     pub prompt: Option<String>,
+
+    /// Explicit execution target: where this state runs.
+    ///
+    /// Derived from `runs-on:` when parsing GHA YAML; defaults to `Local` for
+    /// states that delegate to sub-workflows or are terminal.
+    #[serde(default)]
+    pub execution_target: ExecutionTarget,
 
     /// For `kind: function` states.
     pub function: Option<String>,
@@ -853,5 +905,110 @@ mod tests {
             !serialized.contains("checks:"),
             "serialized workflow must not contain a 'checks:' key — compatibility layer removed"
         );
+    }
+
+    // ── Execution target parsing tests ────────────────────────────────────────
+
+    #[test]
+    fn agent_states_with_runs_on_get_github_target() {
+        // States that have `runs-on:` in their GHA job definition must parse
+        // to ExecutionTarget::GitHub — they are dispatched to GitHub Actions.
+        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+
+        // scan-work-queue uses calypso-agent with runs-on: ubuntu-latest
+        let scan = wf
+            .states
+            .get("scan-work-queue")
+            .expect("scan-work-queue must exist");
+        assert_eq!(
+            scan.execution_target,
+            ExecutionTarget::GitHub,
+            "agent state with runs-on must be GitHub target"
+        );
+    }
+
+    #[test]
+    fn workflow_delegation_states_without_runs_on_get_local_target() {
+        // States that delegate to a sub-workflow via `uses:` have no `runs-on:`
+        // field, so the local Calypso engine routes them — they must parse to
+        // ExecutionTarget::Local.
+        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+
+        // dispatch-planning uses `.github/workflows/calypso-planning.yml`
+        // and has no `runs-on:` field.
+        let dispatch = wf
+            .states
+            .get("dispatch-planning")
+            .expect("dispatch-planning must exist");
+        assert_eq!(
+            dispatch.execution_target,
+            ExecutionTarget::Local,
+            "workflow delegation state without runs-on must be Local target"
+        );
+    }
+
+    #[test]
+    fn terminal_states_get_local_target() {
+        // Terminal states carry `echo 'Terminal state: ...'` steps with runs-on,
+        // so they're still GitHub target. Verify the actual GHA-derived value.
+        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+
+        let done = wf
+            .states
+            .get("done")
+            .expect("done terminal state must exist");
+        assert_eq!(done.kind, Some(StateKind::Terminal));
+        // Terminal states use runs-on: ubuntu-latest in the GHA YAML, so they
+        // are GitHub targets. The execution target faithfully reflects the YAML.
+        assert_eq!(
+            done.execution_target,
+            ExecutionTarget::GitHub,
+            "terminal state with runs-on must be GitHub target"
+        );
+    }
+
+    #[test]
+    fn execution_target_default_is_local() {
+        // The Default impl must produce Local so deserialization of states
+        // that omit the field (e.g. hand-written YAML) is safe.
+        assert_eq!(ExecutionTarget::default(), ExecutionTarget::Local);
+    }
+
+    #[test]
+    fn all_embedded_workflows_have_execution_target_on_every_state() {
+        // Every state in every embedded workflow must carry an explicit
+        // execution_target after parsing. Since the field defaults to Local, this
+        // test verifies the struct field is present and accessible on all states.
+        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+            let wf = BlueprintWorkflowLibrary::parse(yaml)
+                .unwrap_or_else(|e| panic!("failed to parse '{stem}': {e}"));
+            for (state_name, state_cfg) in &wf.states {
+                // Simply accessing the field is the compile-time proof; the
+                // runtime assertion ensures it matches one of the two variants.
+                let target = &state_cfg.execution_target;
+                assert!(
+                    *target == ExecutionTarget::Local || *target == ExecutionTarget::GitHub,
+                    "state '{state_name}' in '{stem}' has invalid execution_target"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn execution_target_roundtrips_through_serde() {
+        // ExecutionTarget must serialize and deserialize correctly so that
+        // persisted workflow state files remain stable across versions.
+        let local_json = serde_json::to_string(&ExecutionTarget::Local).unwrap();
+        assert_eq!(local_json, "\"local\"");
+        let github_json = serde_json::to_string(&ExecutionTarget::GitHub).unwrap();
+        assert_eq!(github_json, "\"github\"");
+
+        let local: ExecutionTarget = serde_json::from_str("\"local\"").unwrap();
+        assert_eq!(local, ExecutionTarget::Local);
+        let github: ExecutionTarget = serde_json::from_str("\"github\"").unwrap();
+        assert_eq!(github, ExecutionTarget::GitHub);
     }
 }

@@ -17,7 +17,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::blueprint_workflows::{
-    BlueprintWorkflow, BlueprintWorkflowLibrary, StateConfig, StateKind,
+    BlueprintWorkflow, BlueprintWorkflowLibrary, ExecutionTarget, StateConfig, StateKind,
 };
 
 // ── Entry points ─────────────────────────────────────────────────────────────
@@ -159,6 +159,20 @@ impl WorkflowRegistry {
     /// Look up a state config within a workflow.
     pub fn get_state(&self, workflow: &str, state: &str) -> Option<&StateConfig> {
         self.workflows.get(workflow)?.states.get(state)
+    }
+
+    /// Return the [`ExecutionTarget`] for the named state within the named workflow.
+    ///
+    /// Routes execution based on the explicit `execution_target` field embedded in
+    /// the state's [`StateConfig`], which is derived from the `runs-on:` field of
+    /// the corresponding GHA job during workflow parsing.
+    ///
+    /// Returns [`ExecutionTarget::Local`] when the workflow or state is not found,
+    /// matching the safe-default documented in [`ExecutionTarget`].
+    pub fn execution_target_for(&self, workflow: &str, state: &str) -> ExecutionTarget {
+        self.get_state(workflow, state)
+            .map(|s| s.execution_target.clone())
+            .unwrap_or_default()
     }
 
     /// Returns the set of workflow names referenced as `workflow:` targets in
@@ -554,6 +568,20 @@ impl WorkflowCatalog {
             .names()
             .filter(move |n| !local_names.contains(*n));
         self.local.keys().map(|s| s.as_str()).chain(embedded_names)
+    }
+
+    /// Return the [`ExecutionTarget`] for the named state within the named workflow.
+    ///
+    /// Prefers the local workflow definition over the embedded one, so a
+    /// repository-local copy of a workflow and the embedded blueprint copy yield
+    /// the same routing decision when they carry identical `runs-on:` metadata.
+    ///
+    /// Returns [`ExecutionTarget::Local`] when the workflow or state is not found.
+    pub fn execution_target_for(&self, workflow: &str, state: &str) -> ExecutionTarget {
+        self.get(workflow)
+            .and_then(|wf| wf.states.get(state))
+            .map(|s| s.execution_target.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -1079,6 +1107,115 @@ mod tests {
         assert!(
             result.is_empty(),
             ".calypso/workflows/ yml files must not be flagged: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── Execution-target routing tests ────────────────────────────────────────
+
+    #[test]
+    fn registry_execution_target_for_github_state() {
+        // Agent states with runs-on in the GHA YAML must resolve to GitHub target.
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "scan-work-queue");
+        assert_eq!(
+            target,
+            ExecutionTarget::GitHub,
+            "scan-work-queue uses calypso-agent with runs-on → GitHub"
+        );
+    }
+
+    #[test]
+    fn registry_execution_target_for_local_state() {
+        // Workflow-delegation states without runs-on must resolve to Local target.
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "dispatch-planning");
+        assert_eq!(
+            target,
+            ExecutionTarget::Local,
+            "dispatch-planning delegates to sub-workflow without runs-on → Local"
+        );
+    }
+
+    #[test]
+    fn registry_execution_target_for_unknown_workflow_defaults_local() {
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let target = registry.execution_target_for("does-not-exist", "any-state");
+        assert_eq!(
+            target,
+            ExecutionTarget::Local,
+            "unknown workflow must default to Local"
+        );
+    }
+
+    #[test]
+    fn registry_execution_target_for_unknown_state_defaults_local() {
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "no-such-state");
+        assert_eq!(
+            target,
+            ExecutionTarget::Local,
+            "unknown state must default to Local"
+        );
+    }
+
+    #[test]
+    fn embedded_and_local_copy_yield_same_execution_target() {
+        // The same workflow YAML loaded as a local file via WorkflowCatalog must
+        // produce the same execution_target for a given state as the embedded copy.
+        // This proves that routing decisions are source-independent.
+        let tmp = unique_temp_dir("exec-target-same");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        // Write the embedded orchestrator YAML as a local file.
+        let wf_name = "calypso-orchestrator-startup";
+        let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(wf_name)
+            .expect("embedded orchestrator must exist");
+        let dest = workflows_dir.join("calypso-orchestrator-startup.yaml");
+        std::fs::write(dest, yaml).unwrap();
+
+        let catalog = WorkflowCatalog::load(&tmp).expect("catalog must load");
+        let registry = WorkflowRegistry::from_embedded().unwrap();
+
+        // A GitHub-target state: same result from both catalog and registry.
+        let cat_gh = catalog.execution_target_for(wf_name, "scan-work-queue");
+        let reg_gh = registry.execution_target_for(wf_name, "scan-work-queue");
+        assert_eq!(
+            cat_gh,
+            ExecutionTarget::GitHub,
+            "local copy: scan-work-queue must be GitHub"
+        );
+        // Same target from embedded registry — source-independent routing.
+        assert_eq!(cat_gh, reg_gh);
+
+        // A Local-target state: same result from both catalog and registry.
+        let cat_lo = catalog.execution_target_for(wf_name, "dispatch-planning");
+        let reg_lo = registry.execution_target_for(wf_name, "dispatch-planning");
+        assert_eq!(
+            cat_lo,
+            ExecutionTarget::Local,
+            "local copy: dispatch-planning must be Local"
+        );
+        // Same target from embedded registry — source-independent routing.
+        assert_eq!(cat_lo, reg_lo);
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn catalog_execution_target_for_unknown_defaults_local() {
+        let tmp = unique_temp_dir("catalog-exec-default");
+        std::fs::create_dir_all(tmp.join(".calypso").join("workflows")).unwrap();
+        let catalog = WorkflowCatalog::load(&tmp).unwrap();
+        let target = catalog.execution_target_for("no-such-workflow", "no-such-state");
+        assert_eq!(
+            target,
+            ExecutionTarget::Local,
+            "unknown workflow/state in catalog must default to Local"
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
