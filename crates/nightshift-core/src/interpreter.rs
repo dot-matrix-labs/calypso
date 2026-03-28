@@ -12,6 +12,7 @@
 //! 5. Auto-launch [`EntryPoint::AutoStart`] entries immediately.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -454,6 +455,165 @@ impl WorkflowInterpreter {
     }
 }
 
+// ── WorkflowCatalog ──────────────────────────────────────────────────────────
+
+/// The canonical names of `.calypso/` configuration files that are NOT workflow
+/// definitions.  These are excluded from legacy layout detection so they never
+/// get misidentified as workflow YAML files.
+const NON_WORKFLOW_CALYPSO_FILES: &[&str] = &[
+    "state-machine.yml",
+    "state-machine.yaml",
+    "agents.yml",
+    "agents.yaml",
+    "prompts.yml",
+    "prompts.yaml",
+    "headless-state.json",
+    "init-state.json",
+    "repository-state.json",
+    "workflow-state.json",
+    "dev-state.json",
+    "keys.json",
+    "pending-event.json",
+    "pending-cron.json",
+];
+
+/// A workflow catalog that loads repository-local workflows strictly from
+/// `.calypso/workflows/`.
+///
+/// # Discovery contract
+///
+/// - Local workflows are loaded from `<repo_root>/.calypso/workflows/*.yml|*.yaml`.
+/// - The root `.calypso/` directory is **never** scanned for workflow files.
+///   Files placed at `.calypso/*.yml` (the legacy layout) are silently ignored by
+///   the runtime.  Use [`detect_legacy_local_workflows`] to surface migration
+///   guidance when a legacy layout is detected.
+/// - Embedded blueprint workflows (from `BlueprintWorkflowLibrary`) are always
+///   available as a fallback when a name is not found in local files.
+pub struct WorkflowCatalog {
+    /// Workflows loaded from `.calypso/workflows/`.
+    pub local: BTreeMap<String, BlueprintWorkflow>,
+    /// The embedded registry — provides all blueprint workflows.
+    pub embedded: WorkflowRegistry,
+}
+
+impl WorkflowCatalog {
+    /// Load local workflows from `<repo_root>/.calypso/workflows/` and combine
+    /// them with the embedded blueprint registry.
+    ///
+    /// YAML files in `.calypso/` root are **not** loaded — only
+    /// `.calypso/workflows/*.yml|*.yaml` is considered.
+    pub fn load(repo_root: &Path) -> Result<Self, String> {
+        let embedded = WorkflowRegistry::from_embedded()?;
+        let workflows_dir = repo_root.join(".calypso").join("workflows");
+        let mut local = BTreeMap::new();
+
+        if let Ok(entries) = std::fs::read_dir(&workflows_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let is_yaml = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e == "yml" || e == "yaml")
+                    .unwrap_or(false);
+                if !is_yaml {
+                    continue;
+                }
+                let yaml = match std::fs::read_to_string(&path) {
+                    Ok(y) => y,
+                    Err(_) => continue,
+                };
+                let wf = match BlueprintWorkflowLibrary::parse(&yaml) {
+                    Ok(w) => w,
+                    Err(_) => continue,
+                };
+                let stem = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let name = wf.name.clone().unwrap_or(stem);
+                local.insert(name, wf);
+            }
+        }
+
+        Ok(Self { local, embedded })
+    }
+
+    /// Look up a workflow by name, preferring local definitions over embedded ones.
+    pub fn get(&self, name: &str) -> Option<&BlueprintWorkflow> {
+        self.local.get(name).or_else(|| self.embedded.get(name))
+    }
+
+    /// Return all workflow names visible through this catalog.
+    ///
+    /// Local workflow names shadow embedded ones of the same name.
+    pub fn names(&self) -> impl Iterator<Item = &str> {
+        let local_names: BTreeSet<&str> = self.local.keys().map(|s| s.as_str()).collect();
+        let embedded_names = self
+            .embedded
+            .names()
+            .filter(move |n| !local_names.contains(*n));
+        self.local.keys().map(|s| s.as_str()).chain(embedded_names)
+    }
+}
+
+/// Detect YAML files placed at `.calypso/*.yml|*.yaml` that look like legacy
+/// local workflow definitions.
+///
+/// Returns the basenames of any YAML files found in the `.calypso/` root that
+/// are not in the known list of non-workflow configuration files.  An empty
+/// result means no legacy layout was detected.
+///
+/// These files are **never** loaded as workflows by the runtime.  When this
+/// function returns a non-empty list the caller should surface migration
+/// guidance to the repository owner:
+///
+/// ```text
+/// Move .calypso/<file>.yml to .calypso/workflows/<file>.yml to register it
+/// as a local workflow definition.
+/// ```
+pub fn detect_legacy_local_workflows(repo_root: &Path) -> Vec<String> {
+    let calypso_dir = repo_root.join(".calypso");
+    let mut found = Vec::new();
+
+    let entries = match std::fs::read_dir(&calypso_dir) {
+        Ok(e) => e,
+        Err(_) => return found,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+
+        // Only files directly under `.calypso/` — not subdirectories.
+        if !path.is_file() {
+            continue;
+        }
+
+        let is_yaml = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e == "yml" || e == "yaml")
+            .unwrap_or(false);
+        if !is_yaml {
+            continue;
+        }
+
+        let filename = match path.file_name().and_then(|f| f.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
+
+        if NON_WORKFLOW_CALYPSO_FILES.contains(&filename) {
+            continue;
+        }
+
+        found.push(filename.to_string());
+    }
+
+    found.sort();
+    found
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -754,5 +914,172 @@ mod tests {
         assert_eq!(exec.position.workflow, "calypso-implementation-loop");
         assert_eq!(exec.position.state, "write-increment");
         assert_eq!(exec.call_stack.len(), 2); // orchestrator + feature-workflow
+    }
+
+    // ── WorkflowCatalog ──────────────────────────────────────────────────────
+
+    fn unique_temp_dir(label: &str) -> std::path::PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        std::env::temp_dir().join(format!("calypso-catalog-{label}-{nanos}"))
+    }
+
+    #[test]
+    fn catalog_load_with_no_local_dir_falls_back_to_embedded() {
+        let tmp = unique_temp_dir("no-local");
+        // No .calypso/workflows/ directory — catalog should still return embedded workflows.
+        let catalog = WorkflowCatalog::load(&tmp).unwrap();
+        assert!(
+            catalog.get("calypso-orchestrator-startup").is_some(),
+            "expected embedded fallback for calypso-orchestrator-startup"
+        );
+        assert!(catalog.local.is_empty(), "expected no local workflows");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn catalog_load_reads_local_yml_from_workflows_subdir() {
+        let tmp = unique_temp_dir("local-yml");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        // A minimal GHA-format local workflow.
+        let yaml = "name: my-local-wf\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: start work\n";
+        std::fs::write(workflows_dir.join("my-local-wf.yml"), yaml).unwrap();
+
+        let catalog = WorkflowCatalog::load(&tmp).unwrap();
+        assert!(
+            catalog.local.contains_key("my-local-wf"),
+            "expected local workflow to be loaded"
+        );
+        assert!(
+            catalog.get("my-local-wf").is_some(),
+            "expected get() to return local workflow"
+        );
+        // Embedded workflows still accessible.
+        assert!(
+            catalog.get("calypso-planning").is_some(),
+            "expected embedded fallback still accessible"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn catalog_load_ignores_non_yaml_files_in_workflows_subdir() {
+        let tmp = unique_temp_dir("non-yaml");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        std::fs::write(workflows_dir.join("readme.txt"), "not yaml").unwrap();
+        std::fs::write(workflows_dir.join("notes.md"), "## notes").unwrap();
+
+        let catalog = WorkflowCatalog::load(&tmp).unwrap();
+        assert!(
+            catalog.local.is_empty(),
+            "expected non-YAML files to be ignored"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn catalog_load_does_not_scan_calypso_root_for_workflows() {
+        // Regression: YAML files placed directly under .calypso/ (legacy layout)
+        // must never be picked up as workflow definitions.
+        let tmp = unique_temp_dir("legacy-root");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+
+        // Write a workflow-like YAML directly in .calypso/ root (legacy layout).
+        let yaml = "name: legacy-workflow\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        run: echo start\n        shell: bash\n";
+        std::fs::write(calypso_dir.join("legacy-workflow.yml"), yaml).unwrap();
+
+        let catalog = WorkflowCatalog::load(&tmp).unwrap();
+        assert!(
+            !catalog.local.contains_key("legacy-workflow"),
+            "legacy .calypso/*.yml must not be loaded as a workflow"
+        );
+        assert!(
+            catalog.get("legacy-workflow").is_none(),
+            "legacy .calypso/*.yml must not be reachable via get()"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── detect_legacy_local_workflows ────────────────────────────────────────
+
+    #[test]
+    fn detect_legacy_returns_empty_when_no_calypso_dir() {
+        let tmp = unique_temp_dir("no-calypso");
+        let result = detect_legacy_local_workflows(&tmp);
+        assert!(result.is_empty(), "expected empty result for missing dir");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn detect_legacy_returns_empty_when_calypso_dir_has_no_yml() {
+        let tmp = unique_temp_dir("no-yml");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        std::fs::write(tmp.join(".calypso").join("readme.txt"), "notes").unwrap();
+        let result = detect_legacy_local_workflows(&tmp);
+        assert!(result.is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn detect_legacy_ignores_known_non_workflow_calypso_files() {
+        let tmp = unique_temp_dir("known-files");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+        for name in NON_WORKFLOW_CALYPSO_FILES {
+            std::fs::write(calypso_dir.join(name), "content").unwrap();
+        }
+        let result = detect_legacy_local_workflows(&tmp);
+        assert!(
+            result.is_empty(),
+            "known config files must not be flagged: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn detect_legacy_returns_unknown_yml_files_in_calypso_root() {
+        let tmp = unique_temp_dir("has-legacy");
+        let calypso_dir = tmp.join(".calypso");
+        std::fs::create_dir_all(&calypso_dir).unwrap();
+
+        std::fs::write(calypso_dir.join("my-workflow.yml"), "name: my-workflow").unwrap();
+        std::fs::write(calypso_dir.join("other.yaml"), "name: other").unwrap();
+
+        let result = detect_legacy_local_workflows(&tmp);
+        assert!(
+            result.contains(&"my-workflow.yml".to_string()),
+            "expected my-workflow.yml in result: {result:?}"
+        );
+        assert!(
+            result.contains(&"other.yaml".to_string()),
+            "expected other.yaml in result: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn detect_legacy_ignores_yml_in_workflows_subdir() {
+        // Files under .calypso/workflows/ are in the correct location and must
+        // NOT be flagged as legacy files.
+        let tmp = unique_temp_dir("workflows-subdir");
+        let workflows_dir = tmp.join(".calypso").join("workflows");
+        std::fs::create_dir_all(&workflows_dir).unwrap();
+
+        std::fs::write(workflows_dir.join("good-workflow.yml"), "name: good").unwrap();
+
+        let result = detect_legacy_local_workflows(&tmp);
+        assert!(
+            result.is_empty(),
+            ".calypso/workflows/ yml files must not be flagged: {result:?}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
