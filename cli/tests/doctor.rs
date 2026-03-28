@@ -556,3 +556,127 @@ fn doctor_report_render_shows_warn_for_advisory_checks() {
         "required check should render as FAIL"
     );
 }
+
+// ── LocalWorkflowLayout doctor check ─────────────────────────────────────────
+
+fn unique_temp_dir(label: &str) -> PathBuf {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = std::env::temp_dir().join(format!("calypso-doctor-layout-{label}-{nanos}"));
+    std::fs::create_dir_all(&path).expect("temp dir should be created");
+    path
+}
+
+#[test]
+fn doctor_local_workflow_layout_passes_when_no_legacy_files() {
+    // A repo with no .calypso/ dir — check must pass (no legacy files).
+    let tmp = unique_temp_dir("no-legacy");
+    let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
+    let statuses = status_map(&report);
+    assert_eq!(
+        statuses[&DoctorCheckId::LocalWorkflowLayout],
+        DoctorStatus::Passing,
+        "expected Passing when no .calypso/ dir"
+    );
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn doctor_local_workflow_layout_warns_when_legacy_files_present() {
+    // A repo with .calypso/my-workflow.yml placed at the root level (legacy layout).
+    let tmp = unique_temp_dir("has-legacy");
+    let calypso_dir = tmp.join(".calypso");
+    std::fs::create_dir_all(&calypso_dir).expect(".calypso dir");
+    std::fs::write(calypso_dir.join("my-workflow.yml"), "name: my-workflow").unwrap();
+
+    let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
+    let statuses = status_map(&report);
+    assert_eq!(
+        statuses[&DoctorCheckId::LocalWorkflowLayout],
+        DoctorStatus::Warning,
+        "expected Warning when legacy workflow files are present"
+    );
+
+    // Detail must mention the legacy file.
+    let check = check_for(&report, DoctorCheckId::LocalWorkflowLayout);
+    let detail = check.detail.as_deref().unwrap_or("");
+    assert!(
+        detail.contains("my-workflow.yml"),
+        "expected legacy filename in detail: {detail}"
+    );
+
+    // Remediation must include migration guidance.
+    let remediation = check.remediation.as_deref().unwrap_or("");
+    assert!(
+        remediation.contains(".calypso/workflows/"),
+        "expected migration path in remediation: {remediation}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn doctor_local_workflow_layout_passes_when_workflows_in_correct_subdir() {
+    // A repo with .calypso/workflows/my-workflow.yml — correct layout, must pass.
+    let tmp = unique_temp_dir("correct-layout");
+    let workflows_dir = tmp.join(".calypso").join("workflows");
+    std::fs::create_dir_all(&workflows_dir).expect("workflows dir");
+    std::fs::write(workflows_dir.join("my-workflow.yml"), "name: my-workflow").unwrap();
+
+    let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
+    let statuses = status_map(&report);
+    assert_eq!(
+        statuses[&DoctorCheckId::LocalWorkflowLayout],
+        DoctorStatus::Passing,
+        "expected Passing when workflows are in .calypso/workflows/"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn doctor_local_workflow_layout_passes_for_known_non_workflow_calypso_files() {
+    // Known config files like state-machine.yml, agents.yml, prompts.yml must
+    // not be flagged as legacy workflow files.
+    let tmp = unique_temp_dir("known-files");
+    let calypso_dir = tmp.join(".calypso");
+    std::fs::create_dir_all(&calypso_dir).expect(".calypso dir");
+    for filename in &[
+        "state-machine.yml",
+        "agents.yml",
+        "prompts.yml",
+        "headless-state.json",
+    ] {
+        std::fs::write(calypso_dir.join(filename), "content").unwrap();
+    }
+
+    let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
+    let statuses = status_map(&report);
+    assert_eq!(
+        statuses[&DoctorCheckId::LocalWorkflowLayout],
+        DoctorStatus::Passing,
+        "expected Passing — known config files must not be flagged"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn doctor_local_workflow_layout_renders_as_warn_in_report() {
+    let tmp = unique_temp_dir("render-warn");
+    let calypso_dir = tmp.join(".calypso");
+    std::fs::create_dir_all(&calypso_dir).expect(".calypso dir");
+    std::fs::write(calypso_dir.join("legacy.yml"), "name: legacy").unwrap();
+
+    let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
+    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+    assert!(
+        rendered.contains("[WARN] local-workflow-layout"),
+        "expected WARN for local-workflow-layout in rendered output: {rendered}"
+    );
+
+    std::fs::remove_dir_all(&tmp).ok();
+}

@@ -38,6 +38,10 @@ pub enum DoctorCheckId {
     StateMachineIntegrity,
     /// Validates internal consistency of the on-disk key store, if one exists.
     KeyStoreHealth,
+    /// Detects YAML files placed at `.calypso/*.yml|*.yaml` (legacy local workflow
+    /// layout). These files are ignored by the runtime — they should be moved to
+    /// `.calypso/workflows/` to be registered as local workflow definitions.
+    LocalWorkflowLayout,
 }
 
 /// Severity of a failing check — determines whether a non-passing result is
@@ -58,6 +62,8 @@ impl DoctorCheckId {
             DoctorCheckId::CodexInstalled => CheckSeverity::Advisory,
             // Key store health is advisory — a missing store is not an error.
             DoctorCheckId::KeyStoreHealth => CheckSeverity::Advisory,
+            // Legacy layout is advisory — runtime still works, but migration is recommended.
+            DoctorCheckId::LocalWorkflowLayout => CheckSeverity::Advisory,
             // All other checks are hard requirements.
             _ => CheckSeverity::Required,
         }
@@ -80,6 +86,7 @@ impl DoctorCheckId {
             }
             DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
             DoctorCheckId::KeyStoreHealth => "builtin.doctor.key_store_health",
+            DoctorCheckId::LocalWorkflowLayout => "builtin.doctor.local_workflow_layout",
         }
     }
 
@@ -96,6 +103,7 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
             DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
             DoctorCheckId::KeyStoreHealth => "key-store-health",
+            DoctorCheckId::LocalWorkflowLayout => "local-workflow-layout",
         }
     }
 }
@@ -374,6 +382,9 @@ pub fn collect_doctor_report(
     } else {
         None
     };
+    // Detect legacy .calypso/*.yml workflow files.
+    let legacy_workflow_files =
+        crate::interpreter::detect_legacy_local_workflows(repo_root);
 
     let repo_name = repo_root
         .file_name()
@@ -477,6 +488,15 @@ pub fn collect_doctor_report(
                     None,
                 )
             },
+            make_check(
+                DoctorCheckId::LocalWorkflowLayout,
+                DoctorCheckScope::LocalConfiguration,
+                legacy_workflow_files.is_empty(),
+                (!legacy_workflow_files.is_empty())
+                    .then_some(legacy_workflow_files.join(", ")),
+                repo_root,
+                None,
+            ),
         ],
     }
 }
@@ -853,6 +873,18 @@ fn failing_doctor_fix(
         DoctorCheckId::KeyStoreHealth => Some(DoctorFix::Manual {
             instructions: "Inspect `.calypso/keys.json` for corruption. Use `calypso keys list` to check key metadata.".to_string(),
         }),
+
+        // Legacy local workflow layout: provide migration instructions.
+        DoctorCheckId::LocalWorkflowLayout => {
+            let files = detail.unwrap_or("unknown");
+            Some(DoctorFix::Manual {
+                instructions: format!(
+                    "Move the following files from `.calypso/` to `.calypso/workflows/` \
+                     so they are registered as local workflow definitions: {files}. \
+                     Files placed directly under `.calypso/` are ignored by the workflow runtime."
+                ),
+            })
+        }
     }
 }
 
@@ -901,6 +933,11 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
         }
         DoctorCheckId::KeyStoreHealth => Some(format!(
             "Key store has integrity issues: {}",
+            detail.unwrap_or("unknown")
+        )),
+        DoctorCheckId::LocalWorkflowLayout => Some(format!(
+            "Legacy local workflow files found under .calypso/: {}. \
+             Move them to .calypso/workflows/ to register them as local workflow definitions.",
             detail.unwrap_or("unknown")
         )),
     }
