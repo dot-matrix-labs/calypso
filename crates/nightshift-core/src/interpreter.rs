@@ -1189,7 +1189,11 @@ mod tests {
             ExecutionTarget::GitHub,
             "local copy: scan-work-queue must be GitHub"
         );
-        assert_eq!(cat_gh, reg_gh, "local and embedded must agree on scan-work-queue");
+        assert_eq!(
+            cat_gh,
+            reg_gh,
+            "local and embedded must agree on scan-work-queue"
+        );
 
         // A Local-target state: same result from both catalog and registry.
         let cat_lo = catalog.execution_target_for(wf_name, "dispatch-planning");
@@ -1199,7 +1203,11 @@ mod tests {
             ExecutionTarget::Local,
             "local copy: dispatch-planning must be Local"
         );
-        assert_eq!(cat_lo, reg_lo, "local and embedded must agree on dispatch-planning");
+        assert_eq!(
+            cat_lo,
+            reg_lo,
+            "local and embedded must agree on dispatch-planning"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
