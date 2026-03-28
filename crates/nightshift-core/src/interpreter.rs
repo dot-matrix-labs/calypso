@@ -1115,10 +1115,10 @@ mod tests {
 
     #[test]
     fn registry_execution_target_for_github_state() {
-        // Planner agent states have runs-on in the GHA YAML → GitHub target.
+        // Agent states with runs-on in the GHA YAML must resolve to GitHub target.
         let registry = WorkflowRegistry::from_embedded().unwrap();
-        let target = registry
-            .execution_target_for("calypso-orchestrator-startup", "scan-work-queue");
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "scan-work-queue");
         assert_eq!(
             target,
             ExecutionTarget::GitHub,
@@ -1128,10 +1128,10 @@ mod tests {
 
     #[test]
     fn registry_execution_target_for_local_state() {
-        // Workflow-delegation states have no runs-on → Local target.
+        // Workflow-delegation states without runs-on must resolve to Local target.
         let registry = WorkflowRegistry::from_embedded().unwrap();
-        let target = registry
-            .execution_target_for("calypso-orchestrator-startup", "dispatch-planning");
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "dispatch-planning");
         assert_eq!(
             target,
             ExecutionTarget::Local,
@@ -1153,8 +1153,8 @@ mod tests {
     #[test]
     fn registry_execution_target_for_unknown_state_defaults_local() {
         let registry = WorkflowRegistry::from_embedded().unwrap();
-        let target =
-            registry.execution_target_for("calypso-orchestrator-startup", "no-such-state");
+        let wf = "calypso-orchestrator-startup";
+        let target = registry.execution_target_for(wf, "no-such-state");
         assert_eq!(
             target,
             ExecutionTarget::Local,
@@ -1167,59 +1167,30 @@ mod tests {
         // The same workflow YAML loaded as a local file via WorkflowCatalog must
         // produce the same execution_target for a given state as the embedded copy.
         // This proves that routing decisions are source-independent.
-        use std::time::{SystemTime, UNIX_EPOCH};
-        let ts = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or(0);
-        let tmp = std::env::temp_dir()
-            .join(format!("calypso-exec-target-test-{ts}"));
+        let tmp = unique_temp_dir("exec-target-same");
         let workflows_dir = tmp.join(".calypso").join("workflows");
         std::fs::create_dir_all(&workflows_dir).unwrap();
 
         // Write the embedded orchestrator YAML as a local file.
-        let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(
-            "calypso-orchestrator-startup",
-        )
-        .expect("embedded orchestrator must exist");
-        std::fs::write(
-            workflows_dir.join("calypso-orchestrator-startup.yaml"),
-            yaml,
-        )
-        .unwrap();
+        let wf_name = "calypso-orchestrator-startup";
+        let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(wf_name)
+            .expect("embedded orchestrator must exist");
+        std::fs::write(workflows_dir.join("calypso-orchestrator-startup.yaml"), yaml).unwrap();
 
         let catalog = WorkflowCatalog::load(&tmp).expect("catalog must load");
-
-        // Check a GitHub-target state.
-        let local_target =
-            catalog.execution_target_for("calypso-orchestrator-startup", "scan-work-queue");
-        assert_eq!(
-            local_target,
-            ExecutionTarget::GitHub,
-            "local copy: scan-work-queue must be GitHub target"
-        );
-
-        // Check a Local-target state.
-        let local_target2 =
-            catalog.execution_target_for("calypso-orchestrator-startup", "dispatch-planning");
-        assert_eq!(
-            local_target2,
-            ExecutionTarget::Local,
-            "local copy: dispatch-planning must be Local target"
-        );
-
-        // Verify both match the embedded registry.
         let registry = WorkflowRegistry::from_embedded().unwrap();
-        assert_eq!(
-            local_target,
-            registry.execution_target_for("calypso-orchestrator-startup", "scan-work-queue"),
-            "local and embedded must agree on scan-work-queue execution target"
-        );
-        assert_eq!(
-            local_target2,
-            registry.execution_target_for("calypso-orchestrator-startup", "dispatch-planning"),
-            "local and embedded must agree on dispatch-planning execution target"
-        );
+
+        // A GitHub-target state: same result from both catalog and registry.
+        let cat_gh = catalog.execution_target_for(wf_name, "scan-work-queue");
+        let reg_gh = registry.execution_target_for(wf_name, "scan-work-queue");
+        assert_eq!(cat_gh, ExecutionTarget::GitHub, "local copy: scan-work-queue must be GitHub");
+        assert_eq!(cat_gh, reg_gh, "local and embedded must agree on scan-work-queue");
+
+        // A Local-target state: same result from both catalog and registry.
+        let cat_lo = catalog.execution_target_for(wf_name, "dispatch-planning");
+        let reg_lo = registry.execution_target_for(wf_name, "dispatch-planning");
+        assert_eq!(cat_lo, ExecutionTarget::Local, "local copy: dispatch-planning must be Local");
+        assert_eq!(cat_lo, reg_lo, "local and embedded must agree on dispatch-planning");
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
