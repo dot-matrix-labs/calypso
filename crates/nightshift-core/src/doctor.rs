@@ -383,8 +383,7 @@ pub fn collect_doctor_report(
         None
     };
     // Detect legacy .calypso/*.yml workflow files.
-    let legacy_workflow_files =
-        crate::interpreter::detect_legacy_local_workflows(repo_root);
+    let legacy_workflow_files = crate::interpreter::detect_legacy_local_workflows(repo_root);
 
     let repo_name = repo_root
         .file_name()
@@ -492,8 +491,7 @@ pub fn collect_doctor_report(
                 DoctorCheckId::LocalWorkflowLayout,
                 DoctorCheckScope::LocalConfiguration,
                 legacy_workflow_files.is_empty(),
-                (!legacy_workflow_files.is_empty())
-                    .then_some(legacy_workflow_files.join(", ")),
+                (!legacy_workflow_files.is_empty()).then_some(legacy_workflow_files.join(", ")),
                 repo_root,
                 None,
             ),

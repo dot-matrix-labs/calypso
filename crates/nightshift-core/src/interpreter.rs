@@ -549,11 +549,11 @@ impl WorkflowCatalog {
     /// Local workflow names shadow embedded ones of the same name.
     pub fn names(&self) -> impl Iterator<Item = &str> {
         let local_names: BTreeSet<&str> = self.local.keys().map(|s| s.as_str()).collect();
-        let embedded_names = self.embedded.names().filter(move |n| !local_names.contains(*n));
-        self.local
-            .keys()
-            .map(|s| s.as_str())
-            .chain(embedded_names)
+        let embedded_names = self
+            .embedded
+            .names()
+            .filter(move |n| !local_names.contains(*n));
+        self.local.keys().map(|s| s.as_str()).chain(embedded_names)
     }
 }
 
