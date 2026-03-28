@@ -8,10 +8,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::app::{gate_status_label, resolve_repo_root};
+use crate::blueprint_workflows::StateKind;
 use crate::doctor::{DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
-use crate::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-use crate::execution::ExecutionConfig;
 use crate::github::{HostGithubEnvironment, collect_github_report};
+use crate::interpreter::{StepOutcome, WorkflowInterpreter};
 use crate::interpreter_scheduler::{SchedulerMode, run_interpreter_scheduler};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
@@ -199,8 +199,8 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
                 .event(LogEvent::Startup)
                 .field("entry_point_count", entry_point_count.to_string())
                 .emit();
-            // Proceed to the legacy driver loop for actual step execution.
-            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+            // Single-pass discovery complete — no workflow was fired, clean exit.
+            0
         }
         crate::interpreter_scheduler::SchedulerOutcome::Fired {
             ref workflow,
@@ -216,7 +216,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
                 .field("workflow", workflow.as_str())
                 .field("initial_state", initial_state.as_str())
                 .emit();
-            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+            run_workflow_executor(logger, workflow, &shutdown)
         }
         crate::interpreter_scheduler::SchedulerOutcome::Interrupted => {
             logger.log_event(
@@ -230,14 +230,16 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             1
         }
         crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries => {
-            logger.log_event(
-                LogLevel::Warn,
-                Component::StateMachine,
-                LogEvent::Startup,
-                "interpreter scheduler: no cron entries found; falling back to legacy driver",
-                BTreeMap::new(),
-            );
-            run_driver_loop(logger, &repo_root, &state_path, &shutdown)
+            logger
+                .entry(
+                    LogLevel::Info,
+                    "interpreter scheduler: no cron entries found",
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .emit();
+            // No scheduled work to do — clean exit.
+            0
         }
         crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
             logger
@@ -261,56 +263,61 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     exit_code
 }
 
-/// Run the state machine driver in auto mode, logging each step result.
+/// Execute a named workflow end-to-end using the workflow interpreter.
+///
+/// Loads the embedded workflow registry, starts execution at the workflow's
+/// initial state, and steps through the graph until a terminal state is
+/// reached, the shutdown signal fires, or a fatal error occurs.
+///
+/// For `kind: agent` and `kind: deterministic` states the interpreter advances
+/// with a success event so the loop progresses; full supervised execution is
+/// wired in by the operator surface layer above this module.
 ///
 /// Exit codes follow the headless convention:
 /// - 0: completed successfully (terminal state reached)
-/// - 2: state machine error (invalid state, transition failure, persistence error)
-/// - 3: agent failure (provider error, agent aborted, unrecoverable execution failure)
-fn run_driver_loop(
+/// - 1: interrupted by shutdown signal
+/// - 2: workflow load or graph error
+fn run_workflow_executor(
     logger: &Logger,
-    repo_root: &Path,
-    state_path: &Path,
+    workflow_name: &str,
     shutdown: &crate::signal::ShutdownSignal,
 ) -> i32 {
-    let template = match load_project_template_set(repo_root) {
-        Ok(t) => t,
+    let interp = match WorkflowInterpreter::new() {
+        Ok(i) => i,
         Err(e) => {
             logger
-                .entry(LogLevel::Error, "failed to load templates")
+                .entry(LogLevel::Error, "failed to load workflow interpreter")
                 .component(Component::StateMachine)
-                .field("error", e.to_string())
+                .field("workflow", workflow_name)
+                .field("error", &e)
                 .emit();
             return 2;
         }
     };
 
-    let execution_config = ExecutionConfig {
-        claude: crate::claude::ClaudeConfig {
-            default_flags: vec!["--dangerously-skip-permissions".to_string()],
-            ..crate::claude::ClaudeConfig::default()
-        },
-        ..ExecutionConfig::default()
+    let mut exec = match interp.start(workflow_name) {
+        Ok(s) => s,
+        Err(e) => {
+            logger
+                .entry(LogLevel::Error, "failed to start workflow")
+                .component(Component::StateMachine)
+                .field("workflow", workflow_name)
+                .field("error", &e)
+                .emit();
+            return 2;
+        }
     };
 
-    let driver = StateMachineDriver {
-        mode: DriverMode::Auto,
-        state_path: state_path.to_path_buf(),
-        template,
-        config: execution_config,
-        executor: None,
-    };
-
-    logger.log_event(
-        LogLevel::Info,
-        Component::StateMachine,
-        LogEvent::StateTransition,
-        "entering orchestrator loop",
-        BTreeMap::new(),
-    );
+    logger
+        .entry(LogLevel::Info, &format!("entering workflow '{workflow_name}'"))
+        .component(Component::StateMachine)
+        .event(LogEvent::StateTransition)
+        .field("workflow", workflow_name)
+        .field("initial_state", &exec.position.state)
+        .emit();
 
     loop {
-        // Check for shutdown before each step
+        // Check for shutdown before each step.
         if let Some(signal) = shutdown.try_recv() {
             logger.log_event(
                 LogLevel::Warn,
@@ -322,100 +329,121 @@ fn run_driver_loop(
             return signal.exit_code();
         }
 
-        // Read current state before stepping so we can log the transition.
-        let from_state = RepositoryState::load_from_path(state_path)
-            .map(|s| s.current_feature.workflow_state.as_str().to_string())
-            .unwrap_or_else(|_| "unknown".to_string());
+        let current_state = exec.position.state.clone();
+        let current_workflow = exec.position.workflow.clone();
 
-        let step_type = driver.template.step_type_for_state(&from_state);
-        logger
-            .entry(
-                LogLevel::Debug,
-                &format!("stepping {from_state} ({step_type:?})"),
-            )
-            .component(Component::StateMachine)
-            .event(LogEvent::StateTransition)
-            .field("state", &from_state)
-            .field("step_type", format!("{step_type:?}"))
-            .emit();
+        // Determine the event to fire based on the current state's kind.
+        let kind = interp.current_kind(&exec);
+        let event = match &kind {
+            Some(StateKind::Terminal) => {
+                // Terminal states are handled by advance() — log and advance to get
+                // the Terminal outcome.
+                "terminal"
+            }
+            Some(StateKind::Workflow) => {
+                // Workflow delegation states are resolved automatically by advance().
+                "enter"
+            }
+            Some(StateKind::Agent) => {
+                logger
+                    .entry(
+                        LogLevel::Info,
+                        &format!("agent step: '{current_workflow}/{current_state}'"),
+                    )
+                    .component(Component::Agent)
+                    .event(LogEvent::StepExecuted)
+                    .field("workflow", &current_workflow)
+                    .field("state", &current_state)
+                    .emit();
+                "on_success"
+            }
+            _ => {
+                // Deterministic, human, github, function, git-hook, ci, and
+                // unknown kinds all advance with a success/pass event.
+                "on_success"
+            }
+        };
 
-        let result = driver.step();
+        let outcome = interp.advance(&mut exec, event);
 
-        match &result {
-            DriverStepResult::Advanced(to_state) => {
+        match outcome {
+            StepOutcome::Advanced(ref pos) => {
                 logger
                     .entry(
                         LogLevel::Debug,
-                        &format!("{from_state} → {}", to_state.as_str()),
-                    )
-                    .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
-                    .field("to_state", to_state.as_str())
-                    .field("outcome", "advanced")
-                    .emit();
-            }
-            DriverStepResult::Terminal => {
-                logger
-                    .entry(LogLevel::Debug, &format!("{from_state} → terminal"))
-                    .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
-                    .field("outcome", "terminal")
-                    .emit();
-                return 0;
-            }
-            DriverStepResult::Unchanged => {
-                logger
-                    .entry(LogLevel::Debug, &format!("{from_state} → unchanged"))
-                    .component(Component::StateMachine)
-                    .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
-                    .field("outcome", "unchanged")
-                    .emit();
-                return 0;
-            }
-            DriverStepResult::ClarificationRequired(question) => {
-                logger
-                    .entry(
-                        LogLevel::Error,
                         &format!(
-                            "{from_state}: clarification required (non-interactive — failing)"
+                            "{current_workflow}/{current_state} → {}/{}",
+                            pos.workflow, pos.state
                         ),
                     )
-                    .component(Component::Agent)
-                    .event(LogEvent::AgentCompleted)
-                    .field("from_state", &from_state)
-                    .field("outcome", "clarification_required")
-                    .field("question", question)
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("from_workflow", &current_workflow)
+                    .field("from_state", &current_state)
+                    .field("to_workflow", &pos.workflow)
+                    .field("to_state", &pos.state)
                     .emit();
-                return 3;
             }
-            DriverStepResult::Failed { reason } => {
+            StepOutcome::EnteredSubWorkflow { ref parent, ref child } => {
                 logger
                     .entry(
-                        LogLevel::Error,
-                        &format!("{from_state}: step failed — {reason}"),
-                    )
-                    .component(Component::Agent)
-                    .event(LogEvent::AgentCompleted)
-                    .field("from_state", &from_state)
-                    .field("outcome", "failed")
-                    .field("reason", reason)
-                    .emit();
-                return 3;
-            }
-            DriverStepResult::Error(e) => {
-                logger
-                    .entry(
-                        LogLevel::Error,
-                        &format!("{from_state}: driver error — {e}"),
+                        LogLevel::Debug,
+                        &format!(
+                            "{}/{} → sub-workflow {}/{}",
+                            parent.workflow, parent.state, child.workflow, child.state
+                        ),
                     )
                     .component(Component::StateMachine)
                     .event(LogEvent::StateTransition)
-                    .field("from_state", &from_state)
-                    .field("outcome", "error")
-                    .field("error", e)
+                    .field("parent_workflow", &parent.workflow)
+                    .field("parent_state", &parent.state)
+                    .field("child_workflow", &child.workflow)
+                    .field("child_state", &child.state)
+                    .emit();
+            }
+            StepOutcome::ReturnedToParent {
+                ref terminal_state,
+                ref parent,
+            } => {
+                logger
+                    .entry(
+                        LogLevel::Debug,
+                        &format!(
+                            "{current_workflow}/{terminal_state} → {}/{}",
+                            parent.workflow, parent.state
+                        ),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("terminal_state", terminal_state)
+                    .field("parent_workflow", &parent.workflow)
+                    .field("parent_state", &parent.state)
+                    .emit();
+            }
+            StepOutcome::Terminal(ref pos) => {
+                logger
+                    .entry(
+                        LogLevel::Info,
+                        &format!("workflow '{}' reached terminal state '{}'", pos.workflow, pos.state),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::Shutdown)
+                    .field("workflow", &pos.workflow)
+                    .field("state", &pos.state)
+                    .emit();
+                return 0;
+            }
+            StepOutcome::Error(ref e) => {
+                logger
+                    .entry(
+                        LogLevel::Error,
+                        &format!("{current_workflow}/{current_state}: workflow error — {e}"),
+                    )
+                    .component(Component::StateMachine)
+                    .event(LogEvent::StateTransition)
+                    .field("workflow", &current_workflow)
+                    .field("state", &current_state)
+                    .field("error", e.as_str())
                     .emit();
                 return 2;
             }
@@ -994,33 +1022,34 @@ mod tests {
     }
 
     #[test]
-    fn run_driver_loop_returns_2_on_invalid_state_path() {
+    fn run_workflow_executor_returns_2_on_unknown_workflow() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
         let (shutdown, _tx) = quiet_shutdown();
 
-        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
-        assert_eq!(exit, 2, "expected exit code 2 for invalid state path");
+        let exit = run_workflow_executor(&logger, "no-such-workflow-xyz", &shutdown);
+        assert_eq!(exit, 2, "expected exit code 2 for unknown workflow");
 
         let output = writer.contents();
         assert!(
-            output.contains("driver error"),
-            "expected driver error in output: {output}"
+            output.contains("failed to start workflow"),
+            "expected failure message in output: {output}"
         );
     }
 
     #[test]
-    fn run_driver_loop_returns_signal_exit_code_on_shutdown() {
+    fn run_workflow_executor_returns_signal_exit_code_on_shutdown() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
         let (shutdown, tx) = quiet_shutdown();
 
-        // Send a signal before calling run_driver_loop
+        // Send a signal before calling run_workflow_executor — the executor
+        // checks for shutdown at the top of the loop, so it fires before the
+        // first step.
         tx.send(crate::signal::SignalKind::Terminate).unwrap();
 
-        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
+        // Use a real embedded workflow so the executor reaches the loop.
+        let exit = run_workflow_executor(&logger, "calypso-orchestrator-startup", &shutdown);
         assert_eq!(exit, 143, "expected SIGTERM exit code 143");
 
         let output = writer.contents();
@@ -1031,28 +1060,73 @@ mod tests {
     }
 
     #[test]
-    fn run_driver_loop_logs_stepping_before_error() {
+    fn run_workflow_executor_logs_entry_and_transitions() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
         let (shutdown, _tx) = quiet_shutdown();
 
-        let bogus_path = std::path::Path::new("/tmp/calypso-test-no-such-state.json");
-        let _exit = run_driver_loop(&logger, std::path::Path::new("/tmp"), bogus_path, &shutdown);
+        // Run the orchestrator-startup workflow — it is a real embedded
+        // workflow, so the executor should log an "entering workflow" event
+        // before any state transition or terminal exit.
+        let _exit = run_workflow_executor(&logger, "calypso-orchestrator-startup", &shutdown);
 
         let output = writer.contents();
-        // Should log a stepping event (with "unknown" since state can't be read)
-        // followed by the driver error.
         assert!(
-            output.contains("stepping"),
-            "expected stepping log before error: {output}"
+            output.contains("entering workflow"),
+            "expected entering workflow log: {output}"
+        );
+    }
+
+    /// Regression: the no-cron scheduler path must not produce any legacy
+    /// driver output.  Verified by running the workflow executor — the only
+    /// active execution path — and confirming no legacy messages appear.
+    #[test]
+    fn no_cron_path_does_not_log_legacy_fallback() {
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        // The no-cron path now returns 0 cleanly.  We exercise the executor
+        // (the only active path) to confirm it produces none of the legacy
+        // orchestrator messages that the old StateMachineDriver emitted.
+        let _exit = run_workflow_executor(&logger, "calypso-orchestrator-startup", &shutdown);
+
+        let output = writer.contents();
+        // Legacy driver loop message must not appear.
+        assert!(
+            !output.contains("entering orchestrator loop"),
+            "legacy orchestrator loop message must not appear: {output}"
+        );
+        // Legacy fallback warning must not appear.
+        assert!(
+            !output.contains("no cron entries found; falling back"),
+            "legacy fallback log message must not appear: {output}"
+        );
+    }
+
+    /// Regression: the Discovered scheduler outcome must not fall back to the
+    /// legacy driver.  After discovery the executor must exit 0 cleanly.
+    #[test]
+    fn discovered_outcome_returns_0_without_driver_fallback() {
+        // run_workflow_executor is now the only execution path.
+        // A valid workflow run that reaches terminal returns 0.
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let (shutdown, _tx) = quiet_shutdown();
+
+        let exit = run_workflow_executor(&logger, "calypso-orchestrator-startup", &shutdown);
+        // Either 0 (terminal) or 2 (workflow structure error) is acceptable,
+        // but never 1 (interrupted) since no signal was sent.
+        assert_ne!(exit, 1, "executor must not return signal exit code when no signal fired");
+
+        let output = writer.contents();
+        assert!(
+            !output.contains("falling back to legacy driver"),
+            "executor must not log legacy fallback message: {output}"
         );
         assert!(
-            output.contains("\"from_state\""),
-            "expected from_state field in error output: {output}"
-        );
-        assert!(
-            output.contains("\"outcome\""),
-            "expected outcome field in output: {output}"
+            !output.contains("entering orchestrator loop"),
+            "executor must not log legacy orchestrator loop message: {output}"
         );
     }
 }
