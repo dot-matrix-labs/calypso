@@ -482,23 +482,17 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     // Scan .github/workflows/ for available GHA files
     let available_gha_files = scan_gha_directory(repo_root);
 
-    // 1) Audit blueprint workflows — skipped in hello_world mode
+    // 1) Audit blueprint workflows — validate that all embedded workflows parse cleanly
     if !is_hello_world {
         for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let wf = match BlueprintWorkflowLibrary::parse(yaml) {
-                Ok(wf) => wf,
-                Err(e) => {
-                    findings.push(AuditFinding {
-                        severity: AuditSeverity::Error,
-                        source: (*stem).to_string(),
-                        message: format!("failed to parse blueprint workflow: {e}"),
-                        suggestion: None,
-                    });
-                    continue;
-                }
-            };
-
-            audit_blueprint_workflow(stem, &wf, repo_root, &available_gha_files, &mut findings);
+            if let Err(e) = BlueprintWorkflowLibrary::parse(yaml) {
+                findings.push(AuditFinding {
+                    severity: AuditSeverity::Error,
+                    source: (*stem).to_string(),
+                    message: format!("failed to parse blueprint workflow: {e}"),
+                    suggestion: None,
+                });
+            }
         }
     }
 
@@ -578,22 +572,6 @@ fn common_char_count(a: &str, b: &str) -> usize {
     let a_chars: BTreeSet<char> = a.chars().collect();
     let b_chars: BTreeSet<char> = b.chars().collect();
     a_chars.intersection(&b_chars).count()
-}
-
-/// Audit a single blueprint workflow for reference integrity.
-///
-/// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
-/// no longer exist. Validation focuses on workflow-level `uses:` references
-/// for `kind: workflow` states.
-fn audit_blueprint_workflow(
-    _stem: &str,
-    _wf: &BlueprintWorkflow,
-    _repo_root: &Path,
-    _available_gha_files: &BTreeMap<String, GhaWorkflow>,
-    _findings: &mut Vec<AuditFinding>,
-) {
-    // No per-workflow checks apply in GHA format — the checks map is not part
-    // of the canonical workflow document surface.
 }
 
 /// Validate a single workflow file reference (existence + name match).
