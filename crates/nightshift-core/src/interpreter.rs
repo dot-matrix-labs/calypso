@@ -1175,7 +1175,8 @@ mod tests {
         let wf_name = "calypso-orchestrator-startup";
         let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(wf_name)
             .expect("embedded orchestrator must exist");
-        std::fs::write(workflows_dir.join("calypso-orchestrator-startup.yaml"), yaml).unwrap();
+        let dest = workflows_dir.join("calypso-orchestrator-startup.yaml");
+        std::fs::write(dest, yaml).unwrap();
 
         let catalog = WorkflowCatalog::load(&tmp).expect("catalog must load");
         let registry = WorkflowRegistry::from_embedded().unwrap();
@@ -1183,13 +1184,21 @@ mod tests {
         // A GitHub-target state: same result from both catalog and registry.
         let cat_gh = catalog.execution_target_for(wf_name, "scan-work-queue");
         let reg_gh = registry.execution_target_for(wf_name, "scan-work-queue");
-        assert_eq!(cat_gh, ExecutionTarget::GitHub, "local copy: scan-work-queue must be GitHub");
+        assert_eq!(
+            cat_gh,
+            ExecutionTarget::GitHub,
+            "local copy: scan-work-queue must be GitHub"
+        );
         assert_eq!(cat_gh, reg_gh, "local and embedded must agree on scan-work-queue");
 
         // A Local-target state: same result from both catalog and registry.
         let cat_lo = catalog.execution_target_for(wf_name, "dispatch-planning");
         let reg_lo = registry.execution_target_for(wf_name, "dispatch-planning");
-        assert_eq!(cat_lo, ExecutionTarget::Local, "local copy: dispatch-planning must be Local");
+        assert_eq!(
+            cat_lo,
+            ExecutionTarget::Local,
+            "local copy: dispatch-planning must be Local"
+        );
         assert_eq!(cat_lo, reg_lo, "local and embedded must agree on dispatch-planning");
 
         let _ = std::fs::remove_dir_all(&tmp);
