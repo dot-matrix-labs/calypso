@@ -309,7 +309,10 @@ fn run_workflow_executor(
     };
 
     logger
-        .entry(LogLevel::Info, &format!("entering workflow '{workflow_name}'"))
+        .entry(
+            LogLevel::Info,
+            &format!("entering workflow '{workflow_name}'"),
+        )
         .component(Component::StateMachine)
         .event(LogEvent::StateTransition)
         .field("workflow", workflow_name)
@@ -384,7 +387,10 @@ fn run_workflow_executor(
                     .field("to_state", &pos.state)
                     .emit();
             }
-            StepOutcome::EnteredSubWorkflow { ref parent, ref child } => {
+            StepOutcome::EnteredSubWorkflow {
+                ref parent,
+                ref child,
+            } => {
                 logger
                     .entry(
                         LogLevel::Debug,
@@ -424,7 +430,10 @@ fn run_workflow_executor(
                 logger
                     .entry(
                         LogLevel::Info,
-                        &format!("workflow '{}' reached terminal state '{}'", pos.workflow, pos.state),
+                        &format!(
+                            "workflow '{}' reached terminal state '{}'",
+                            pos.workflow, pos.state
+                        ),
                     )
                     .component(Component::StateMachine)
                     .event(LogEvent::Shutdown)
@@ -1117,7 +1126,10 @@ mod tests {
         let exit = run_workflow_executor(&logger, "calypso-orchestrator-startup", &shutdown);
         // Either 0 (terminal) or 2 (workflow structure error) is acceptable,
         // but never 1 (interrupted) since no signal was sent.
-        assert_ne!(exit, 1, "executor must not return signal exit code when no signal fired");
+        assert_ne!(
+            exit, 1,
+            "executor must not return signal exit code when no signal fired"
+        );
 
         let output = writer.contents();
         assert!(
