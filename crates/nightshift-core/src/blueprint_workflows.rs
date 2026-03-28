@@ -132,8 +132,7 @@ struct GhaStepRaw {
 
 /// A blueprint workflow document parsed from GHA YAML.
 ///
-/// Maintains backward compatibility with the old custom format API:
-/// - `states` contains one entry per GHA job
+/// Each GHA job maps to one entry in `states`:
 /// - `initial_state` is the first job with no `needs:`
 /// - `schedule` is extracted from `on: schedule:`
 /// - Transitions are derived from `needs:` + `if:` conditions
@@ -147,10 +146,6 @@ pub struct BlueprintWorkflow {
     /// States keyed by job name, derived from GHA `jobs:`.
     #[serde(default)]
     pub states: HashMap<String, StateConfig>,
-
-    /// Checks — always empty in GHA format (checks are validated differently).
-    #[serde(default)]
-    pub checks: HashMap<String, CheckConfig>,
 }
 
 impl BlueprintWorkflow {
@@ -240,7 +235,6 @@ impl BlueprintWorkflow {
                     workflows: None,
                     poll_cmd: None,
                     ci_job: None,
-                    checks: None,
                     completion: None,
                     cleanup: None,
                     gates: None,
@@ -255,7 +249,6 @@ impl BlueprintWorkflow {
             schedule,
             trigger,
             states,
-            checks: HashMap::new(),
         }
     }
 
@@ -504,9 +497,6 @@ pub struct StateConfig {
     /// CI job specification.
     pub ci_job: Option<serde_yaml::Value>,
 
-    /// Checks that must pass.
-    pub checks: Option<Vec<String>>,
-
     /// Completion criteria for agent/human states.
     pub completion: Option<CompletionCriteria>,
 
@@ -662,51 +652,6 @@ impl NextSpec {
     }
 }
 
-// ── Checks (kept for API compatibility) ──────────────────────────────────────
-
-/// Configuration for a single named check — retained for API compatibility.
-/// In GHA format, checks are not embedded in the workflow files.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CheckConfig {
-    pub kind: Option<CheckKind>,
-    pub role: Option<String>,
-    pub description: Option<String>,
-    pub status: Option<String>,
-    pub cmd: Option<String>,
-    pub source: Option<CheckSource>,
-    pub hook: Option<String>,
-    pub workflow: Option<String>,
-    pub workflow_name: Option<String>,
-    pub check_names: Option<Vec<String>>,
-    pub builtin: Option<String>,
-    pub job: Option<String>,
-    pub step: Option<String>,
-    pub blocking: Option<bool>,
-    pub behavior: Option<String>,
-}
-
-/// The kind of evaluator for a check.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum CheckKind {
-    Deterministic,
-    Agent,
-    Human,
-    Github,
-    #[serde(rename = "git-hook")]
-    GitHook,
-    Ci,
-}
-
-/// Where a deterministic check is enforced.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum CheckSource {
-    GitHook,
-    Ci,
-    Builtin,
-}
-
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -854,5 +799,59 @@ mod tests {
         let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
         let req = wf.states.get("request-clarification").unwrap();
         assert_eq!(req.kind, Some(StateKind::Human));
+    }
+
+    // ── Canonical API surface tests ───────────────────────────────────────────
+    //
+    // These tests verify that the workflow document model is purely GHA-shaped
+    // and does not carry compatibility-only fields.
+
+    #[test]
+    fn parsed_workflow_has_no_compatibility_checks_field() {
+        // All embedded workflows parsed through the library must produce
+        // BlueprintWorkflow values with no extraneous checks. The struct no
+        // longer exposes a `checks` map — this test confirms the parsing path
+        // produces a well-formed canonical document for every embedded file.
+        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
+            let wf = BlueprintWorkflowLibrary::parse(yaml)
+                .unwrap_or_else(|e| panic!("failed to parse '{stem}': {e}"));
+            // All states must have a kind derived from GHA structure.
+            for (state_name, state_cfg) in &wf.states {
+                assert!(
+                    state_cfg.kind.is_some(),
+                    "state '{state_name}' in workflow '{stem}' has no kind — GHA parsing must derive kind"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn state_config_has_no_checks_list_from_gha_parse() {
+        // Parsing any GHA workflow must never populate `StateConfig.checks`.
+        // That field was part of the old compatibility layer and is no longer
+        // present on the struct.
+        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        // Compile-time proof: accessing wf.states (HashMap<String, StateConfig>)
+        // and any StateConfig field is still possible without `checks`.
+        for (_, state_cfg) in &wf.states {
+            // Confirm ci_job and completion fields still exist (canonical fields).
+            let _ = &state_cfg.ci_job;
+            let _ = &state_cfg.completion;
+        }
+        // If this test compiles and runs without error, the canonical surface
+        // is coherent with no orphaned compatibility fields.
+    }
+
+    #[test]
+    fn workflow_roundtrip_serializes_without_checks_key() {
+        // A parsed workflow serialized back to YAML must not emit a `checks:` key.
+        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let serialized = serde_yaml::to_string(&wf).expect("serialization must succeed");
+        assert!(
+            !serialized.contains("checks:"),
+            "serialized workflow must not contain a 'checks:' key — compatibility layer removed"
+        );
     }
 }

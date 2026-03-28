@@ -223,7 +223,6 @@ fn audit_workflow_graph(
         };
 
         // Per-workflow checks
-        audit_check_references(wf_name, wf, findings);
         audit_reachability(wf_name, wf, findings);
 
         // Follow kind: workflow references to sub-workflows
@@ -483,23 +482,17 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     // Scan .github/workflows/ for available GHA files
     let available_gha_files = scan_gha_directory(repo_root);
 
-    // 1) Audit blueprint workflows — skipped in hello_world mode
+    // 1) Audit blueprint workflows — validate that all embedded workflows parse cleanly
     if !is_hello_world {
         for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let wf = match BlueprintWorkflowLibrary::parse(yaml) {
-                Ok(wf) => wf,
-                Err(e) => {
-                    findings.push(AuditFinding {
-                        severity: AuditSeverity::Error,
-                        source: (*stem).to_string(),
-                        message: format!("failed to parse blueprint workflow: {e}"),
-                        suggestion: None,
-                    });
-                    continue;
-                }
-            };
-
-            audit_blueprint_workflow(stem, &wf, repo_root, &available_gha_files, &mut findings);
+            if let Err(e) = BlueprintWorkflowLibrary::parse(yaml) {
+                findings.push(AuditFinding {
+                    severity: AuditSeverity::Error,
+                    source: (*stem).to_string(),
+                    message: format!("failed to parse blueprint workflow: {e}"),
+                    suggestion: None,
+                });
+            }
         }
     }
 
@@ -581,23 +574,6 @@ fn common_char_count(a: &str, b: &str) -> usize {
     a_chars.intersection(&b_chars).count()
 }
 
-/// Audit a single blueprint workflow for reference integrity.
-///
-/// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
-/// no longer exist. Validation focuses on workflow-level `uses:` references
-/// for `kind: workflow` states and check reference integrity.
-fn audit_blueprint_workflow(
-    stem: &str,
-    wf: &BlueprintWorkflow,
-    _repo_root: &Path,
-    _available_gha_files: &BTreeMap<String, GhaWorkflow>,
-    findings: &mut Vec<AuditFinding>,
-) {
-    // Orphan/dangling check detection (checks map is empty in GHA format,
-    // but retained for backward compatibility with test workflows).
-    audit_check_references(stem, wf, findings);
-}
-
 /// Validate a single workflow file reference (existence + name match).
 ///
 /// `missing_severity` controls whether a missing file is reported as an error
@@ -677,60 +653,6 @@ fn validate_job_keys(
                         gha.jobs.join(", ")
                     }
                 ),
-                suggestion: None,
-            });
-        }
-    }
-}
-
-/// Audit orphan and dangling check references within a blueprint workflow.
-fn audit_check_references(stem: &str, wf: &BlueprintWorkflow, findings: &mut Vec<AuditFinding>) {
-    let defined_checks: BTreeSet<&str> = wf.checks.keys().map(|k| k.as_str()).collect();
-
-    // Collect all check names referenced by states
-    let mut referenced_checks: BTreeSet<&str> = BTreeSet::new();
-    for state_cfg in wf.states.values() {
-        if let Some(checks) = &state_cfg.checks {
-            for check in checks {
-                referenced_checks.insert(check.as_str());
-            }
-        }
-        // Also count checks referenced via completion criteria
-        if let Some(completion) = &state_cfg.completion {
-            if let Some(all_of) = &completion.all_of {
-                for item in all_of {
-                    referenced_checks.insert(item.as_str());
-                }
-            }
-            if let Some(any_of) = &completion.any_of {
-                for item in any_of {
-                    referenced_checks.insert(item.as_str());
-                }
-            }
-        }
-    }
-
-    // Dangling: referenced by a state but not defined in `checks`
-    for check_ref in &referenced_checks {
-        if !defined_checks.contains(*check_ref) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: stem.to_string(),
-                message: format!(
-                    "check '{check_ref}' is referenced by a state but not defined in the checks map"
-                ),
-                suggestion: Some(format!("add '{check_ref}' to the checks section")),
-            });
-        }
-    }
-
-    // Orphan: defined in `checks` but not referenced by any state
-    for defined in &defined_checks {
-        if !referenced_checks.contains(*defined) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Warning,
-                source: stem.to_string(),
-                message: format!("check '{defined}' is defined but not referenced by any state"),
                 suggestion: None,
             });
         }
@@ -1026,67 +948,6 @@ mod tests {
         assert!(findings.is_empty());
 
         std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn audit_detects_orphan_checks() {
-        let wf_yaml = r#"
-version: 1
-name: test-workflow
-initial_state: start
-states:
-  start:
-    kind: agent
-    completion:
-      all_of:
-        - check-a
-checks:
-  check-a:
-    kind: deterministic
-  check-orphan:
-    kind: deterministic
-"#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
-        let mut findings = Vec::new();
-        audit_check_references("test-wf", &wf, &mut findings);
-
-        let orphans: Vec<_> = findings
-            .iter()
-            .filter(|f| f.message.contains("not referenced"))
-            .collect();
-        assert_eq!(orphans.len(), 1);
-        assert!(orphans[0].message.contains("check-orphan"));
-        assert_eq!(orphans[0].severity, AuditSeverity::Warning);
-    }
-
-    #[test]
-    fn audit_detects_dangling_check_references() {
-        let wf_yaml = r#"
-version: 1
-name: test-workflow
-initial_state: start
-states:
-  start:
-    kind: agent
-    completion:
-      all_of:
-        - check-a
-        - check-nonexistent
-checks:
-  check-a:
-    kind: deterministic
-"#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
-        let mut findings = Vec::new();
-        audit_check_references("test-wf", &wf, &mut findings);
-
-        let dangling: Vec<_> = findings
-            .iter()
-            .filter(|f| f.message.contains("not defined"))
-            .collect();
-        assert_eq!(dangling.len(), 1);
-        assert!(dangling[0].message.contains("check-nonexistent"));
-        assert_eq!(dangling[0].severity, AuditSeverity::Error);
     }
 
     #[test]
