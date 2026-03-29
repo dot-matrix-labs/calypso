@@ -337,12 +337,18 @@ fn main() {
         }
         // calypso webview
         [command] if command == "webview" => {
-            run_webview(&cwd, 7373);
+            if let Err(error) = run_webview(&cwd, 7373) {
+                eprintln!("webview error: {error}");
+                std::process::exit(1);
+            }
         }
         // calypso webview --port <N>
         [command, flag, port_str] if command == "webview" && flag == "--port" => {
             let port: u16 = port_str.parse().unwrap_or(7373);
-            run_webview(&cwd, port);
+            if let Err(error) = run_webview(&cwd, port) {
+                eprintln!("webview error: {error}");
+                std::process::exit(1);
+            }
         }
         [command, subcommand] if command == "template" && subcommand == "validate" => {
             run_template_validate(&cwd);

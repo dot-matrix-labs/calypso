@@ -11,6 +11,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
 use calypso_workflows::{StateKind, WorkflowCatalog};
+use nightshift_core::error::CalypsoError;
 use serde_json::Value;
 
 // ── Embedded HTML page ────────────────────────────────────────────────────────
@@ -36,9 +37,14 @@ fn public_ip() -> Option<std::net::Ipv4Addr> {
 ///
 /// Prints the local URL and the public/LAN IP if detectable. Blocks forever
 /// (until the process is killed). Each connection is handled on a dedicated thread.
-pub fn run_webview(cwd: &Path, port: u16) {
+///
+/// Returns `Err(CalypsoError)` if the TCP listener cannot bind to the requested
+/// address (e.g. the port is already in use).
+pub fn run_webview(cwd: &Path, port: u16) -> Result<(), CalypsoError> {
     let addr = format!("0.0.0.0:{port}");
-    let listener = TcpListener::bind(&addr).expect("bind failed — port may already be in use");
+    let listener = TcpListener::bind(&addr).map_err(|e| {
+        CalypsoError::transport(format!("failed to bind webview server to {addr}: {e}"))
+    })?;
     println!("Calypso webview running at http://localhost:{port}");
     if let Some(ip) = public_ip() {
         println!("                       http://{ip}:{port}  (network)");
@@ -48,6 +54,7 @@ pub fn run_webview(cwd: &Path, port: u16) {
         let cwd = cwd.to_path_buf();
         std::thread::spawn(move || handle_connection(stream, &cwd));
     }
+    Ok(())
 }
 
 // ── Connection handler ────────────────────────────────────────────────────────
