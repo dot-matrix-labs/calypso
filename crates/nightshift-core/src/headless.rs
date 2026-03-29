@@ -66,8 +66,8 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
 
     // 4. Resolve repo root
     let repo_root = match resolve_repo_root(cwd) {
-        Some(root) => root,
-        None => {
+        Ok(root) => root,
+        Err(_) => {
             logger.log_event(
                 LogLevel::Error,
                 Component::Cli,

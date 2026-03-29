@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::doctor::{HostDoctorEnvironment, collect_doctor_report};
+use crate::error::CalypsoError;
 use crate::github::{HostGithubEnvironment, collect_github_report};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::report::{StateJsonGate, StateJsonGateGroup, StateStatusJsonReport};
@@ -15,11 +16,9 @@ use super::helpers::{
     resolve_current_pull_request, resolve_repo_root,
 };
 
-pub fn run_status(cwd: &Path) -> Result<String, String> {
-    let repo_root =
-        resolve_repo_root(cwd).ok_or_else(|| "not inside a git repository".to_string())?;
-    let branch = resolve_current_branch(&repo_root)
-        .expect("git repositories should report the current branch");
+pub fn run_status(cwd: &Path) -> Result<String, CalypsoError> {
+    let repo_root = resolve_repo_root(cwd)?;
+    let branch = resolve_current_branch(&repo_root)?;
     let template =
         resolve_template_set_for_path(&repo_root).expect("embedded templates should remain valid");
     let pull_request_lookup = resolve_current_pull_request(&repo_root);
@@ -55,7 +54,7 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
         .as_ref()
         .and_then(|report| report.snapshot.clone());
     feature.github_error = match &pull_request_lookup {
-        Err(error) => Some(error.clone()),
+        Err(error) => Some(error.to_string()),
         Ok(_) => None,
     }
     .or_else(|| {
@@ -256,13 +255,14 @@ pub fn state_status_json_report(feature: &FeatureState) -> StateStatusJsonReport
 }
 
 /// Load state from `.calypso/repository-state.json` and return the JSON report.
-/// Returns `Ok(json)` on success, `Err(message)` when the file cannot be loaded.
-pub fn run_state_status_json(cwd: &Path) -> Result<String, String> {
+/// Returns `Ok(json)` on success, `Err(CalypsoError)` when the file cannot be loaded.
+pub fn run_state_status_json(cwd: &Path) -> Result<String, CalypsoError> {
     let state_path = cwd.join(".calypso").join("repository-state.json");
-    let state =
-        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let state = crate::state::RepositoryState::load_from_path(&state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     let json_report = state_status_json_report(&state.current_feature);
-    serde_json::to_string_pretty(&json_report).map_err(|e| format!("serialization error: {e}"))
+    serde_json::to_string_pretty(&json_report)
+        .map_err(|e| CalypsoError::state_load(format!("serialization error: {e}")))
 }
 
 /// Render a human-readable summary of the feature state.
@@ -311,10 +311,10 @@ pub fn render_state_status(feature: &FeatureState) -> String {
 }
 
 /// Load state from `.calypso/repository-state.json` and return a plain-text summary.
-pub fn run_state_status_plain(cwd: &Path) -> Result<String, String> {
+pub fn run_state_status_plain(cwd: &Path) -> Result<String, CalypsoError> {
     let state_path = cwd.join(".calypso").join("repository-state.json");
-    let state =
-        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let state = crate::state::RepositoryState::load_from_path(&state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     Ok(render_state_status(&state.current_feature))
 }
 
@@ -348,17 +348,20 @@ pub fn render_dev_status(dev_state: &DevelopmentState) -> String {
 }
 
 /// Load development state from `.calypso/dev-state.json` and render a plain-text summary.
-pub fn run_dev_status(cwd: &Path) -> Result<String, String> {
+pub fn run_dev_status(cwd: &Path) -> Result<String, CalypsoError> {
     let dev_state_path = cwd.join(".calypso").join("dev-state.json");
-    let dev_state = DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
+    let dev_state = DevelopmentState::load_from_path(&dev_state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     Ok(render_dev_status(&dev_state))
 }
 
 /// Load development state from `.calypso/dev-state.json` and return as JSON.
-pub fn run_dev_status_json(cwd: &Path) -> Result<String, String> {
+pub fn run_dev_status_json(cwd: &Path) -> Result<String, CalypsoError> {
     let dev_state_path = cwd.join(".calypso").join("dev-state.json");
-    let dev_state = DevelopmentState::load_from_path(&dev_state_path).map_err(|e| e.to_string())?;
-    serde_json::to_string_pretty(&dev_state).map_err(|e| format!("serialization error: {e}"))
+    let dev_state = DevelopmentState::load_from_path(&dev_state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
+    serde_json::to_string_pretty(&dev_state)
+        .map_err(|e| CalypsoError::state_load(format!("serialization error: {e}")))
 }
 
 #[cfg(test)]
@@ -450,12 +453,16 @@ mod tests {
     fn run_dev_status_returns_error_for_missing_dir() {
         let result = run_dev_status(std::path::Path::new("/nonexistent/project"));
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, crate::error::codes::STATE_LOAD);
     }
 
     #[test]
     fn run_dev_status_json_returns_error_for_missing_dir() {
         let result = run_dev_status_json(std::path::Path::new("/nonexistent/project"));
         assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.code, crate::error::codes::STATE_LOAD);
     }
 
     #[test]

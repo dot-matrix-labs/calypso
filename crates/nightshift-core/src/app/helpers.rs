@@ -3,6 +3,7 @@ use std::process::Command;
 
 use serde::Deserialize;
 
+use crate::error::{CalypsoError, Recoverability};
 use crate::state::{BuiltinEvidence, PullRequestRef};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,7 +12,7 @@ pub enum CommandOutput {
     Failure(String),
 }
 
-pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOutput, String> {
+pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOutput, CalypsoError> {
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
@@ -20,7 +21,7 @@ pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOu
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .output()
-        .map_err(|error| format!("failed to spawn `{program}`: {error}"))?;
+        .map_err(|error| CalypsoError::subprocess_spawn(format!("failed to spawn `{program}`: {error}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -34,36 +35,45 @@ pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOu
 
     String::from_utf8(output.stdout)
         .map(|stdout| CommandOutput::Success(stdout.trim().to_string()))
-        .map_err(|error| format!("`{program}` produced invalid UTF-8: {error}"))
+        .map_err(|error| {
+            CalypsoError::new(
+                crate::error::codes::MALFORMED_PROVIDER_OUTPUT,
+                format!("`{program}` produced invalid UTF-8: {error}"),
+                Recoverability::Unrecoverable,
+            )
+        })
 }
 
-pub fn resolve_repo_root(cwd: &Path) -> Option<PathBuf> {
-    match run_command(cwd, "git", &["rev-parse", "--show-toplevel"]) {
-        Ok(CommandOutput::Success(output)) => Some(PathBuf::from(output)),
-        Ok(CommandOutput::Failure(_)) | Err(_) => None,
+pub fn resolve_repo_root(cwd: &Path) -> Result<PathBuf, CalypsoError> {
+    match run_command(cwd, "git", &["rev-parse", "--show-toplevel"])? {
+        CommandOutput::Success(output) => Ok(PathBuf::from(output)),
+        CommandOutput::Failure(message) => Err(CalypsoError::repo_root_not_found(format!(
+            "not inside a git repository: {message}"
+        ))),
     }
 }
 
-pub fn resolve_current_branch(repo_root: &Path) -> Option<String> {
-    match run_command(repo_root, "git", &["branch", "--show-current"]) {
-        Ok(CommandOutput::Success(output)) => Some(output),
-        Ok(CommandOutput::Failure(_)) | Err(_) => None,
+pub fn resolve_current_branch(repo_root: &Path) -> Result<String, CalypsoError> {
+    match run_command(repo_root, "git", &["branch", "--show-current"])? {
+        CommandOutput::Success(output) => Ok(output),
+        CommandOutput::Failure(message) => Err(CalypsoError::git(format!(
+            "could not determine current branch: {message}"
+        ))),
     }
 }
 
-pub fn resolve_current_pull_request(repo_root: &Path) -> Result<Option<PullRequestRef>, String> {
+pub fn resolve_current_pull_request(repo_root: &Path) -> Result<Option<PullRequestRef>, CalypsoError> {
     resolve_current_pull_request_with_program(repo_root, "gh")
 }
 
 pub fn resolve_current_pull_request_with_program(
     repo_root: &Path,
     program: &str,
-) -> Result<Option<PullRequestRef>, String> {
+) -> Result<Option<PullRequestRef>, CalypsoError> {
     // Resolve owner/repo and current branch, then query the REST API.
     let (owner, repo_name) = crate::github::resolve_owner_repo(repo_root)
-        .map_err(|e| format!("could not resolve owner/repo: {e}"))?;
-    let branch = resolve_current_branch(repo_root)
-        .ok_or_else(|| "could not determine current branch".to_string())?;
+        .map_err(|e| CalypsoError::git(format!("could not resolve owner/repo: {e}")))?;
+    let branch = resolve_current_branch(repo_root)?;
 
     let endpoint =
         format!("repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open");
@@ -74,14 +84,14 @@ pub fn resolve_current_pull_request_with_program(
             if error.contains("no pull requests found") {
                 Ok(None)
             } else {
-                Err(error)
+                Err(CalypsoError::github_api(error))
             }
         }
     }
 }
 
 /// Parse a JSON array of pull requests (REST format) and return the first one.
-fn parse_pull_request_list_json(json: &str) -> Result<Option<PullRequestRef>, String> {
+fn parse_pull_request_list_json(json: &str) -> Result<Option<PullRequestRef>, CalypsoError> {
     #[derive(Deserialize)]
     struct RestPr {
         number: u64,
@@ -91,7 +101,7 @@ fn parse_pull_request_list_json(json: &str) -> Result<Option<PullRequestRef>, St
     }
 
     let prs: Vec<RestPr> = serde_json::from_str(json)
-        .map_err(|_| "gh returned malformed pull request JSON".to_string())?;
+        .map_err(|_| CalypsoError::malformed_provider_output("gh returned malformed pull request JSON"))?;
 
     Ok(prs.into_iter().next().map(|pr| PullRequestRef {
         number: pr.number,
