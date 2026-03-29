@@ -24,5 +24,9 @@ pub mod runtime;
 pub mod signal;
 pub mod sm_audit;
 pub mod state;
+pub mod step_loop;
 pub mod telemetry;
 pub mod workflows;
+
+#[cfg(any(test, feature = "testing"))]
+pub mod testing;
