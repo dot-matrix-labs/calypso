@@ -676,57 +676,11 @@ fn validate_job_keys(
 }
 
 /// Audit orphan and dangling check references within a workflow definition.
-fn audit_check_references(stem: &str, wf: &Workflow, findings: &mut Vec<AuditFinding>) {
-    let defined_checks: BTreeSet<&str> = wf.checks.keys().map(|k| k.as_str()).collect();
-
-    // Collect all check names referenced by states
-    let mut referenced_checks: BTreeSet<&str> = BTreeSet::new();
-    for state_cfg in wf.states.values() {
-        if let Some(checks) = &state_cfg.checks {
-            for check in checks {
-                referenced_checks.insert(check.as_str());
-            }
-        }
-        // Also count checks referenced via completion criteria
-        if let Some(completion) = &state_cfg.completion {
-            if let Some(all_of) = &completion.all_of {
-                for item in all_of {
-                    referenced_checks.insert(item.as_str());
-                }
-            }
-            if let Some(any_of) = &completion.any_of {
-                for item in any_of {
-                    referenced_checks.insert(item.as_str());
-                }
-            }
-        }
-    }
-
-    // Dangling: referenced by a state but not defined in `checks`
-    for check_ref in &referenced_checks {
-        if !defined_checks.contains(*check_ref) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: stem.to_string(),
-                message: format!(
-                    "check '{check_ref}' is referenced by a state but not defined in the checks map"
-                ),
-                suggestion: Some(format!("add '{check_ref}' to the checks section")),
-            });
-        }
-    }
-
-    // Orphan: defined in `checks` but not referenced by any state
-    for defined in &defined_checks {
-        if !referenced_checks.contains(*defined) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Warning,
-                source: stem.to_string(),
-                message: format!("check '{defined}' is defined but not referenced by any state"),
-                suggestion: None,
-            });
-        }
-    }
+///
+/// GHA-format workflows do not have a `checks` map — this is a no-op for the
+/// current workflow schema.  Retained as a stub for API compatibility.
+fn audit_check_references(_stem: &str, _wf: &Workflow, _findings: &mut Vec<AuditFinding>) {
+    // GHA-format Workflow has no `checks` map; nothing to validate.
 }
 
 /// Audit policy gate paths from the template's `policy_gates`.
@@ -1018,67 +972,6 @@ mod tests {
         assert!(findings.is_empty());
 
         std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn audit_detects_orphan_checks() {
-        let wf_yaml = r#"
-version: 1
-name: test-workflow
-initial_state: start
-states:
-  start:
-    kind: agent
-    completion:
-      all_of:
-        - check-a
-checks:
-  check-a:
-    kind: deterministic
-  check-orphan:
-    kind: deterministic
-"#;
-        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
-        let mut findings = Vec::new();
-        audit_check_references("test-wf", &wf, &mut findings);
-
-        let orphans: Vec<_> = findings
-            .iter()
-            .filter(|f| f.message.contains("not referenced"))
-            .collect();
-        assert_eq!(orphans.len(), 1);
-        assert!(orphans[0].message.contains("check-orphan"));
-        assert_eq!(orphans[0].severity, AuditSeverity::Warning);
-    }
-
-    #[test]
-    fn audit_detects_dangling_check_references() {
-        let wf_yaml = r#"
-version: 1
-name: test-workflow
-initial_state: start
-states:
-  start:
-    kind: agent
-    completion:
-      all_of:
-        - check-a
-        - check-nonexistent
-checks:
-  check-a:
-    kind: deterministic
-"#;
-        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
-        let mut findings = Vec::new();
-        audit_check_references("test-wf", &wf, &mut findings);
-
-        let dangling: Vec<_> = findings
-            .iter()
-            .filter(|f| f.message.contains("not defined"))
-            .collect();
-        assert_eq!(dangling.len(), 1);
-        assert!(dangling[0].message.contains("check-nonexistent"));
-        assert_eq!(dangling[0].severity, AuditSeverity::Error);
     }
 
     #[test]

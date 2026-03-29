@@ -961,8 +961,8 @@ mod tests {
         // BlueprintWorkflow values with no extraneous checks. The struct no
         // longer exposes a `checks` map — this test confirms the parsing path
         // produces a well-formed canonical document for every embedded file.
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let wf = BlueprintWorkflowLibrary::parse(yaml)
+        for (stem, yaml) in EmbeddedWorkflowLibrary::list() {
+            let wf = EmbeddedWorkflowLibrary::parse(yaml)
                 .unwrap_or_else(|e| panic!("failed to parse '{stem}': {e}"));
             // All states must have a kind derived from GHA structure.
             for (state_name, state_cfg) in &wf.states {
@@ -979,8 +979,8 @@ mod tests {
         // Parsing any GHA workflow must never populate `StateConfig.checks`.
         // That field was part of the old compatibility layer and is no longer
         // present on the struct.
-        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         // Compile-time proof: accessing wf.states (HashMap<String, StateConfig>)
         // and any StateConfig field is still possible without `checks`.
         for (_, state_cfg) in &wf.states {
@@ -995,8 +995,8 @@ mod tests {
     #[test]
     fn workflow_roundtrip_serializes_without_checks_key() {
         // A parsed workflow serialized back to YAML must not emit a `checks:` key.
-        let yaml = BlueprintWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-default-feature-workflow").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         let serialized = serde_yaml::to_string(&wf).expect("serialization must succeed");
         assert!(
             !serialized.contains("checks:"),
@@ -1010,8 +1010,8 @@ mod tests {
     fn agent_states_with_runs_on_get_github_target() {
         // States that have `runs-on:` in their GHA job definition must parse
         // to ExecutionTarget::GitHub — they are dispatched to GitHub Actions.
-        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
 
         // scan-work-queue uses calypso-agent with runs-on: ubuntu-latest
         let scan = wf
@@ -1030,8 +1030,8 @@ mod tests {
         // States that delegate to a sub-workflow via `uses:` have no `runs-on:`
         // field, so the local Calypso engine routes them — they must parse to
         // ExecutionTarget::Local.
-        let yaml = BlueprintWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-orchestrator-startup").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
 
         // dispatch-planning uses `.github/workflows/calypso-planning.yml`
         // and has no `runs-on:` field.
@@ -1050,8 +1050,8 @@ mod tests {
     fn terminal_states_get_local_target() {
         // Terminal states carry `echo 'Terminal state: ...'` steps with runs-on,
         // so they're still GitHub target. Verify the actual GHA-derived value.
-        let yaml = BlueprintWorkflowLibrary::get("calypso-planning").unwrap();
-        let wf = BlueprintWorkflowLibrary::parse(yaml).unwrap();
+        let yaml = EmbeddedWorkflowLibrary::get("calypso-planning").unwrap();
+        let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
 
         let done = wf
             .states
@@ -1079,8 +1079,8 @@ mod tests {
         // Every state in every embedded workflow must carry an explicit
         // execution_target after parsing. Since the field defaults to Local, this
         // test verifies the struct field is present and accessible on all states.
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            let wf = BlueprintWorkflowLibrary::parse(yaml)
+        for (stem, yaml) in EmbeddedWorkflowLibrary::list() {
+            let wf = EmbeddedWorkflowLibrary::parse(yaml)
                 .unwrap_or_else(|e| panic!("failed to parse '{stem}': {e}"));
             for (state_name, state_cfg) in &wf.states {
                 // Simply accessing the field is the compile-time proof; the

@@ -674,7 +674,7 @@ fn doctor_local_workflow_layout_renders_as_warn_in_report() {
     std::fs::write(calypso_dir.join("legacy.yml"), "name: legacy").unwrap();
 
     let report = collect_doctor_report(&FakeEnvironment::default(), &tmp);
-    let rendered = calypso_cli::doctor::render_doctor_report(&report);
+    let rendered = nightshift_core::doctor::render_doctor_report(&report);
     assert!(
         rendered.contains("[WARN] local-workflow-layout"),
         "expected WARN for local-workflow-layout in rendered output: {rendered}"

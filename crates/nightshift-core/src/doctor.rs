@@ -383,7 +383,7 @@ pub fn collect_doctor_report(
         None
     };
     // Detect legacy .calypso/*.yml workflow files.
-    let legacy_workflow_files = crate::interpreter::detect_legacy_local_workflows(repo_root);
+    let legacy_workflow_files = calypso_workflow_exec::detect_legacy_local_workflows(repo_root);
 
     let repo_name = repo_root
         .file_name()

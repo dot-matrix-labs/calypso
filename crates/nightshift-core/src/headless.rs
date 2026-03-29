@@ -8,16 +8,16 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::app::{gate_status_label, resolve_repo_root};
-use crate::blueprint_workflows::StateKind;
 use crate::doctor::{DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
 use crate::github::{HostGithubEnvironment, collect_github_report};
-use crate::interpreter::{StepOutcome, WorkflowInterpreter};
 use crate::interpreter_scheduler::{SchedulerMode, run_interpreter_scheduler};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
 use crate::state::RepositoryState;
 use crate::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 use crate::template::load_project_template_set;
+use calypso_workflow_exec::{StepOutcome, WorkflowInterpreter};
+use calypso_workflows::StateKind;
 
 /// Configuration resolved from CLI flags when `--headless` is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -283,18 +283,19 @@ fn run_workflow_executor(
     workflow_name: &str,
     shutdown: &crate::signal::ShutdownSignal,
 ) -> i32 {
-    let interp = match WorkflowInterpreter::new() {
-        Ok(i) => i,
-        Err(e) => {
-            logger
-                .entry(LogLevel::Error, "failed to load workflow interpreter")
-                .component(Component::StateMachine)
-                .field("workflow", workflow_name)
-                .field("error", &e)
-                .emit();
-            return 2;
-        }
-    };
+    let interp =
+        match WorkflowInterpreter::from_catalog(&calypso_workflows::WorkflowCatalog::embedded()) {
+            Ok(i) => i,
+            Err(e) => {
+                logger
+                    .entry(LogLevel::Error, "failed to load workflow interpreter")
+                    .component(Component::StateMachine)
+                    .field("workflow", workflow_name)
+                    .field("error", &e)
+                    .emit();
+                return 2;
+            }
+        };
 
     let mut exec = match interp.start(workflow_name) {
         Ok(s) => s,

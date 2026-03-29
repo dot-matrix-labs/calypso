@@ -389,9 +389,12 @@ pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
 pub fn load_template_set_with_state_machine(
     state_machine_path: &Path,
 ) -> Result<TemplateSet, TemplateError> {
-    let state_machine_yaml =
-        fs::read_to_string(state_machine_path).map_err(TemplateError::Io)?;
-    TemplateSet::from_yaml_strings(&state_machine_yaml, DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML)
+    let state_machine_yaml = fs::read_to_string(state_machine_path).map_err(TemplateError::Io)?;
+    TemplateSet::from_yaml_strings(
+        &state_machine_yaml,
+        DEFAULT_AGENTS_YAML,
+        DEFAULT_PROMPTS_YAML,
+    )
 }
 
 pub fn resolve_template_set_for_path(root: &Path) -> Result<TemplateSet, TemplateError> {

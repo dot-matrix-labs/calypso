@@ -16,7 +16,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use calypso_workflows::{StateConfig, StateKind, Workflow, WorkflowCatalog};
+use calypso_workflows::{ExecutionTarget, StateConfig, StateKind, Workflow, WorkflowCatalog};
 
 // ── Entry points ─────────────────────────────────────────────────────────────
 
@@ -476,7 +476,7 @@ impl WorkflowInterpreter {
     }
 }
 
-// ── WorkflowCatalog ──────────────────────────────────────────────────────────
+// ── Legacy workflow detection ─────────────────────────────────────────────────
 
 /// The canonical names of `.calypso/` configuration files that are NOT workflow
 /// definitions.  These are excluded from legacy layout detection so they never
@@ -497,100 +497,6 @@ const NON_WORKFLOW_CALYPSO_FILES: &[&str] = &[
     "pending-event.json",
     "pending-cron.json",
 ];
-
-/// A workflow catalog that loads repository-local workflows strictly from
-/// `.calypso/workflows/`.
-///
-/// # Discovery contract
-///
-/// - Local workflows are loaded from `<repo_root>/.calypso/workflows/*.yml|*.yaml`.
-/// - The root `.calypso/` directory is **never** scanned for workflow files.
-///   Files placed at `.calypso/*.yml` (the legacy layout) are silently ignored by
-///   the runtime.  Use [`detect_legacy_local_workflows`] to surface migration
-///   guidance when a legacy layout is detected.
-/// - Embedded blueprint workflows (from `BlueprintWorkflowLibrary`) are always
-///   available as a fallback when a name is not found in local files.
-pub struct WorkflowCatalog {
-    /// Workflows loaded from `.calypso/workflows/`.
-    pub local: BTreeMap<String, BlueprintWorkflow>,
-    /// The embedded registry — provides all blueprint workflows.
-    pub embedded: WorkflowRegistry,
-}
-
-impl WorkflowCatalog {
-    /// Load local workflows from `<repo_root>/.calypso/workflows/` and combine
-    /// them with the embedded blueprint registry.
-    ///
-    /// YAML files in `.calypso/` root are **not** loaded — only
-    /// `.calypso/workflows/*.yml|*.yaml` is considered.
-    pub fn load(repo_root: &Path) -> Result<Self, String> {
-        let embedded = WorkflowRegistry::from_embedded()?;
-        let workflows_dir = repo_root.join(".calypso").join("workflows");
-        let mut local = BTreeMap::new();
-
-        if let Ok(entries) = std::fs::read_dir(&workflows_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let is_yaml = path
-                    .extension()
-                    .and_then(|e| e.to_str())
-                    .map(|e| e == "yml" || e == "yaml")
-                    .unwrap_or(false);
-                if !is_yaml {
-                    continue;
-                }
-                let yaml = match std::fs::read_to_string(&path) {
-                    Ok(y) => y,
-                    Err(_) => continue,
-                };
-                let wf = match BlueprintWorkflowLibrary::parse(&yaml) {
-                    Ok(w) => w,
-                    Err(_) => continue,
-                };
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or_default()
-                    .to_string();
-                let name = wf.name.clone().unwrap_or(stem);
-                local.insert(name, wf);
-            }
-        }
-
-        Ok(Self { local, embedded })
-    }
-
-    /// Look up a workflow by name, preferring local definitions over embedded ones.
-    pub fn get(&self, name: &str) -> Option<&BlueprintWorkflow> {
-        self.local.get(name).or_else(|| self.embedded.get(name))
-    }
-
-    /// Return all workflow names visible through this catalog.
-    ///
-    /// Local workflow names shadow embedded ones of the same name.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        let local_names: BTreeSet<&str> = self.local.keys().map(|s| s.as_str()).collect();
-        let embedded_names = self
-            .embedded
-            .names()
-            .filter(move |n| !local_names.contains(*n));
-        self.local.keys().map(|s| s.as_str()).chain(embedded_names)
-    }
-
-    /// Return the [`ExecutionTarget`] for the named state within the named workflow.
-    ///
-    /// Prefers the local workflow definition over the embedded one, so a
-    /// repository-local copy of a workflow and the embedded blueprint copy yield
-    /// the same routing decision when they carry identical `runs-on:` metadata.
-    ///
-    /// Returns [`ExecutionTarget::Local`] when the workflow or state is not found.
-    pub fn execution_target_for(&self, workflow: &str, state: &str) -> ExecutionTarget {
-        self.get(workflow)
-            .and_then(|wf| wf.states.get(state))
-            .map(|s| s.execution_target.clone())
-            .unwrap_or_default()
-    }
-}
 
 /// Detect YAML files placed at `.calypso/*.yml|*.yaml` that look like legacy
 /// local workflow definitions.
@@ -962,7 +868,7 @@ mod tests {
         assert_eq!(exec.call_stack.len(), 2); // orchestrator + feature-workflow
     }
 
-    // ── WorkflowCatalog ──────────────────────────────────────────────────────
+    // ── detect_legacy_local_workflows ────────────────────────────────────────
 
     fn unique_temp_dir(label: &str) -> std::path::PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -972,89 +878,6 @@ mod tests {
             .unwrap_or(0);
         std::env::temp_dir().join(format!("calypso-catalog-{label}-{nanos}"))
     }
-
-    #[test]
-    fn catalog_load_with_no_local_dir_falls_back_to_embedded() {
-        let tmp = unique_temp_dir("no-local");
-        // No .calypso/workflows/ directory — catalog should still return embedded workflows.
-        let catalog = WorkflowCatalog::load(&tmp).unwrap();
-        assert!(
-            catalog.get("calypso-orchestrator-startup").is_some(),
-            "expected embedded fallback for calypso-orchestrator-startup"
-        );
-        assert!(catalog.local.is_empty(), "expected no local workflows");
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn catalog_load_reads_local_yml_from_workflows_subdir() {
-        let tmp = unique_temp_dir("local-yml");
-        let workflows_dir = tmp.join(".calypso").join("workflows");
-        std::fs::create_dir_all(&workflows_dir).unwrap();
-
-        // A minimal GHA-format local workflow.
-        let yaml = "name: my-local-wf\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        uses: ./.github/actions/calypso-agent\n        with:\n          role: engineer\n          prompt: start work\n";
-        std::fs::write(workflows_dir.join("my-local-wf.yml"), yaml).unwrap();
-
-        let catalog = WorkflowCatalog::load(&tmp).unwrap();
-        assert!(
-            catalog.local.contains_key("my-local-wf"),
-            "expected local workflow to be loaded"
-        );
-        assert!(
-            catalog.get("my-local-wf").is_some(),
-            "expected get() to return local workflow"
-        );
-        // Embedded workflows still accessible.
-        assert!(
-            catalog.get("calypso-planning").is_some(),
-            "expected embedded fallback still accessible"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn catalog_load_ignores_non_yaml_files_in_workflows_subdir() {
-        let tmp = unique_temp_dir("non-yaml");
-        let workflows_dir = tmp.join(".calypso").join("workflows");
-        std::fs::create_dir_all(&workflows_dir).unwrap();
-
-        std::fs::write(workflows_dir.join("readme.txt"), "not yaml").unwrap();
-        std::fs::write(workflows_dir.join("notes.md"), "## notes").unwrap();
-
-        let catalog = WorkflowCatalog::load(&tmp).unwrap();
-        assert!(
-            catalog.local.is_empty(),
-            "expected non-YAML files to be ignored"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn catalog_load_does_not_scan_calypso_root_for_workflows() {
-        // Regression: YAML files placed directly under .calypso/ (legacy layout)
-        // must never be picked up as workflow definitions.
-        let tmp = unique_temp_dir("legacy-root");
-        let calypso_dir = tmp.join(".calypso");
-        std::fs::create_dir_all(&calypso_dir).unwrap();
-
-        // Write a workflow-like YAML directly in .calypso/ root (legacy layout).
-        let yaml = "name: legacy-workflow\non:\n  workflow_dispatch:\njobs:\n  start:\n    runs-on: ubuntu-latest\n    steps:\n      - id: run\n        run: echo start\n        shell: bash\n";
-        std::fs::write(calypso_dir.join("legacy-workflow.yml"), yaml).unwrap();
-
-        let catalog = WorkflowCatalog::load(&tmp).unwrap();
-        assert!(
-            !catalog.local.contains_key("legacy-workflow"),
-            "legacy .calypso/*.yml must not be loaded as a workflow"
-        );
-        assert!(
-            catalog.get("legacy-workflow").is_none(),
-            "legacy .calypso/*.yml must not be reachable via get()"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    // ── detect_legacy_local_workflows ────────────────────────────────────────
 
     #[test]
     fn detect_legacy_returns_empty_when_no_calypso_dir() {
@@ -1134,7 +957,7 @@ mod tests {
     #[test]
     fn registry_execution_target_for_github_state() {
         // Agent states with runs-on in the GHA YAML must resolve to GitHub target.
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         let wf = "calypso-orchestrator-startup";
         let target = registry.execution_target_for(wf, "scan-work-queue");
         assert_eq!(
@@ -1147,7 +970,7 @@ mod tests {
     #[test]
     fn registry_execution_target_for_local_state() {
         // Workflow-delegation states without runs-on must resolve to Local target.
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         let wf = "calypso-orchestrator-startup";
         let target = registry.execution_target_for(wf, "dispatch-planning");
         assert_eq!(
@@ -1159,7 +982,7 @@ mod tests {
 
     #[test]
     fn registry_execution_target_for_unknown_workflow_defaults_local() {
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         let target = registry.execution_target_for("does-not-exist", "any-state");
         assert_eq!(
             target,
@@ -1170,7 +993,7 @@ mod tests {
 
     #[test]
     fn registry_execution_target_for_unknown_state_defaults_local() {
-        let registry = WorkflowRegistry::from_embedded().unwrap();
+        let registry = embedded_registry();
         let wf = "calypso-orchestrator-startup";
         let target = registry.execution_target_for(wf, "no-such-state");
         assert_eq!(
@@ -1178,63 +1001,5 @@ mod tests {
             ExecutionTarget::Local,
             "unknown state must default to Local"
         );
-    }
-
-    #[test]
-    fn embedded_and_local_copy_yield_same_execution_target() {
-        // The same workflow YAML loaded as a local file via WorkflowCatalog must
-        // produce the same execution_target for a given state as the embedded copy.
-        // This proves that routing decisions are source-independent.
-        let tmp = unique_temp_dir("exec-target-same");
-        let workflows_dir = tmp.join(".calypso").join("workflows");
-        std::fs::create_dir_all(&workflows_dir).unwrap();
-
-        // Write the embedded orchestrator YAML as a local file.
-        let wf_name = "calypso-orchestrator-startup";
-        let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(wf_name)
-            .expect("embedded orchestrator must exist");
-        let dest = workflows_dir.join("calypso-orchestrator-startup.yaml");
-        std::fs::write(dest, yaml).unwrap();
-
-        let catalog = WorkflowCatalog::load(&tmp).expect("catalog must load");
-        let registry = WorkflowRegistry::from_embedded().unwrap();
-
-        // A GitHub-target state: same result from both catalog and registry.
-        let cat_gh = catalog.execution_target_for(wf_name, "scan-work-queue");
-        let reg_gh = registry.execution_target_for(wf_name, "scan-work-queue");
-        assert_eq!(
-            cat_gh,
-            ExecutionTarget::GitHub,
-            "local copy: scan-work-queue must be GitHub"
-        );
-        // Same target from embedded registry — source-independent routing.
-        assert_eq!(cat_gh, reg_gh);
-
-        // A Local-target state: same result from both catalog and registry.
-        let cat_lo = catalog.execution_target_for(wf_name, "dispatch-planning");
-        let reg_lo = registry.execution_target_for(wf_name, "dispatch-planning");
-        assert_eq!(
-            cat_lo,
-            ExecutionTarget::Local,
-            "local copy: dispatch-planning must be Local"
-        );
-        // Same target from embedded registry — source-independent routing.
-        assert_eq!(cat_lo, reg_lo);
-
-        let _ = std::fs::remove_dir_all(&tmp);
-    }
-
-    #[test]
-    fn catalog_execution_target_for_unknown_defaults_local() {
-        let tmp = unique_temp_dir("catalog-exec-default");
-        std::fs::create_dir_all(tmp.join(".calypso").join("workflows")).unwrap();
-        let catalog = WorkflowCatalog::load(&tmp).unwrap();
-        let target = catalog.execution_target_for("no-such-workflow", "no-such-state");
-        assert_eq!(
-            target,
-            ExecutionTarget::Local,
-            "unknown workflow/state in catalog must default to Local"
-        );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

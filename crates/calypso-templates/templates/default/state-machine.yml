@@ -320,9 +320,9 @@ gate_groups:
   - id: implementation
     label: Implementation
     gates:
-      - id: blueprint-policy-clean
+      - id: process-policy-clean
         label: Blueprint policy clean
-        task: blueprint-review
+        task: process-review
         pr_checklist_label: Blueprint review completed — no drift detected
         applies_to:
           - implementation
