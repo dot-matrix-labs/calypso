@@ -538,7 +538,6 @@ fn scan_gha_directory(repo_root: &Path) -> BTreeMap<String, GhaWorkflow> {
 }
 
 /// Find the closest matching GHA filename using simple substring matching.
-#[allow(dead_code)]
 fn suggest_filename(target: &str, available: &BTreeMap<String, GhaWorkflow>) -> Option<String> {
     // Extract the basename from a path like `.github/workflows/foo.yml`
     let target_base = target
@@ -566,7 +565,6 @@ fn suggest_filename(target: &str, available: &BTreeMap<String, GhaWorkflow>) -> 
 }
 
 /// Count the number of characters in common (simple heuristic).
-#[allow(dead_code)]
 fn common_char_count(a: &str, b: &str) -> usize {
     let a_chars: BTreeSet<char> = a.chars().collect();
     let b_chars: BTreeSet<char> = b.chars().collect();
@@ -588,91 +586,6 @@ fn audit_blueprint_workflow(
     // Orphan/dangling check detection (checks map is empty in GHA format,
     // but retained for backward compatibility with test workflows).
     audit_check_references(stem, wf, findings);
-}
-
-/// Validate a single workflow file reference (existence + name match).
-///
-/// `missing_severity` controls whether a missing file is reported as an error
-/// or a warning — use `Warning` for entries under `proposed_required` or other
-/// not-yet-created workflows.
-#[allow(clippy::too_many_arguments)]
-#[allow(dead_code)]
-fn validate_workflow_reference(
-    source: &str,
-    context: &str,
-    wf_path: &str,
-    declared_name: Option<&str>,
-    missing_severity: AuditSeverity,
-    repo_root: &Path,
-    available_gha_files: &BTreeMap<String, GhaWorkflow>,
-    findings: &mut Vec<AuditFinding>,
-) {
-    let full_path = repo_root.join(wf_path);
-
-    // a) Check file existence
-    if !full_path.is_file() {
-        let suggestion = suggest_filename(wf_path, available_gha_files);
-        findings.push(AuditFinding {
-            severity: missing_severity,
-            source: source.to_string(),
-            message: format!("{context}: workflow file not found: {wf_path}"),
-            suggestion: suggestion.map(|s| format!("did you mean .github/workflows/{s}?")),
-        });
-        return;
-    }
-
-    // b) Workflow name validation
-    if let Some(declared) = declared_name {
-        let filename = wf_path.rsplit('/').next().unwrap_or(wf_path);
-        if let Some(gha) = available_gha_files.get(filename)
-            && let Some(actual_name) = &gha.name
-            && !names_match(declared, actual_name)
-        {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Warning,
-                source: source.to_string(),
-                message: format!(
-                    "{context}: workflow_name mismatch — declared '{declared}' but GHA file has '{actual_name}'"
-                ),
-                suggestion: Some(format!("update workflow_name to '{actual_name}'")),
-            });
-        }
-    }
-}
-
-/// Validate job keys referenced by `check_names` exist in the target GHA file.
-#[allow(dead_code)]
-fn validate_job_keys(
-    source: &str,
-    context: &str,
-    wf_path: &str,
-    job_keys: &[String],
-    available_gha_files: &BTreeMap<String, GhaWorkflow>,
-    findings: &mut Vec<AuditFinding>,
-) {
-    let filename = wf_path.rsplit('/').next().unwrap_or(wf_path);
-    let gha = match available_gha_files.get(filename) {
-        Some(gha) => gha,
-        None => return, // File missing is already reported by reference integrity check
-    };
-
-    for key in job_keys {
-        if !gha.jobs.contains(key) {
-            findings.push(AuditFinding {
-                severity: AuditSeverity::Error,
-                source: source.to_string(),
-                message: format!(
-                    "{context}: job key '{key}' not found in {wf_path} (available: {})",
-                    if gha.jobs.is_empty() {
-                        "none".to_string()
-                    } else {
-                        gha.jobs.join(", ")
-                    }
-                ),
-                suggestion: None,
-            });
-        }
-    }
 }
 
 /// Audit orphan and dangling check references within a workflow definition.
@@ -707,12 +620,6 @@ fn audit_template_policy_gates(
             }
         }
     }
-}
-
-/// Case-insensitive name comparison.
-#[allow(dead_code)]
-fn names_match(a: &str, b: &str) -> bool {
-    a.eq_ignore_ascii_case(b)
 }
 
 /// Render the audit results as a human-readable string block.
@@ -848,145 +755,6 @@ mod tests {
         );
 
         std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn audit_reports_missing_workflow_file_with_suggestion() {
-        let repo_root = unique_temp_dir("missing-wf");
-        // Write a file with a similar name so suggestion can fire
-        write_gha_file(&repo_root, "rust-quality.yml", "Rust Quality", &["check"]);
-
-        let available = scan_gha_directory(&repo_root);
-        let mut findings = Vec::new();
-
-        validate_workflow_reference(
-            "test-source",
-            "check 'ci-gate'",
-            ".github/workflows/quality-gate.yml",
-            None,
-            AuditSeverity::Error,
-            &repo_root,
-            &available,
-            &mut findings,
-        );
-
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].severity, AuditSeverity::Error);
-        assert!(findings[0].message.contains("not found"));
-        // Suggestion may or may not fire depending on substring match
-    }
-
-    #[test]
-    fn audit_reports_workflow_name_mismatch() {
-        let repo_root = unique_temp_dir("name-mismatch");
-        write_gha_file(&repo_root, "quality-gate.yml", "Quality gate", &["quality"]);
-
-        let available = scan_gha_directory(&repo_root);
-        let mut findings = Vec::new();
-
-        // "Quality Gate" vs actual "Quality gate" — case-insensitive comparison should pass
-        validate_workflow_reference(
-            "test-source",
-            "check 'ci-gate'",
-            ".github/workflows/quality-gate.yml",
-            Some("Quality Gate"),
-            AuditSeverity::Error,
-            &repo_root,
-            &available,
-            &mut findings,
-        );
-
-        assert!(
-            findings.is_empty(),
-            "case-insensitive match should pass: {findings:?}"
-        );
-
-        // Now test actual mismatch
-        validate_workflow_reference(
-            "test-source",
-            "check 'ci-gate'",
-            ".github/workflows/quality-gate.yml",
-            Some("Wrong Name"),
-            AuditSeverity::Error,
-            &repo_root,
-            &available,
-            &mut findings,
-        );
-
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].severity, AuditSeverity::Warning);
-        assert!(findings[0].message.contains("mismatch"));
-        assert!(
-            findings[0]
-                .suggestion
-                .as_ref()
-                .unwrap()
-                .contains("Quality gate")
-        );
-
-        std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn audit_reports_invalid_job_key() {
-        let repo_root = unique_temp_dir("invalid-job");
-        write_gha_file(&repo_root, "release.yml", "Release", &["build", "deploy"]);
-
-        let available = scan_gha_directory(&repo_root);
-        let mut findings = Vec::new();
-
-        validate_job_keys(
-            "test-source",
-            "check 'release-lint'",
-            ".github/workflows/release.yml",
-            &["nonexistent-job".to_string()],
-            &available,
-            &mut findings,
-        );
-
-        assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].severity, AuditSeverity::Error);
-        assert!(findings[0].message.contains("nonexistent-job"));
-        assert!(findings[0].message.contains("build, deploy"));
-
-        std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn audit_reports_valid_job_key_no_finding() {
-        let repo_root = unique_temp_dir("valid-job");
-        write_gha_file(&repo_root, "release.yml", "Release", &["build", "deploy"]);
-
-        let available = scan_gha_directory(&repo_root);
-        let mut findings = Vec::new();
-
-        validate_job_keys(
-            "test-source",
-            "check 'release-build'",
-            ".github/workflows/release.yml",
-            &["build".to_string()],
-            &available,
-            &mut findings,
-        );
-
-        assert!(findings.is_empty());
-
-        std::fs::remove_dir_all(repo_root).ok();
-    }
-
-    #[test]
-    fn suggest_filename_finds_substring_match() {
-        let mut available = BTreeMap::new();
-        available.insert(
-            "rust-quality.yml".to_string(),
-            GhaWorkflow {
-                name: Some("Rust Quality".to_string()),
-                jobs: vec![],
-            },
-        );
-
-        let result = suggest_filename(".github/workflows/quality.yml", &available);
-        assert_eq!(result.as_deref(), Some("rust-quality.yml"));
     }
 
     #[test]
