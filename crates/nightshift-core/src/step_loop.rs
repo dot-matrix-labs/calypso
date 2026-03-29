@@ -116,12 +116,13 @@ where
 mod tests {
     use super::*;
     use crate::driver::{DriverMode, SessionExecutor, StateMachineDriver};
+    use crate::claude::ClarificationRequest;
     use crate::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
     use crate::state::{
         FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
     };
     use crate::testing::{MockBackend, make_prompt};
-    use crossterm::event::{Event, KeyCode, KeyEvent};
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use std::path::PathBuf;
     use std::sync::Arc;
 
@@ -158,6 +159,15 @@ mod tests {
                     summary: "phony nok".to_string(),
                     reason: reason.to_string(),
                 },
+            })
+        }
+
+        fn clarification(question: &str) -> Arc<Self> {
+            Arc::new(Self {
+                outcome: ExecutionOutcome::ClarificationRequired(ClarificationRequest {
+                    question: question.to_string(),
+                    session_id: "phony-session".to_string(),
+                }),
             })
         }
     }
@@ -392,5 +402,56 @@ mod tests {
             output.contains("\x1b[1;"),
             "expected DECSTBM scroll-region escape after step; got: {output:?}"
         );
+    }
+
+    /// Confirmation::Yes + PhonyExecutor::clarification returns ClarificationRequired.
+    #[test]
+    fn clarification_step_returns_clarification_required_outcome() {
+        let dir = temp_dir("clarification");
+        let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
+
+        let executor = PhonyExecutor::clarification("what should I do?");
+        let driver = make_driver(state_path.clone(), executor);
+
+        let mut prompt = make_prompt(80, 24, vec![y_key()]);
+        let outcome = run_step_loop(&mut prompt, &driver, &state_path);
+        assert_eq!(
+            outcome,
+            StepLoopOutcome::ClarificationRequired("what should I do?".to_string())
+        );
+    }
+
+    /// Ctrl-C event returns UserCancelled.
+    #[test]
+    fn ctrl_c_returns_user_cancelled() {
+        let dir = temp_dir("ctrl-c");
+        let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
+
+        struct PanicExecutor;
+        impl SessionExecutor for PanicExecutor {
+            fn run(
+                &self,
+                _: &std::path::Path,
+                _: &str,
+                _: &ExecutionConfig,
+            ) -> Result<ExecutionOutcome, ExecutionError> {
+                panic!("executor must not be called on ctrl-c");
+            }
+        }
+
+        let ctrl_c = Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        let template = calypso_templates::TemplateSet::load_from_directory(&phony_template_dir())
+            .expect("phony template loads");
+        let driver = StateMachineDriver {
+            mode: DriverMode::Step,
+            state_path: state_path.clone(),
+            template,
+            config: ExecutionConfig::default(),
+            executor: Some(Arc::new(PanicExecutor)),
+        };
+
+        let mut prompt = make_prompt(80, 24, vec![ctrl_c]);
+        let outcome = run_step_loop(&mut prompt, &driver, &state_path);
+        assert_eq!(outcome, StepLoopOutcome::UserCancelled);
     }
 }
