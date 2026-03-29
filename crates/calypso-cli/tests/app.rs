@@ -134,7 +134,10 @@ fn resolve_repo_root_and_branch_report_git_context() {
     std::fs::create_dir_all(&nested_dir).expect("nested dir should be created");
     let canonical_repo_root = std::fs::canonicalize(&repo_root).expect("repo root should resolve");
 
-    assert_eq!(resolve_repo_root(&nested_dir).ok(), Some(canonical_repo_root));
+    assert_eq!(
+        resolve_repo_root(&nested_dir).ok(),
+        Some(canonical_repo_root)
+    );
     assert_eq!(
         resolve_current_branch(&repo_root).ok(),
         Some("feature/test-app-runtime".to_string())

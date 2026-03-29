@@ -60,8 +60,7 @@ pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptRes
         .as_ref()
         .ok_or_else(|| CalypsoError::state_load(format!("no fix available for '{check_id}'")))?;
 
-    let output = apply_fix(fix, &repo_root)
-        .map_err(|e| CalypsoError::state_load(e))?;
+    let output = apply_fix(fix, &repo_root).map_err(CalypsoError::state_load)?;
     let is_manual = !fix.is_automatic();
 
     // Re-run the doctor check to validate the fix worked.

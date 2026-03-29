@@ -13,8 +13,8 @@ fn load_key_store(cwd: &Path) -> Result<KeyStore, CalypsoError> {
     }
     let json = std::fs::read_to_string(&path)
         .map_err(|e| CalypsoError::state_load(format!("cannot read {}: {e}", path.display())))?;
-    let snapshot: KeyStoreSnapshot =
-        serde_json::from_str(&json).map_err(|e| CalypsoError::state_load(format!("key store JSON invalid: {e}")))?;
+    let snapshot: KeyStoreSnapshot = serde_json::from_str(&json)
+        .map_err(|e| CalypsoError::state_load(format!("key store JSON invalid: {e}")))?;
     Ok(snapshot.into_store())
 }
 
@@ -25,10 +25,12 @@ fn save_key_store(store: &KeyStore, cwd: &Path) -> Result<(), CalypsoError> {
     let path = calypso_dir.join(KEY_STORE_FILE);
     let tmp = path.with_extension("tmp");
     let snapshot = KeyStoreSnapshot::from(store);
-    let json =
-        serde_json::to_string_pretty(&snapshot).map_err(|e| CalypsoError::state_load(format!("serialization error: {e}")))?;
-    std::fs::write(&tmp, json).map_err(|e| CalypsoError::state_load(format!("write error: {e}")))?;
-    std::fs::rename(&tmp, &path).map_err(|e| CalypsoError::state_load(format!("rename error: {e}")))?;
+    let json = serde_json::to_string_pretty(&snapshot)
+        .map_err(|e| CalypsoError::state_load(format!("serialization error: {e}")))?;
+    std::fs::write(&tmp, json)
+        .map_err(|e| CalypsoError::state_load(format!("write error: {e}")))?;
+    std::fs::rename(&tmp, &path)
+        .map_err(|e| CalypsoError::state_load(format!("rename error: {e}")))?;
     Ok(())
 }
 
@@ -57,7 +59,9 @@ pub fn run_keys_rotate(cwd: &Path, name: &str) -> Result<String, CalypsoError> {
     let key_name = KeyName::new(name).map_err(|e| CalypsoError::state_load(e.to_string()))?;
     let mut store = load_key_store(cwd)?;
     let now = now_iso8601();
-    store.rotate(&key_name, &now).map_err(|e| CalypsoError::state_load(e.to_string()))?;
+    store
+        .rotate(&key_name, &now)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     save_key_store(&store, cwd)?;
     Ok(format!("Key '{name}' rotated successfully."))
 }
@@ -67,7 +71,9 @@ pub fn run_keys_revoke(cwd: &Path, name: &str) -> Result<String, CalypsoError> {
     let key_name = KeyName::new(name).map_err(|e| CalypsoError::state_load(e.to_string()))?;
     let mut store = load_key_store(cwd)?;
     let now = now_iso8601();
-    store.revoke(&key_name, &now).map_err(|e| CalypsoError::state_load(e.to_string()))?;
+    store
+        .revoke(&key_name, &now)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     save_key_store(&store, cwd)?;
     Ok(format!("Key '{name}' revoked successfully."))
 }

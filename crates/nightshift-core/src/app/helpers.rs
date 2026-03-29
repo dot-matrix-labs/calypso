@@ -12,7 +12,11 @@ pub enum CommandOutput {
     Failure(String),
 }
 
-pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOutput, CalypsoError> {
+pub fn run_command(
+    cwd: &Path,
+    program: &str,
+    args: &[&str],
+) -> Result<CommandOutput, CalypsoError> {
     let output = Command::new(program)
         .args(args)
         .current_dir(cwd)
@@ -21,7 +25,9 @@ pub fn run_command(cwd: &Path, program: &str, args: &[&str]) -> Result<CommandOu
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE")
         .output()
-        .map_err(|error| CalypsoError::subprocess_spawn(format!("failed to spawn `{program}`: {error}")))?;
+        .map_err(|error| {
+            CalypsoError::subprocess_spawn(format!("failed to spawn `{program}`: {error}"))
+        })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -62,7 +68,9 @@ pub fn resolve_current_branch(repo_root: &Path) -> Result<String, CalypsoError> 
     }
 }
 
-pub fn resolve_current_pull_request(repo_root: &Path) -> Result<Option<PullRequestRef>, CalypsoError> {
+pub fn resolve_current_pull_request(
+    repo_root: &Path,
+) -> Result<Option<PullRequestRef>, CalypsoError> {
     resolve_current_pull_request_with_program(repo_root, "gh")
 }
 
@@ -100,8 +108,9 @@ fn parse_pull_request_list_json(json: &str) -> Result<Option<PullRequestRef>, Ca
         url: String,
     }
 
-    let prs: Vec<RestPr> = serde_json::from_str(json)
-        .map_err(|_| CalypsoError::malformed_provider_output("gh returned malformed pull request JSON"))?;
+    let prs: Vec<RestPr> = serde_json::from_str(json).map_err(|_| {
+        CalypsoError::malformed_provider_output("gh returned malformed pull request JSON")
+    })?;
 
     Ok(prs.into_iter().next().map(|pr| PullRequestRef {
         number: pr.number,

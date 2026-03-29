@@ -244,11 +244,7 @@ impl CalypsoError {
     }
 
     pub fn state_load(message: impl Into<String>) -> Self {
-        Self::new(
-            codes::STATE_LOAD,
-            message,
-            Recoverability::Unrecoverable,
-        )
+        Self::new(codes::STATE_LOAD, message, Recoverability::Unrecoverable)
     }
 
     pub fn workflow_not_found(message: impl Into<String>) -> Self {

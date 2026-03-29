@@ -318,7 +318,9 @@ fn state_status_json_missing_state_file_returns_error() {
     );
     let msg = result.unwrap_err();
     assert!(
-        msg.message.contains("state I/O error") || msg.message.contains("os error") || !msg.message.is_empty(),
+        msg.message.contains("state I/O error")
+            || msg.message.contains("os error")
+            || !msg.message.is_empty(),
         "error message should be non-empty: {msg}"
     );
 }
