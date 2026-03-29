@@ -2,13 +2,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use calypso_templates::{TemplateSet, load_embedded_template_set};
 use nightshift_core::state::{
     AgentSession, AgentSessionStatus, BuiltinEvidence, EvidenceStatus, FeatureState, FeatureType,
     Gate, GateEvaluationError, GateGroup, GateGroupStatus, GateInitializationError, GateStatus,
     PullRequestRef, RepositoryIdentity, RepositoryState, SchedulingMeta, SessionOutput,
     SessionOutputStream, StateError, TransitionError, TransitionFacts, WorkflowState,
 };
-use calypso_templates::{TemplateSet, load_embedded_template_set};
 
 fn sample_state() -> RepositoryState {
     RepositoryState {

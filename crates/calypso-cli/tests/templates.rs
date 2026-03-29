@@ -1228,10 +1228,7 @@ fn state_definition_simple_parses_as_string() {
     assert_eq!(w.states.len(), 2);
     assert_eq!(w.states[0].name(), "new");
     assert_eq!(w.states[1].name(), "prd-review");
-    assert_eq!(
-        w.states[0].step_type(),
-        calypso_templates::StepType::Agent
-    );
+    assert_eq!(w.states[0].step_type(), calypso_templates::StepType::Agent);
 }
 
 #[test]
@@ -1258,10 +1255,7 @@ fn state_definition_detailed_defaults_step_type_to_agent() {
         states: Vec<StateDefinition>,
     }
     let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
-    assert_eq!(
-        w.states[0].step_type(),
-        calypso_templates::StepType::Agent
-    );
+    assert_eq!(w.states[0].step_type(), calypso_templates::StepType::Agent);
 }
 
 #[test]
@@ -1274,10 +1268,7 @@ fn state_definition_mixed_simple_and_detailed_parse_together() {
     let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
     assert_eq!(w.states.len(), 3);
     assert_eq!(w.states[0].name(), "new");
-    assert_eq!(
-        w.states[0].step_type(),
-        calypso_templates::StepType::Agent
-    );
+    assert_eq!(w.states[0].step_type(), calypso_templates::StepType::Agent);
     assert_eq!(w.states[1].name(), "setup");
     assert_eq!(
         w.states[1].step_type(),
