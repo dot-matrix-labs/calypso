@@ -10,7 +10,7 @@
 //!
 //! When [`SchedulerMode::Daemon`] is active the scheduler:
 //!
-//! 1. Loads the embedded workflow registry.
+//! 1. Loads the effective workflow registry for the repository root.
 //! 2. Scans all entry points and classifies them.
 //! 3. For each [`EntryPoint::CronScheduled`] entry computes the next fire time
 //!    via [`next_fire_in`] and waits (polling the shutdown signal every second).
@@ -26,11 +26,13 @@
 //! contexts and CI environments where blocking is not acceptable.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::time::Duration;
 
-use crate::interpreter::{EntryPoint, WorkflowInterpreter, WorkflowPosition, next_fire_in};
 use crate::signal::ShutdownSignal;
 use crate::telemetry::{Component, LogEvent, LogLevel, Logger};
+use calypso_workflow_exec::{EntryPoint, WorkflowInterpreter, WorkflowPosition, next_fire_in};
+use calypso_workflows::WorkflowCatalog;
 
 // ── Scheduler mode ────────────────────────────────────────────────────────────
 
@@ -80,12 +82,14 @@ pub enum SchedulerOutcome {
 /// - `1`: interrupted by shutdown signal.
 /// - `2`: load or configuration error.
 pub fn run_interpreter_scheduler(
+    repo_root: &Path,
     mode: SchedulerMode,
     shutdown: &ShutdownSignal,
     logger: &Logger,
 ) -> SchedulerOutcome {
     // Load the interpreter.
-    let interp = match WorkflowInterpreter::new() {
+    let catalog = WorkflowCatalog::load(repo_root);
+    let interp = match WorkflowInterpreter::from_catalog(&catalog) {
         Ok(i) => i,
         Err(e) => {
             logger
@@ -354,7 +358,12 @@ pub fn initial_position(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use calypso_workflows::WorkflowCatalog;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -389,9 +398,30 @@ mod tests {
     use crate::signal::install_signal_handlers;
     use crate::telemetry::{LogFormat, LogLevel};
 
+    static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
+
     fn make_logger(writer: CaptureWriter) -> Logger {
         Logger::_with_level_and_writer(LogLevel::Debug, Box::new(writer))
             .with_format(LogFormat::Json)
+    }
+
+    fn temp_repo_dir(prefix: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        let counter = TEMP_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "{prefix}-{}-{unique}-{counter}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&path).expect("temp repo dir should be created");
+        path
+    }
+
+    fn embedded_interpreter() -> WorkflowInterpreter {
+        WorkflowInterpreter::from_catalog(&WorkflowCatalog::embedded())
+            .expect("embedded workflow catalog should load")
     }
 
     // ── Single-pass mode ─────────────────────────────────────────────────────
@@ -402,7 +432,12 @@ mod tests {
         let logger = make_logger(writer.clone());
         let shutdown = install_signal_handlers();
 
-        let outcome = run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, &logger);
+        let outcome = run_interpreter_scheduler(
+            &std::env::temp_dir(),
+            SchedulerMode::SinglePass,
+            &shutdown,
+            &logger,
+        );
 
         assert!(
             matches!(outcome, SchedulerOutcome::Discovered { entry_point_count } if entry_point_count > 0),
@@ -416,7 +451,12 @@ mod tests {
         let logger = make_logger(writer.clone());
         let shutdown = install_signal_handlers();
 
-        run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, &logger);
+        run_interpreter_scheduler(
+            &std::env::temp_dir(),
+            SchedulerMode::SinglePass,
+            &shutdown,
+            &logger,
+        );
 
         let output = writer.contents();
         // Orchestrator is cron-scheduled — should appear in output
@@ -437,7 +477,12 @@ mod tests {
         let logger = make_logger(writer.clone());
         let shutdown = install_signal_handlers();
 
-        run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, &logger);
+        run_interpreter_scheduler(
+            &std::env::temp_dir(),
+            SchedulerMode::SinglePass,
+            &shutdown,
+            &logger,
+        );
 
         let output = writer.contents();
         assert!(
@@ -446,11 +491,47 @@ mod tests {
         );
     }
 
+    #[test]
+    fn single_pass_uses_repo_local_workflow_catalog() {
+        let repo_root = temp_repo_dir("calypso-scheduler-local-catalog");
+        let workflows_dir = repo_root.join(".calypso").join("workflows");
+        fs::create_dir_all(&workflows_dir).expect("workflow dir should be created");
+        fs::write(
+            workflows_dir.join("local-cron.yaml"),
+            "name: local-cron\non:\n  schedule:\n    - cron: '*/5 * * * *'\njobs:\n  run:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo local\n",
+        )
+        .expect("local workflow should write");
+
+        let writer = CaptureWriter::new();
+        let logger = make_logger(writer.clone());
+        let shutdown = install_signal_handlers();
+
+        let outcome =
+            run_interpreter_scheduler(&repo_root, SchedulerMode::SinglePass, &shutdown, &logger);
+
+        assert!(
+            matches!(outcome, SchedulerOutcome::Discovered { entry_point_count } if entry_point_count == 1),
+            "expected exactly one local entry point, got: {outcome:?}"
+        );
+
+        let output = writer.contents();
+        assert!(
+            output.contains("local-cron"),
+            "expected local workflow in output: {output}"
+        );
+        assert!(
+            !output.contains("calypso-orchestrator-startup"),
+            "did not expect embedded workflow in local-only output: {output}"
+        );
+
+        fs::remove_dir_all(repo_root).expect("temp repo dir should be removed");
+    }
+
     // ── Initial position ─────────────────────────────────────────────────────
 
     #[test]
     fn initial_position_returns_correct_state() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let pos = initial_position(&interp, "calypso-orchestrator-startup");
         assert!(pos.is_some());
         let pos = pos.unwrap();
@@ -460,7 +541,7 @@ mod tests {
 
     #[test]
     fn initial_position_returns_none_for_unknown_workflow() {
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let pos = initial_position(&interp, "does-not-exist");
         assert!(pos.is_none());
     }
@@ -471,7 +552,7 @@ mod tests {
     fn log_entry_points_includes_cron_event_user_auto_kinds() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
-        let interp = WorkflowInterpreter::new().unwrap();
+        let interp = embedded_interpreter();
         let entries = interp.entry_points();
 
         log_entry_points(&logger, &entries);
@@ -506,7 +587,12 @@ mod tests {
         let shutdown = install_signal_handlers();
 
         // Use SinglePass so the test doesn't block
-        let outcome = run_interpreter_scheduler(SchedulerMode::SinglePass, &shutdown, &logger);
+        let outcome = run_interpreter_scheduler(
+            &std::env::temp_dir(),
+            SchedulerMode::SinglePass,
+            &shutdown,
+            &logger,
+        );
         assert!(
             matches!(outcome, SchedulerOutcome::Discovered { .. }),
             "expected Discovered: {outcome:?}"

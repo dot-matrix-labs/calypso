@@ -383,7 +383,7 @@ pub fn collect_doctor_report(
         None
     };
     // Detect legacy .calypso/*.yml workflow files.
-    let legacy_workflow_files = crate::interpreter::detect_legacy_local_workflows(repo_root);
+    let legacy_workflow_files = calypso_workflow_exec::detect_legacy_local_workflows(repo_root);
 
     let repo_name = repo_root
         .file_name()
@@ -863,7 +863,7 @@ fn failing_doctor_fix(
         // No automated fix for SM integrity — manual review required.
         DoctorCheckId::StateMachineIntegrity => Some(DoctorFix::Manual {
             instructions:
-                "Review the state machine audit output and correct workflow references in blueprint YAML files."
+                "Review the state machine audit output and correct workflow references in Calypso workflow YAML files."
                     .to_string(),
         }),
 

@@ -1,4 +1,4 @@
-name: Release — cli
+name: Release — calypso-cli
 
 on:
   push:
@@ -46,7 +46,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Install aarch64 Linux toolchain
         if: matrix.target == 'aarch64-unknown-linux-gnu'
@@ -55,11 +55,11 @@ jobs:
           sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Build release binary
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Verify binary
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: |
           binary_path="target/${{ matrix.target }}/release/${{ matrix.binary_name }}"
           echo "Verifying binary: $binary_path"
@@ -72,7 +72,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
-          cp cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
+          cp crates/calypso-cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
           tar -czf dist/${{ matrix.artifact_name }}-${VERSION}.tar.gz -C dist ${{ matrix.binary_name }}
           # Generate SHA256 checksum for this artifact
           cd dist
@@ -121,7 +121,7 @@ jobs:
           # Create combined checksums file
           cat release-assets/*.sha256 > release-assets/CHECKSUMS.txt
           # Include install script
-          cp cli/scripts/install.sh release-assets/install.sh || true
+          cp crates/calypso-cli/scripts/install.sh release-assets/install.sh || true
 
       - name: Publish GitHub release
         env:

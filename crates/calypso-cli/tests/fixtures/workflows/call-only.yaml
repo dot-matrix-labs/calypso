@@ -1,0 +1,8 @@
+name: call-only
+on:
+  workflow_call: null
+jobs:
+  sub-step:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "sub-workflow step"

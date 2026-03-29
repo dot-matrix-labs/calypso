@@ -1,5 +1,5 @@
 prompts:
   pr-editor: |
     Keep the pull request description aligned with the current feature state and gate checklist.
-  blueprint-review: |
+  process-review: |
     Review current transcripts and planned work for drift from the documented blueprint and process rules.

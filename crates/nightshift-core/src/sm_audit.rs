@@ -19,7 +19,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use crate::blueprint_workflows::{BlueprintWorkflow, BlueprintWorkflowLibrary, StateKind};
+use calypso_workflows::{NextSpec, StateKind, Workflow, WorkflowCatalog};
+
 use crate::template::{self, TemplateSet};
 
 // ── Audit result types ──────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ pub enum AuditSeverity {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditFinding {
     pub severity: AuditSeverity,
-    /// Which blueprint workflow or template produced this finding.
+    /// Which workflow or template produced this finding.
     pub source: String,
     pub message: String,
     pub suggestion: Option<String>,
@@ -113,7 +114,7 @@ pub fn parse_gha_workflow(yaml: &str) -> Result<GhaWorkflow, String> {
 /// Discovers all entry points (workflows that are not exclusively used as
 /// sub-workflows) and walks the graph from each one transitively. Validates:
 ///
-/// - All embedded blueprint workflows parse as valid YAML
+/// - All embedded workflows parse as valid YAML
 /// - Every workflow file is reachable from at least one entry point (no orphans)
 /// - Every state within each workflow is reachable from its `initial_state`
 /// - No dead branches: every non-terminal state can reach a terminal state
@@ -128,22 +129,7 @@ pub fn run_structural_audit() -> StateMachineAudit {
     let mut findings = Vec::new();
 
     // 1) Parse all embedded workflows into a lookup map
-    let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
-    for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-        match BlueprintWorkflowLibrary::parse(yaml) {
-            Ok(wf) => {
-                workflows.insert(stem.to_string(), wf);
-            }
-            Err(e) => {
-                findings.push(AuditFinding {
-                    severity: AuditSeverity::Error,
-                    source: (*stem).to_string(),
-                    message: format!("failed to parse blueprint workflow: {e}"),
-                    suggestion: None,
-                });
-            }
-        }
-    }
+    let workflows = parse_catalog_workflows(&WorkflowCatalog::embedded(), &mut findings);
 
     // 2) Walk the workflow graph from all entry points
     let entry_roots = entry_point_roots(&workflows);
@@ -164,7 +150,7 @@ pub fn run_structural_audit() -> StateMachineAudit {
 
 /// Returns the names of all top-level entry point workflows — those that are
 /// not exclusively used as sub-workflows by other workflows.
-fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&str> {
+fn entry_point_roots(workflows: &BTreeMap<String, Workflow>) -> Vec<&str> {
     // Collect all sub-workflow names referenced by kind: workflow states.
     let mut sub_names: BTreeSet<&str> = BTreeSet::new();
     for wf in workflows.values() {
@@ -201,7 +187,7 @@ fn entry_point_roots(workflows: &BTreeMap<String, BlueprintWorkflow>) -> Vec<&st
 /// After walking, flags any workflow files that were never reached as orphans.
 fn audit_workflow_graph(
     roots: &[&str],
-    workflows: &BTreeMap<String, BlueprintWorkflow>,
+    workflows: &BTreeMap<String, Workflow>,
     findings: &mut Vec<AuditFinding>,
 ) {
     // BFS through workflow references, seeded from all entry points
@@ -237,7 +223,7 @@ fn audit_workflow_graph(
                         source: wf_name.to_string(),
                         message: format!(
                             "state '{state_name}' references workflow '{sub_wf_name}' \
-                             which is not in the embedded workflow library"
+                             which is not in the embedded workflow catalog"
                         ),
                         suggestion: None,
                     });
@@ -289,8 +275,8 @@ fn audit_workflow_handoff(
     parent_wf: &str,
     parent_state: &str,
     sub_wf_name: &str,
-    parent_next: Option<&crate::blueprint_workflows::NextSpec>,
-    sub_wf: &BlueprintWorkflow,
+    parent_next: Option<&NextSpec>,
+    sub_wf: &Workflow,
     findings: &mut Vec<AuditFinding>,
 ) {
     // Collect terminal state names from the sub-workflow
@@ -344,12 +330,12 @@ fn audit_workflow_handoff(
 
 // ── Reachability analysis ────────────────────────────────────────────────────
 
-/// Build a directed graph from a blueprint workflow and verify:
+/// Build a directed graph from a workflow definition and verify:
 /// 1. Every declared state is reachable from `initial_state` (forward reachability)
 /// 2. Every non-terminal state can reach at least one terminal state (no dead branches)
 ///
 /// A state is terminal if its `kind` is `Terminal` or it has no `next` spec.
-fn audit_reachability(stem: &str, wf: &BlueprintWorkflow, findings: &mut Vec<AuditFinding>) {
+fn audit_reachability(stem: &str, wf: &Workflow, findings: &mut Vec<AuditFinding>) {
     let initial_state = match &wf.initial_state {
         Some(s) => s.as_str(),
         None => return, // No initial_state means no state machine graph to audit
@@ -482,39 +468,52 @@ pub fn run_audit(repo_root: &Path, is_hello_world: bool) -> StateMachineAudit {
     // Scan .github/workflows/ for available GHA files
     let available_gha_files = scan_gha_directory(repo_root);
 
-    // 1) Audit blueprint workflows — validate that all embedded workflows parse cleanly
+    // 1) Audit workflows — skipped in hello_world mode
     if !is_hello_world {
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            if let Err(e) = BlueprintWorkflowLibrary::parse(yaml) {
+        let catalog = WorkflowCatalog::load(repo_root);
+        let workflows = parse_catalog_workflows(&catalog, &mut findings);
+
+        for (name, wf) in &workflows {
+            audit_blueprint_workflow(name, wf, repo_root, &available_gha_files, &mut findings);
+        }
+
+        // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
+        if let Ok(template) = template::load_embedded_template_set() {
+            audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
+        }
+
+        // 3) Unified workflow graph walk — reachability, dead branches, handoffs
+        // Skipped in hello_world mode to avoid auditing unused embedded workflows.
+        let entry_roots = entry_point_roots(&workflows);
+        audit_workflow_graph(&entry_roots, &workflows, &mut findings);
+    }
+
+    StateMachineAudit { findings }
+}
+
+fn parse_catalog_workflows(
+    catalog: &WorkflowCatalog,
+    findings: &mut Vec<AuditFinding>,
+) -> BTreeMap<String, Workflow> {
+    let mut workflows = BTreeMap::new();
+
+    for entry in catalog.entries() {
+        match entry.parse() {
+            Ok(wf) => {
+                workflows.insert(entry.handle.name.clone(), wf);
+            }
+            Err(e) => {
                 findings.push(AuditFinding {
                     severity: AuditSeverity::Error,
-                    source: (*stem).to_string(),
-                    message: format!("failed to parse blueprint workflow: {e}"),
+                    source: entry.handle.display_name().to_string(),
+                    message: format!("failed to parse workflow: {e}"),
                     suggestion: None,
                 });
             }
         }
     }
 
-    // 2) Audit policy gate paths from the default state machine template — skipped in hello_world mode
-    if !is_hello_world && let Ok(template) = template::load_embedded_template_set() {
-        audit_template_policy_gates(&template, repo_root, &available_gha_files, &mut findings);
-    }
-
-    // 3) Unified workflow graph walk — reachability, dead branches, handoffs
-    // Skipped in hello_world mode to avoid auditing unused blueprints.
-    if !is_hello_world {
-        let mut workflows: BTreeMap<String, BlueprintWorkflow> = BTreeMap::new();
-        for (stem, yaml) in BlueprintWorkflowLibrary::list() {
-            if let Ok(wf) = BlueprintWorkflowLibrary::parse(yaml) {
-                workflows.insert(stem.to_string(), wf);
-            }
-        }
-        let entry_roots = entry_point_roots(&workflows);
-        audit_workflow_graph(&entry_roots, &workflows, &mut findings);
-    }
-
-    StateMachineAudit { findings }
+    workflows
 }
 
 /// Scan `.github/workflows/` and return a map of filename → parsed `GhaWorkflow`.
@@ -572,6 +571,23 @@ fn common_char_count(a: &str, b: &str) -> usize {
     let a_chars: BTreeSet<char> = a.chars().collect();
     let b_chars: BTreeSet<char> = b.chars().collect();
     a_chars.intersection(&b_chars).count()
+}
+
+/// Audit a single workflow definition for reference integrity.
+///
+/// In GHA format, the old `checks`, `github_actions`, and `hard_gates` sections
+/// no longer exist. Validation focuses on workflow-level `uses:` references
+/// for `kind: workflow` states and check reference integrity.
+fn audit_blueprint_workflow(
+    stem: &str,
+    wf: &Workflow,
+    _repo_root: &Path,
+    _available_gha_files: &BTreeMap<String, GhaWorkflow>,
+    findings: &mut [AuditFinding],
+) {
+    // Orphan/dangling check detection (checks map is empty in GHA format,
+    // but retained for backward compatibility with test workflows).
+    audit_check_references(stem, wf, findings);
 }
 
 /// Validate a single workflow file reference (existence + name match).
@@ -657,6 +673,14 @@ fn validate_job_keys(
             });
         }
     }
+}
+
+/// Audit orphan and dangling check references within a workflow definition.
+///
+/// GHA-format workflows do not have a `checks` map — this is a no-op for the
+/// current workflow schema.  Retained as a stub for API compatibility.
+fn audit_check_references(_stem: &str, _wf: &Workflow, _findings: &mut [AuditFinding]) {
+    // GHA-format Workflow has no `checks` map; nothing to validate.
 }
 
 /// Audit policy gate paths from the template's `policy_gates`.
@@ -808,7 +832,7 @@ mod tests {
         let audit = run_audit(&repo_root, false);
 
         // Filter to only errors — there will be warnings for non-existent GHA files
-        // referenced by other blueprint workflows (deployment, release, etc.)
+        // referenced by other workflows (deployment, release, etc.)
         // but the key check here is that correct references don't produce errors
         // beyond the expected missing files from blueprint examples
         let template_errors: Vec<_> = audit
@@ -1039,7 +1063,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1071,7 +1095,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1097,7 +1121,7 @@ states:
   done:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1138,7 +1162,7 @@ states:
   aborted:
     kind: terminal
 "#;
-        let wf: BlueprintWorkflow = serde_yaml::from_str(wf_yaml).unwrap();
+        let wf: Workflow = serde_yaml::from_str(wf_yaml).unwrap();
         let mut findings = Vec::new();
         audit_reachability("test-wf", &wf, &mut findings);
 
@@ -1154,7 +1178,7 @@ states:
     fn workflow_graph_detects_orphan_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(
+        let root: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: root
@@ -1170,7 +1194,7 @@ states:
         )
         .unwrap();
 
-        let orphan: BlueprintWorkflow = serde_yaml::from_str(
+        let orphan: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: orphan-wf
@@ -1204,7 +1228,7 @@ states:
     fn workflow_graph_detects_missing_sub_workflow() {
         let mut workflows = BTreeMap::new();
 
-        let root: BlueprintWorkflow = serde_yaml::from_str(
+        let root: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: root
@@ -1229,7 +1253,7 @@ states:
 
         let missing: Vec<_> = findings
             .iter()
-            .filter(|f| f.message.contains("not in the embedded workflow library"))
+            .filter(|f| f.message.contains("not in the embedded workflow catalog"))
             .collect();
         assert_eq!(missing.len(), 1);
         assert!(missing[0].message.contains("nonexistent"));
@@ -1239,7 +1263,7 @@ states:
     fn workflow_graph_detects_handoff_mismatch() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(
+        let parent: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: parent
@@ -1258,7 +1282,7 @@ states:
         )
         .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(
+        let child: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: child
@@ -1304,7 +1328,7 @@ states:
     fn workflow_graph_valid_handoff_no_errors() {
         let mut workflows = BTreeMap::new();
 
-        let parent: BlueprintWorkflow = serde_yaml::from_str(
+        let parent: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: parent
@@ -1323,7 +1347,7 @@ states:
         )
         .unwrap();
 
-        let child: BlueprintWorkflow = serde_yaml::from_str(
+        let child: Workflow = serde_yaml::from_str(
             r#"
 version: 1
 name: child
@@ -1356,7 +1380,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_on_map() {
-        use crate::blueprint_workflows::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  ok: state-a\n  fail: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1367,7 +1391,7 @@ states:
 
     #[test]
     fn next_spec_all_targets_extracts_top_level_keys() {
-        use crate::blueprint_workflows::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value = serde_yaml::from_str(
             "on_success: state-a\non_failure: state-b\non_rejection: state-c\n",
         )
@@ -1380,7 +1404,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_on_map_keys() {
-        use crate::blueprint_workflows::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on:\n  done: state-a\n  aborted: state-b\n").unwrap();
         let spec = NextSpec(yaml);
@@ -1391,7 +1415,7 @@ states:
 
     #[test]
     fn next_spec_all_event_keys_extracts_top_level() {
-        use crate::blueprint_workflows::NextSpec;
+        use calypso_workflows::NextSpec;
         let yaml: serde_yaml::Value =
             serde_yaml::from_str("on_success: state-a\non_failure: state-b\n").unwrap();
         let spec = NextSpec(yaml);

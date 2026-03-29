@@ -382,6 +382,21 @@ pub fn load_embedded_template_set() -> Result<TemplateSet, TemplateError> {
     )
 }
 
+/// Load a TemplateSet using a custom state-machine YAML file with embedded defaults for agents
+/// and prompts.
+///
+/// Use this when the user selects a specific workflow file via `--select-flow`.
+pub fn load_template_set_with_state_machine(
+    state_machine_path: &Path,
+) -> Result<TemplateSet, TemplateError> {
+    let state_machine_yaml = fs::read_to_string(state_machine_path).map_err(TemplateError::Io)?;
+    TemplateSet::from_yaml_strings(
+        &state_machine_yaml,
+        DEFAULT_AGENTS_YAML,
+        DEFAULT_PROMPTS_YAML,
+    )
+}
+
 pub fn resolve_template_set_for_path(root: &Path) -> Result<TemplateSet, TemplateError> {
     let state_machine_path = root.join(LOCAL_STATE_MACHINE_FILE);
     let agents_path = root.join(LOCAL_AGENTS_FILE);

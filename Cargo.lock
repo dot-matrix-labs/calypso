@@ -70,6 +70,8 @@ name = "calypso-cli"
 version = "0.1.0"
 dependencies = [
  "calypso-web",
+ "calypso-workflow-exec",
+ "calypso-workflows",
  "expectrl",
  "nightshift-core",
  "serde",
@@ -89,8 +91,29 @@ dependencies = [
 name = "calypso-web"
 version = "0.1.0"
 dependencies = [
+ "calypso-workflows",
  "nightshift-core",
  "serde_json",
+]
+
+[[package]]
+name = "calypso-workflow-exec"
+version = "0.1.0"
+dependencies = [
+ "calypso-workflows",
+ "chrono",
+ "cron",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "calypso-workflows"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "serde_yaml",
 ]
 
 [[package]]
@@ -400,6 +423,8 @@ name = "nightshift-core"
 version = "0.1.0"
 dependencies = [
  "calypso-templates",
+ "calypso-workflow-exec",
+ "calypso-workflows",
  "chrono",
  "cron",
  "crossterm",

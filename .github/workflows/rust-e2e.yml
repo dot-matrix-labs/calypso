@@ -59,7 +59,7 @@ jobs:
 
           changed="$(git diff --name-only "$base" "$head")"
 
-          if grep -Eq '^(cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-e2e\.yml$)' <<<"$changed"; then
+          if grep -Eq '^(crates/calypso-cli/|crates/nightshift-core/|crates/calypso-web/|calypso-blueprint/|Cargo.toml$|Cargo.lock$|\.github/workflows/rust-e2e\.yml$)' <<<"$changed"; then
             echo "rust_relevant=true" >> "$GITHUB_OUTPUT"
           else
             echo "rust_relevant=false" >> "$GITHUB_OUTPUT"
@@ -93,9 +93,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run end-to-end tests
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test-e2e
+
+      - name: Run select-flow end-to-end tests
+        if: needs.changes.outputs.rust_relevant == 'true'
+        working-directory: crates/calypso-cli
+        run: cargo test-select-flow

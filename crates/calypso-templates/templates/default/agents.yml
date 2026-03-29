@@ -108,7 +108,7 @@ tasks:
 
   # blueprint agent: validates implementation against process rules
   # Responsible state: implementation (validator role)
-  - name: blueprint-review
+  - name: process-review
     kind: agent
     role: validator
 

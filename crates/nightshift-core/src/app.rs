@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use calypso_workflows::WorkflowCatalog;
 use serde::Deserialize;
 
 use crate::doctor::{
@@ -18,7 +19,7 @@ use crate::state::{
     FeatureState, GateStatus, GithubMergeability, GithubReviewStatus, PullRequestChecklistItem,
     PullRequestRef,
 };
-use crate::template::load_embedded_template_set;
+use crate::template::resolve_template_set_for_path;
 
 pub fn run_doctor(cwd: &Path) -> String {
     let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
@@ -205,7 +206,8 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
         resolve_repo_root(cwd).ok_or_else(|| "not inside a git repository".to_string())?;
     let branch = resolve_current_branch(&repo_root)
         .expect("git repositories should report the current branch");
-    let template = load_embedded_template_set().expect("embedded templates should remain valid");
+    let template = resolve_template_set_for_path(&repo_root)
+        .map_err(|error| format!("template error: {error}"))?;
     let pull_request_lookup = resolve_current_pull_request(&repo_root);
     let pull_request = match &pull_request_lookup {
         Ok(pull_request) => pull_request.clone(),
@@ -220,7 +222,7 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
             .unwrap_or_else(missing_pull_request_ref),
         &template,
     )
-    .expect("embedded templates should initialize feature state");
+    .expect("resolved templates should initialize feature state");
 
     let doctor_evidence =
         collect_doctor_report(&HostDoctorEnvironment, &repo_root).to_builtin_evidence();
@@ -772,27 +774,32 @@ pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-/// Return a newline-separated list of all embedded blueprint workflow name stems.
-pub fn run_workflows_list() -> String {
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::list()
+/// Return a newline-separated list of all effective workflow names for the repository.
+pub fn run_workflows_list(cwd: &Path) -> String {
+    WorkflowCatalog::load(cwd)
+        .entries()
         .iter()
-        .map(|(stem, _)| *stem)
+        .map(|entry| entry.handle.display_name())
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 /// Return the raw YAML content for a named workflow, or an error message.
-pub fn run_workflows_show(name: &str) -> Result<String, String> {
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::get(name)
-        .map(|yaml| yaml.to_string())
+pub fn run_workflows_show(cwd: &Path, name: &str) -> Result<String, String> {
+    WorkflowCatalog::load(cwd)
+        .find(name)
+        .map(|entry| entry.yaml.clone())
         .ok_or_else(|| format!("workflow not found: {name}"))
 }
 
 /// Parse the named workflow and return `Ok("OK")` or `Err(parse_error_string)`.
-pub fn run_workflows_validate(name: &str) -> Result<String, String> {
-    let yaml = crate::blueprint_workflows::BlueprintWorkflowLibrary::get(name)
+pub fn run_workflows_validate(cwd: &Path, name: &str) -> Result<String, String> {
+    let catalog = WorkflowCatalog::load(cwd);
+    let entry = catalog
+        .find(name)
         .ok_or_else(|| format!("workflow not found: {name}"))?;
-    crate::blueprint_workflows::BlueprintWorkflowLibrary::parse(yaml)
+    entry
+        .parse()
         .map(|_| "OK".to_string())
         .map_err(|e| e.to_string())
 }

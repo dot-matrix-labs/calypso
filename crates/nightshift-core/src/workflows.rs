@@ -26,10 +26,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Check formatting
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo fmt --check
 
   clippy:
@@ -47,10 +47,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run clippy
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo clippy --all-targets -- -D warnings
 
   build:
@@ -66,10 +66,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Build
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo build
 "#;
 
@@ -98,10 +98,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run unit tests
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test --lib
 "#;
 
@@ -130,10 +130,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run integration tests
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test --test '*'
 "#;
 
@@ -162,10 +162,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run end-to-end tests
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test --test '*' -- --ignored
 "#;
 
@@ -195,17 +195,17 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run coverage
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo llvm-cov --lcov --output-path lcov.info
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v6
         with:
           name: cli-coverage-lcov
-          path: cli/lcov.info
+          path: crates/calypso-cli/lcov.info
 "#;
 
 pub const RELEASE_CLI: &str = r#"name: Release — cli
@@ -251,10 +251,10 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Build release binary
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Package release artifact
@@ -263,7 +263,7 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: |
           mkdir -p dist
-          cp cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
+          cp crates/calypso-cli/target/${{ matrix.target }}/release/${{ matrix.binary_name }} dist/${{ matrix.binary_name }}
           tar -czf dist/${{ matrix.artifact_name }}-${VERSION}.tar.gz -C dist ${{ matrix.binary_name }}
           cd dist
           sha256sum ${{ matrix.artifact_name }}-${VERSION}.tar.gz > ${{ matrix.artifact_name }}-${VERSION}.tar.gz.sha256

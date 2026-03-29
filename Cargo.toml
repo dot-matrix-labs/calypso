@@ -1,4 +1,4 @@
 [workspace]
-members = ["crates/calypso-templates", "crates/nightshift-core", "crates/calypso-web", "cli"]
-default-members = ["cli"]
+members = ["crates/calypso-templates", "crates/calypso-workflows", "crates/calypso-workflow-exec", "crates/nightshift-core", "crates/calypso-web", "crates/calypso-cli"]
+default-members = ["crates/calypso-cli"]
 resolver = "3"

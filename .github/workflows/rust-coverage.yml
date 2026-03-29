@@ -1,4 +1,4 @@
-name: Rust coverage — cli
+name: Rust coverage — calypso-cli
 
 on:
   push:
@@ -29,7 +29,7 @@ jobs:
         with:
           filters: |
             coverage:
-              - 'cli/**/*.rs'
+              - 'crates/calypso-cli/**/*.rs'
 
   coverage:
     needs: changes
@@ -38,7 +38,7 @@ jobs:
     steps:
       - name: Skip coverage when no CLI Rust files changed
         if: needs.changes.outputs.coverage_needed != 'true'
-        run: echo "No Rust changes under cli/; coverage gate skipped."
+        run: echo "No Rust changes under crates/calypso-cli/; coverage gate skipped."
 
       - uses: actions/checkout@v5
         if: needs.changes.outputs.coverage_needed == 'true'
@@ -61,11 +61,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run coverage with 90% line threshold
         if: needs.changes.outputs.coverage_needed == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo coverage
 
       - name: Upload coverage artifact
@@ -76,7 +76,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: cli-coverage-lcov
-          path: cli/lcov.info
+          path: crates/calypso-cli/lcov.info
 
       - name: Append coverage summary
         shell: bash
@@ -84,7 +84,7 @@ jobs:
           echo "## CLI Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           if [[ "${{ needs.changes.outputs.coverage_needed }}" != "true" ]]; then
-            echo "- Skipped: no Rust changes under \`cli/\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "- Skipped: no Rust changes under \`crates/calypso-cli/\`" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
