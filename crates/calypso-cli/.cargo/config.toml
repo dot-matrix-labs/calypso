@@ -2,7 +2,7 @@
 fmt-check = "fmt --all -- --check"
 lint = "clippy --all-targets --all-features -- -D warnings"
 build-check = "build --all-targets"
-test-unit = "test --lib"
+test-unit = "test --lib --workspace"
 test-integration = "test --test cli --test doctor --test github --test state --test templates"
 test-e2e = "test --test e2e -- --nocapture"
 test-select-flow = "test --test select_flow -- --nocapture"
