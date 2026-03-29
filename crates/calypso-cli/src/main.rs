@@ -458,7 +458,29 @@ fn main() {
                 None => {
                     if state_path.exists() {
                         run_state_machine_auto(&cwd, &state_path, None);
+                    } else if !select_flow {
+                        // No --select-flow flag was used: auto-detect local workflow files
+                        // before falling back to doctor output.
+                        let local_flows = collect_eligible_local_flows(&cwd);
+                        match local_flows.len() {
+                            1 => {
+                                run_workflow_auto(&local_flows[0], &cwd);
+                            }
+                            n if n > 1 => {
+                                // Multiple local workflows: prompt the user to pick one.
+                                if let Some(SelectedFlow::Workflow(name)) =
+                                    select_workflow_interactively(&cwd)
+                                {
+                                    run_workflow_auto(&name, &cwd);
+                                }
+                            }
+                            _ => {
+                                // No local workflows: fall back to embedded doctor output.
+                                println!("{}", run_doctor(&cwd));
+                            }
+                        }
                     } else {
+                        // --select-flow was used but user cancelled or no eligible workflows.
                         println!("{}", run_doctor(&cwd));
                     }
                 }
@@ -466,6 +488,32 @@ fn main() {
         }
         _ => println!("{}", render_help(info)),
     }
+}
+
+/// Collect the names of all local (non-embedded) workflows that have a user-facing
+/// entry point (`workflow_dispatch` or `cron` trigger).
+///
+/// Returns a vec of workflow names suitable for passing to `run_workflow_auto`.
+fn collect_eligible_local_flows(cwd: &std::path::Path) -> Vec<String> {
+    use calypso_workflows::{WorkflowCatalog, WorkflowSource};
+
+    let catalog = WorkflowCatalog::load(cwd);
+    let mut names = Vec::new();
+
+    for entry in catalog.entries() {
+        // Skip embedded catalog entries — only consider project-local files.
+        if entry.handle.source == WorkflowSource::Embedded {
+            continue;
+        }
+        let Ok(wf) = entry.parse() else {
+            continue;
+        };
+        if wf.trigger.is_some() || wf.schedule.is_some() {
+            names.push(entry.handle.name.clone());
+        }
+    }
+
+    names
 }
 
 /// Strip `--select-flow` from `args` and return whether the flag was present plus the remaining args.
