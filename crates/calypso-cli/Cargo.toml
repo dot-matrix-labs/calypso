@@ -31,6 +31,9 @@ required-features = ["__dev_only"]
 [dev-dependencies]
 crossterm = "0.26.1"
 expectrl = "0.7"
+# Enable the testing helpers (MockBackend, make_prompt) from nightshift-core in
+# unit tests. Cargo merges features from dev-dependencies with the normal dep.
+nightshift-core = { path = "../nightshift-core", features = ["testing"] }
 
 [features]
 __dev_only = []

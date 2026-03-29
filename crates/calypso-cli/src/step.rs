@@ -1,108 +1,20 @@
-//! Step-mode state machine execution for `calypso --step`.
+//! Step-mode entry point for `calypso --step`.
 //!
-//! Extracted from `main.rs` so that the loop can be unit-tested with an
-//! injected [`TerminalBackend`] and [`SessionExecutor`] without needing a
-//! real terminal or Claude installation.
+//! Constructs the driver and prompt, then delegates the interactive loop to
+//! [`nightshift_core::step_loop::run_step_loop`].
 
-use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
 use calypso_templates::TemplateSet;
-use nightshift_core::driver::{DriverMode, DriverStepResult, SessionExecutor, StateMachineDriver};
+use nightshift_core::driver::{DriverMode, SessionExecutor, StateMachineDriver};
 use nightshift_core::execution::ExecutionConfig;
-use nightshift_core::pinned_prompt::{
-    Confirmation, PinnedPrompt, TerminalBackend, format_initial_prompt, format_transition_prompt,
-};
-use nightshift_core::state::RepositoryState;
+use nightshift_core::pinned_prompt::PinnedPrompt;
+use nightshift_core::step_loop::run_step_loop;
 
-/// Run the interactive step-mode loop.
-///
-/// Each iteration:
-/// 1. Loads current state from `state_path`.
-/// 2. Shows the step prompt and waits for Y/n/q.
-/// 3. On Y: logs "running: <state>" immediately, then calls `driver.step()`.
-/// 4. Repairs the scroll region after the step (subprocess output may have
-///    disrupted the ANSI scroll region).
-/// 5. Logs the step result and shows the next prompt.
-///
-/// Returns when the user quits, the machine reaches a terminal state, or a
-/// driver error occurs.
-pub fn run_step_loop<W, B>(
-    prompt: &mut PinnedPrompt<W, B>,
-    driver: &StateMachineDriver,
-    state_path: &Path,
-) where
-    W: Write,
-    B: TerminalBackend,
-{
-    loop {
-        let current = match RepositoryState::load_from_path(state_path) {
-            Ok(state) => state.current_feature.workflow_state.as_str().to_string(),
-            Err(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("error loading state: {e}");
-                std::process::exit(1);
-            }
-        };
-
-        let prompt_text = format_initial_prompt(&current);
-        if let Err(e) = prompt.show_prompt(&prompt_text) {
-            let _ = prompt.cleanup();
-            eprintln!("prompt error: {e}");
-            std::process::exit(1);
-        }
-
-        match prompt.read_confirmation() {
-            Ok(Confirmation::Yes) => {}
-            Ok(Confirmation::No | Confirmation::Quit) => break,
-            Err(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("input error: {e}");
-                std::process::exit(1);
-            }
-        }
-
-        // Acknowledge the keypress immediately before the (potentially long)
-        // step executes.
-        let _ = prompt.log(&format!("running: {current}"));
-
-        let result = driver.step();
-
-        // Repair any scroll-region disruption caused by subprocess stdout/stderr.
-        let _ = prompt.repair_scroll_region();
-
-        match result {
-            DriverStepResult::Advanced(next_state) => {
-                let next = next_state.as_str();
-                let _ = prompt.log(&format!("→ advanced to: {next}"));
-                let transition_prompt = format_transition_prompt(&current, next);
-                let _ = prompt.show_prompt(&transition_prompt);
-            }
-            DriverStepResult::Terminal => {
-                let _ = prompt.log("done");
-                break;
-            }
-            DriverStepResult::Unchanged => {
-                let _ = prompt.log("step complete (state unchanged)");
-            }
-            DriverStepResult::ClarificationRequired(q) => {
-                let _ = prompt.log(&format!("clarification required: {q}"));
-            }
-            DriverStepResult::Failed { reason } => {
-                let _ = prompt.log(&format!("step failed: {reason}"));
-            }
-            DriverStepResult::Error(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
-}
-
-/// Convenience entry point for `main.rs`: resolves the template and delegates
-/// to [`run_step_loop`].
+/// Entry point called from `main()`: resolves the template, constructs the
+/// driver and prompt, runs the interactive loop, and maps the outcome to an
+/// exit code.
 pub fn run_state_machine_step(
     state_path: &Path,
     template: TemplateSet,
@@ -115,7 +27,6 @@ pub fn run_state_machine_step(
         config: ExecutionConfig::default(),
         executor,
     };
-
     let mut prompt = match PinnedPrompt::new() {
         Ok(p) => p,
         Err(e) => {
@@ -123,72 +34,23 @@ pub fn run_state_machine_step(
             std::process::exit(1);
         }
     };
-
     run_step_loop(&mut prompt, &driver, state_path);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use nightshift_core::driver::{DriverMode, SessionExecutor, StateMachineDriver};
     use nightshift_core::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
+    use nightshift_core::pinned_prompt::PinnedPrompt;
     use nightshift_core::state::{
         FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
     };
-    use std::collections::VecDeque;
-    use std::path::PathBuf;
-    use std::sync::Arc;
+    use nightshift_core::step_loop::{StepLoopOutcome, run_step_loop};
+    use nightshift_core::testing::{MockBackend, make_prompt};
 
     use crossterm::event::{Event, KeyCode, KeyEvent};
-
-    // ── MockBackend ────────────────────────────────────────────────────────
-
-    struct MockBackend {
-        events: VecDeque<Event>,
-        width: u16,
-        height: u16,
-    }
-
-    impl MockBackend {
-        fn new(events: Vec<Event>) -> Self {
-            MockBackend {
-                events: events.into(),
-                width: 80,
-                height: 24,
-            }
-        }
-    }
-
-    impl TerminalBackend for MockBackend {
-        fn read_event(&mut self) -> std::io::Result<Event> {
-            self.events.pop_front().ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "no more events")
-            })
-        }
-
-        fn size(&self) -> std::io::Result<(u16, u16)> {
-            Ok((self.width, self.height))
-        }
-
-        fn enable_raw_mode(&self) -> std::io::Result<()> {
-            Ok(())
-        }
-
-        fn disable_raw_mode(&self) -> std::io::Result<()> {
-            Ok(())
-        }
-    }
-
-    fn key(code: KeyCode) -> Event {
-        Event::Key(KeyEvent::from(code))
-    }
-
-    fn y_key() -> Event {
-        key(KeyCode::Char('y'))
-    }
-
-    fn q_key() -> Event {
-        key(KeyCode::Char('q'))
-    }
+    use std::path::PathBuf;
+    use std::sync::Arc;
 
     // ── PhonyExecutor ──────────────────────────────────────────────────────
 
@@ -308,6 +170,14 @@ mod tests {
         }
     }
 
+    fn y_key() -> Event {
+        Event::Key(KeyEvent::from(KeyCode::Char('y')))
+    }
+
+    fn q_key() -> Event {
+        Event::Key(KeyEvent::from(KeyCode::Char('q')))
+    }
+
     // ── Tests ──────────────────────────────────────────────────────────────
 
     /// Pressing Y writes "running: <state>" to the prompt output BEFORE the
@@ -320,10 +190,11 @@ mod tests {
         let executor = PhonyExecutor::advancing(WorkflowState::PrdReview);
         let driver = make_driver(state_path.clone(), executor);
 
-        // Y → advance, then q to exit
-        let events = vec![y_key(), q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
+        let mut prompt = PinnedPrompt::with_backend(
+            Vec::<u8>::new(),
+            MockBackend::new(80, 24, vec![y_key(), q_key()]),
+        )
+        .expect("mock prompt init");
 
         run_step_loop(&mut prompt, &driver, &state_path);
 
@@ -350,10 +221,11 @@ mod tests {
         let executor = PhonyExecutor::advancing(WorkflowState::PrdReview);
         let driver = make_driver(state_path.clone(), executor);
 
-        // Y → advance, then q to exit
-        let events = vec![y_key(), q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
+        let mut prompt = PinnedPrompt::with_backend(
+            Vec::<u8>::new(),
+            MockBackend::new(80, 24, vec![y_key(), q_key()]),
+        )
+        .expect("mock prompt init");
 
         run_step_loop(&mut prompt, &driver, &state_path);
 
@@ -377,30 +249,28 @@ mod tests {
         let executor = PhonyExecutor::advancing(WorkflowState::PrdReview);
         let driver = make_driver(state_path.clone(), executor);
 
-        // Y → advance, then q
-        let events = vec![y_key(), q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
+        let mut prompt = PinnedPrompt::with_backend(
+            Vec::<u8>::new(),
+            MockBackend::new(80, 24, vec![y_key(), q_key()]),
+        )
+        .expect("mock prompt init");
 
-        // Clear init output so we only see output from the loop
         prompt.writer_mut().clear();
         run_step_loop(&mut prompt, &driver, &state_path);
 
         let output = String::from_utf8_lossy(prompt.writer_ref());
-        // DECSTBM set-scroll-region escape: \x1b[1;<N>r
         assert!(
             output.contains("\x1b[1;"),
             "expected DECSTBM scroll-region escape after step; got: {output:?}"
         );
     }
 
-    /// Pressing q immediately exits without executing a step.
+    /// Pressing q immediately returns UserCancelled without executing a step.
     #[test]
-    fn quit_exits_without_step() {
+    fn quit_returns_user_cancelled_without_step() {
         let dir = temp_dir("quit-no-step");
         let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
 
-        // Executor that panics if called — it should never be invoked
         struct PanicExecutor;
         impl SessionExecutor for PanicExecutor {
             fn run(
@@ -423,12 +293,9 @@ mod tests {
             executor: Some(Arc::new(PanicExecutor)),
         };
 
-        let events = vec![q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
-
-        run_step_loop(&mut prompt, &driver, &state_path);
-        // If we get here without panicking, the test passes.
+        let mut prompt = make_prompt(80, 24, vec![q_key()]);
+        let outcome = run_step_loop(&mut prompt, &driver, &state_path);
+        assert_eq!(outcome, StepLoopOutcome::UserCancelled);
     }
 
     /// In Unchanged result, "step complete (state unchanged)" appears in output.
@@ -440,11 +307,7 @@ mod tests {
         let executor = PhonyExecutor::unchanged();
         let driver = make_driver(state_path.clone(), executor);
 
-        // Y → unchanged, then q
-        let events = vec![y_key(), q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
-
+        let mut prompt = make_prompt(80, 24, vec![y_key(), q_key()]);
         run_step_loop(&mut prompt, &driver, &state_path);
 
         let output = String::from_utf8_lossy(prompt.writer_ref());
@@ -454,26 +317,23 @@ mod tests {
         );
     }
 
-    /// Failed result logs the failure reason.
+    /// Failed result logs the failure reason and returns Failed outcome.
     #[test]
-    fn failed_result_logs_reason() {
+    fn failed_result_logs_reason_and_returns_outcome() {
         let dir = temp_dir("failed");
         let state_path = write_state(&dir, &minimal_state(WorkflowState::New));
 
         let executor = PhonyExecutor::failed("phony failure");
         let driver = make_driver(state_path.clone(), executor);
 
-        // Y → failed, then q
-        let events = vec![y_key(), q_key()];
-        let mut prompt = PinnedPrompt::with_backend(Vec::new(), MockBackend::new(events))
-            .expect("mock prompt init");
-
-        run_step_loop(&mut prompt, &driver, &state_path);
+        let mut prompt = make_prompt(80, 24, vec![y_key()]);
+        let outcome = run_step_loop(&mut prompt, &driver, &state_path);
 
         let output = String::from_utf8_lossy(prompt.writer_ref());
         assert!(
             output.contains("step failed: phony failure"),
             "expected failure message; got: {output}"
         );
+        assert_eq!(outcome, StepLoopOutcome::Failed("phony failure".to_string()));
     }
 }

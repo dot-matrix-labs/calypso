@@ -19,6 +19,10 @@ cron = "0.12"
 [dev-dependencies]
 proptest = "1"
 
+[features]
+# Expose test helpers (MockBackend, make_prompt) to dependent crates.
+testing = []
+
 [lib]
 name = "nightshift_core"
 path = "src/lib.rs"
