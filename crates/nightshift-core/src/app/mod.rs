@@ -17,8 +17,8 @@ pub use helpers::{
 };
 pub use keys::{run_keys_list, run_keys_list_json, run_keys_revoke, run_keys_rotate};
 pub use status::{
-    gate_status_label, render_dev_status, render_feature_status, render_state_status, run_dev_status,
-    run_dev_status_json, run_state_status_json, run_state_status_plain, run_status,
+    gate_status_label, render_dev_status, render_feature_status, render_state_status,
+    run_dev_status, run_dev_status_json, run_state_status_json, run_state_status_plain, run_status,
     state_status_json_report,
 };
 pub use workflows::{run_workflows_list, run_workflows_show, run_workflows_validate};
