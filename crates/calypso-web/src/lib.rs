@@ -43,9 +43,7 @@ fn public_ip() -> Option<std::net::Ipv4Addr> {
 pub fn run_webview(cwd: &Path, port: u16) -> Result<(), CalypsoError> {
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).map_err(|e| {
-        CalypsoError::transport(format!(
-            "failed to bind webview server to {addr}: {e}"
-        ))
+        CalypsoError::transport(format!("failed to bind webview server to {addr}: {e}"))
     })?;
     println!("Calypso webview running at http://localhost:{port}");
     if let Some(ip) = public_ip() {
