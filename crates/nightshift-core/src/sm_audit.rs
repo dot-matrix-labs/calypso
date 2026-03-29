@@ -583,7 +583,7 @@ fn audit_blueprint_workflow(
     wf: &Workflow,
     _repo_root: &Path,
     _available_gha_files: &BTreeMap<String, GhaWorkflow>,
-    findings: &mut Vec<AuditFinding>,
+    findings: &mut [AuditFinding],
 ) {
     // Orphan/dangling check detection (checks map is empty in GHA format,
     // but retained for backward compatibility with test workflows).
@@ -679,7 +679,7 @@ fn validate_job_keys(
 ///
 /// GHA-format workflows do not have a `checks` map — this is a no-op for the
 /// current workflow schema.  Retained as a stub for API compatibility.
-fn audit_check_references(_stem: &str, _wf: &Workflow, _findings: &mut Vec<AuditFinding>) {
+fn audit_check_references(_stem: &str, _wf: &Workflow, _findings: &mut [AuditFinding]) {
     // GHA-format Workflow has no `checks` map; nothing to validate.
 }
 
