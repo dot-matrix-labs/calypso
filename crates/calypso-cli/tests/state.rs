@@ -8,7 +8,7 @@ use nightshift_core::state::{
     PullRequestRef, RepositoryIdentity, RepositoryState, SchedulingMeta, SessionOutput,
     SessionOutputStream, StateError, TransitionError, TransitionFacts, WorkflowState,
 };
-use nightshift_core::template::{TemplateSet, load_embedded_template_set};
+use calypso_templates::{TemplateSet, load_embedded_template_set};
 
 fn sample_state() -> RepositoryState {
     RepositoryState {

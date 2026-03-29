@@ -13,7 +13,7 @@ use nightshift_core::runtime::{
 use nightshift_core::state::{
     GateInitializationError, PullRequestRef, RepositoryState, StateError, WorkflowState,
 };
-use nightshift_core::template::TemplateError;
+use calypso_templates::TemplateError;
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PATH_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();

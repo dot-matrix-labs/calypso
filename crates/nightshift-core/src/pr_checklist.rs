@@ -1,5 +1,5 @@
 use crate::state::{GateGroup, GateStatus};
-use crate::template::TemplateSet;
+use calypso_templates::TemplateSet;
 
 const GATES_START: &str = "<!-- CALYPSO:GATES:START -->";
 const GATES_END: &str = "<!-- CALYPSO:GATES:END -->";
@@ -73,7 +73,7 @@ fn render_gates_section(gate_groups: &[GateGroup], template: &TemplateSet) -> St
 mod tests {
     use super::*;
     use crate::state::{Gate, GateGroup, GateStatus};
-    use crate::template::TemplateSet;
+    use calypso_templates::TemplateSet;
 
     fn minimal_template() -> TemplateSet {
         let sm = r#"

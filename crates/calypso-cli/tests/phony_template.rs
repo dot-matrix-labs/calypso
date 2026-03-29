@@ -13,7 +13,7 @@ use nightshift_core::execution::{ExecutionConfig, ExecutionError, ExecutionOutco
 use nightshift_core::state::{
     FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
 };
-use nightshift_core::template::TemplateSet;
+use calypso_templates::TemplateSet;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

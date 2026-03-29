@@ -15,7 +15,7 @@ use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
 use crate::signal::install_signal_handlers;
 use crate::state::RepositoryState;
 use crate::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
-use crate::template::load_project_template_set;
+use calypso_templates::load_project_template_set;
 use calypso_workflow_exec::{StepOutcome, WorkflowInterpreter};
 use calypso_workflows::StateKind;
 
@@ -550,7 +550,7 @@ fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &Repository
 fn evaluate_and_log_gates(
     logger: &Logger,
     feature: &mut crate::state::FeatureState,
-    template: &crate::template::TemplateSet,
+    template: &calypso_templates::TemplateSet,
     evidence: &crate::state::BuiltinEvidence,
 ) -> i32 {
     if let Err(e) = feature.evaluate_gates(template, evidence) {
@@ -816,11 +816,11 @@ mod tests {
     }
 
     /// Build a phony TemplateSet from the test fixture YAML files.
-    fn phony_template() -> crate::template::TemplateSet {
+    fn phony_template() -> calypso_templates::TemplateSet {
         let sm = include_str!("../tests/fixtures/phony-template/.calypso/state-machine.yml");
         let agents = include_str!("../tests/fixtures/phony-template/.calypso/agents.yml");
         let prompts = include_str!("../tests/fixtures/phony-template/.calypso/prompts.yml");
-        crate::template::TemplateSet::from_yaml_strings(sm, agents, prompts)
+        calypso_templates::TemplateSet::from_yaml_strings(sm, agents, prompts)
             .expect("phony template should parse")
     }
 

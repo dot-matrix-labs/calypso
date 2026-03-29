@@ -1,10 +1,10 @@
-use nightshift_core::template::{
+use calypso_templates::{
     AgentCatalog, AgentTask, AgentTaskKind, GateGroupTemplate, GateTemplate, PromptCatalog,
     StateDefinition, StateMachineTemplate, TemplateError, TemplateSet, TransitionTemplate,
     load_embedded_template_set, resolve_template_set_for_path,
 };
 #[allow(unused_imports)]
-use nightshift_core::template::{GateStatus, TimeoutPolicy};
+use calypso_templates::{GateStatus, TimeoutPolicy};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -1230,7 +1230,7 @@ fn state_definition_simple_parses_as_string() {
     assert_eq!(w.states[1].name(), "prd-review");
     assert_eq!(
         w.states[0].step_type(),
-        nightshift_core::template::StepType::Agent
+        calypso_templates::StepType::Agent
     );
 }
 
@@ -1246,7 +1246,7 @@ fn state_definition_detailed_parses_with_function_type() {
     assert_eq!(w.states[0].name(), "git-init");
     assert_eq!(
         w.states[0].step_type(),
-        nightshift_core::template::StepType::Function
+        calypso_templates::StepType::Function
     );
 }
 
@@ -1260,7 +1260,7 @@ fn state_definition_detailed_defaults_step_type_to_agent() {
     let w: Wrapper = serde_yaml::from_str(yaml).expect("should parse");
     assert_eq!(
         w.states[0].step_type(),
-        nightshift_core::template::StepType::Agent
+        calypso_templates::StepType::Agent
     );
 }
 
@@ -1276,12 +1276,12 @@ fn state_definition_mixed_simple_and_detailed_parse_together() {
     assert_eq!(w.states[0].name(), "new");
     assert_eq!(
         w.states[0].step_type(),
-        nightshift_core::template::StepType::Agent
+        calypso_templates::StepType::Agent
     );
     assert_eq!(w.states[1].name(), "setup");
     assert_eq!(
         w.states[1].step_type(),
-        nightshift_core::template::StepType::Function
+        calypso_templates::StepType::Function
     );
     assert_eq!(w.states[2].name(), "implementation");
 }

@@ -8,7 +8,7 @@ use crate::state::{
     DevelopmentState, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
     GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
 };
-use crate::template::load_embedded_template_set;
+use calypso_templates::load_embedded_template_set;
 
 use super::helpers::{
     missing_pull_request_evidence, missing_pull_request_ref, resolve_current_branch,

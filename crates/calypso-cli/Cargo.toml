@@ -7,6 +7,7 @@ default-run = "calypso-cli"
 
 [dependencies]
 nightshift-core = { path = "../nightshift-core" }
+calypso-templates = { path = "../calypso-templates" }
 calypso-web = { path = "../calypso-web" }
 calypso-workflows = { path = "../calypso-workflows" }
 calypso-workflow-exec = { path = "../calypso-workflow-exec" }

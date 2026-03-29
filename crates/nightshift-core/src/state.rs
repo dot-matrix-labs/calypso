@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::template::{AgentTaskKind, TemplateSet};
+use calypso_templates::{AgentTaskKind, TemplateSet};
 
 /// Identity metadata for the repository. Contains no secrets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
