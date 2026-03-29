@@ -1,6 +1,6 @@
+use calypso_templates::{StepType, load_embedded_template_set};
 use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
 use nightshift_core::execution::ExecutionConfig;
-use nightshift_core::template::{StepType, load_embedded_template_set};
 
 #[test]
 fn step_type_defaults_to_agent_for_simple_state_name() {

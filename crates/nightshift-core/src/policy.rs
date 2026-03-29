@@ -4,7 +4,7 @@ use std::process::Command;
 use std::time::SystemTime;
 
 use crate::state::BuiltinEvidence;
-use crate::template::TemplateSet;
+use calypso_templates::TemplateSet;
 
 pub trait PolicyEnvironment {
     fn file_exists(&self, path: &Path) -> bool;
@@ -49,7 +49,7 @@ pub fn collect_policy_evidence(
 fn evaluate_policy_gate(
     environment: &impl PolicyEnvironment,
     repo_root: &Path,
-    gate: &crate::template::PolicyGateTemplate,
+    gate: &calypso_templates::PolicyGateTemplate,
 ) -> bool {
     match gate.evaluator.as_str() {
         "builtin.policy.implementation_plan_present"
@@ -92,7 +92,7 @@ fn branch_contains_main(repo_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::TemplateSet;
+    use calypso_templates::TemplateSet;
     use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
     use std::time::{Duration, UNIX_EPOCH};
@@ -278,7 +278,7 @@ tasks:
 
     #[test]
     fn evaluate_policy_gate_returns_false_for_unknown_evaluator() {
-        use crate::template::{PolicyGateKind, PolicyGateTemplate};
+        use calypso_templates::{PolicyGateKind, PolicyGateTemplate};
 
         let gate = PolicyGateTemplate {
             gate_id: "unknown-gate".to_string(),

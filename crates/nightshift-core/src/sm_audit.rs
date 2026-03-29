@@ -21,7 +21,7 @@ use std::path::Path;
 
 use calypso_workflows::{NextSpec, StateKind, Workflow, WorkflowCatalog};
 
-use crate::template::{self, TemplateSet};
+use calypso_templates::{self as template, TemplateSet};
 
 // ── Audit result types ──────────────────────────────────────────────────────
 

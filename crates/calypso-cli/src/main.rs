@@ -1,3 +1,4 @@
+use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
     render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
@@ -14,7 +15,6 @@ use nightshift_core::init::{
 };
 use nightshift_core::operator_surface::OperatorSurface;
 use nightshift_core::state::RepositoryState;
-use nightshift_core::template::TemplateSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BuildInfo<'a> {
@@ -885,10 +885,8 @@ fn run_claude_session(state_path: &str, role: &str) {
 fn resolve_state_machine_template(
     repo_root: &std::path::Path,
     flow_override: Option<&std::path::Path>,
-) -> Result<(TemplateSet, Option<String>), nightshift_core::template::TemplateError> {
-    use nightshift_core::template::{
-        load_template_set_with_state_machine, resolve_template_set_for_path,
-    };
+) -> Result<(TemplateSet, Option<String>), calypso_templates::TemplateError> {
+    use calypso_templates::{load_template_set_with_state_machine, resolve_template_set_for_path};
 
     match flow_override {
         Some(path) => match load_template_set_with_state_machine(path) {

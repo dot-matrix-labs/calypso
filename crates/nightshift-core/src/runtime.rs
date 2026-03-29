@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::state::{
     FeatureState, GateInitializationError, PullRequestRef, RepositoryState, StateError,
 };
-use crate::template::{TemplateError, TemplateSet, resolve_template_set_for_path};
+use calypso_templates::{TemplateError, TemplateSet, resolve_template_set_for_path};
 
 const STATE_DIRECTORY: &str = ".calypso";
 const STATE_FILE_NAME: &str = "repository-state.json";

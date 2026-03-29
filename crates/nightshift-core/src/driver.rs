@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome, run_supervised_session};
 use crate::state::{RepositoryState, WorkflowState};
-use crate::template::{StateDefinition, StepType, TemplateSet};
+use calypso_templates::{StateDefinition, StepType, TemplateSet};
 
 // ── SessionExecutor trait ─────────────────────────────────────────────────────
 
@@ -254,7 +254,7 @@ fn dispatch_function_step(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::template::load_embedded_template_set;
+    use calypso_templates::load_embedded_template_set;
 
     #[test]
     fn step_type_defaults_to_agent_for_simple_state_name() {

@@ -5,7 +5,7 @@ use std::process::Command;
 use crate::pr_checklist::seed_pr_body;
 use crate::runtime::{PullRequestResolver, RuntimeError, load_or_initialize_runtime};
 use crate::state::PullRequestRef;
-use crate::template::resolve_template_set_for_path;
+use calypso_templates::resolve_template_set_for_path;
 
 const DEFAULT_BRANCH_PREFIX: &str = "feat";
 

@@ -6,7 +6,7 @@ use std::process::Command;
 
 use crate::doctor::{DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
 use crate::state::{DevelopmentState, RepositoryIdentity, RepositoryState};
-use crate::template::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
+use calypso_templates::{DEFAULT_AGENTS_YAML, DEFAULT_PROMPTS_YAML, DEFAULT_STATE_MACHINE_YAML};
 
 // ---------------------------------------------------------------------------
 // Init state machine

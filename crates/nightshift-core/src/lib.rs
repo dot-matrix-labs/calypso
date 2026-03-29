@@ -25,5 +25,4 @@ pub mod signal;
 pub mod sm_audit;
 pub mod state;
 pub mod telemetry;
-pub mod template;
 pub mod workflows;
