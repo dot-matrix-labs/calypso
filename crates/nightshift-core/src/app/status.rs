@@ -8,7 +8,7 @@ use crate::state::{
     DevelopmentState, EvidenceStatus, FeatureState, GateStatus, GithubMergeability,
     GithubReviewStatus, PullRequestChecklistItem, PullRequestRef,
 };
-use calypso_templates::load_embedded_template_set;
+use calypso_templates::resolve_template_set_for_path;
 
 use super::helpers::{
     missing_pull_request_evidence, missing_pull_request_ref, resolve_current_branch,
@@ -20,7 +20,8 @@ pub fn run_status(cwd: &Path) -> Result<String, String> {
         resolve_repo_root(cwd).ok_or_else(|| "not inside a git repository".to_string())?;
     let branch = resolve_current_branch(&repo_root)
         .expect("git repositories should report the current branch");
-    let template = load_embedded_template_set().expect("embedded templates should remain valid");
+    let template =
+        resolve_template_set_for_path(&repo_root).expect("embedded templates should remain valid");
     let pull_request_lookup = resolve_current_pull_request(&repo_root);
     let pull_request = match &pull_request_lookup {
         Ok(pull_request) => pull_request.clone(),
