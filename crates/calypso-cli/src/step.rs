@@ -334,6 +334,9 @@ mod tests {
             output.contains("step failed: phony failure"),
             "expected failure message; got: {output}"
         );
-        assert_eq!(outcome, StepLoopOutcome::Failed("phony failure".to_string()));
+        assert_eq!(
+            outcome,
+            StepLoopOutcome::Failed("phony failure".to_string())
+        );
     }
 }

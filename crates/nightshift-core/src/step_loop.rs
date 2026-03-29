@@ -115,8 +115,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::driver::{DriverMode, SessionExecutor, StateMachineDriver};
     use crate::claude::ClarificationRequest;
+    use crate::driver::{DriverMode, SessionExecutor, StateMachineDriver};
     use crate::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
     use crate::state::{
         FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
@@ -321,7 +321,10 @@ mod tests {
 
         let mut prompt = make_prompt(80, 24, vec![y_key()]);
         let outcome = run_step_loop(&mut prompt, &driver, &state_path);
-        assert_eq!(outcome, StepLoopOutcome::Failed("phony failure".to_string()));
+        assert_eq!(
+            outcome,
+            StepLoopOutcome::Failed("phony failure".to_string())
+        );
     }
 
     /// Unchanged result: loop logs "step complete (state unchanged)" and continues.
