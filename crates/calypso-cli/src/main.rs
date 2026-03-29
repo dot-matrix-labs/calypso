@@ -1,3 +1,5 @@
+mod step;
+
 use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
@@ -111,6 +113,18 @@ fn build_info() -> BuildInfo<'static> {
 }
 
 fn main() {
+    // Initialise structured logging to stderr.  Level defaults to INFO and is
+    // overridable via the RUST_LOG environment variable (e.g. RUST_LOG=debug).
+    // Using stderr keeps stdout clean so that --json commands emit valid JSON
+    // without any log noise mixed in.
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_writer(std::io::stderr)
+        .init();
+
     let info = build_info();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -1197,13 +1211,6 @@ fn workflow_agent_prompt(state_name: &str, cfg: &calypso_workflows::StateConfig)
 }
 
 fn run_state_machine_step(repo_root: &std::path::Path, state_path: &std::path::Path) {
-    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-    use nightshift_core::execution::ExecutionConfig;
-    use nightshift_core::pinned_prompt::{
-        Confirmation, PinnedPrompt, format_initial_prompt, format_transition_prompt,
-    };
-    use nightshift_core::state::RepositoryState;
-
     let (template, _) = match resolve_state_machine_template(repo_root, None) {
         Ok(result) => result,
         Err(error) => {
@@ -1211,76 +1218,7 @@ fn run_state_machine_step(repo_root: &std::path::Path, state_path: &std::path::P
             std::process::exit(1);
         }
     };
-    let driver = StateMachineDriver {
-        mode: DriverMode::Step,
-        state_path: state_path.to_path_buf(),
-        template,
-        config: ExecutionConfig::default(),
-        executor: None,
-    };
-
-    let mut prompt = match PinnedPrompt::new() {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("failed to initialize pinned prompt: {e}");
-            std::process::exit(1);
-        }
-    };
-
-    loop {
-        let current = match RepositoryState::load_from_path(state_path) {
-            Ok(state) => state.current_feature.workflow_state.as_str().to_string(),
-            Err(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("error loading state: {e}");
-                std::process::exit(1);
-            }
-        };
-
-        let prompt_text = format_initial_prompt(&current);
-        if let Err(e) = prompt.show_prompt(&prompt_text) {
-            let _ = prompt.cleanup();
-            eprintln!("prompt error: {e}");
-            std::process::exit(1);
-        }
-
-        match prompt.read_confirmation() {
-            Ok(Confirmation::Yes) => {}
-            Ok(Confirmation::No | Confirmation::Quit) => break,
-            Err(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("input error: {e}");
-                std::process::exit(1);
-            }
-        }
-
-        match driver.step() {
-            DriverStepResult::Advanced(next_state) => {
-                let next = next_state.as_str();
-                let _ = prompt.log(&format!("→ advanced to: {next}"));
-                let transition_prompt = format_transition_prompt(&current, next);
-                let _ = prompt.show_prompt(&transition_prompt);
-            }
-            DriverStepResult::Terminal => {
-                let _ = prompt.log("done");
-                break;
-            }
-            DriverStepResult::Unchanged => {
-                let _ = prompt.log("step complete (state unchanged)");
-            }
-            DriverStepResult::ClarificationRequired(q) => {
-                let _ = prompt.log(&format!("clarification required: {q}"));
-            }
-            DriverStepResult::Failed { reason } => {
-                let _ = prompt.log(&format!("step failed: {reason}"));
-            }
-            DriverStepResult::Error(e) => {
-                let _ = prompt.cleanup();
-                eprintln!("error: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
+    step::run_state_machine_step(state_path, template, None);
 }
 
 #[cfg(test)]

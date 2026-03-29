@@ -104,6 +104,28 @@ impl<W: Write, B: TerminalBackend> PinnedPrompt<W, B> {
         self.writer.flush()
     }
 
+    /// Return a reference to the written bytes when `W` is `Vec<u8>`.
+    ///
+    /// Used in tests to inspect what was written to the prompt.
+    pub fn writer_ref(&self) -> &W {
+        &self.writer
+    }
+
+    /// Return a mutable reference to the writer so tests can clear it between
+    /// assertions.
+    pub fn writer_mut(&mut self) -> &mut W {
+        &mut self.writer
+    }
+
+    /// Re-apply the scroll region after subprocess output may have disrupted it.
+    ///
+    /// Call this after any `driver.step()` invocation and before the next
+    /// `log()` or `show_prompt()` call to ensure ANSI scroll-region state is
+    /// intact.
+    pub fn repair_scroll_region(&mut self) -> io::Result<()> {
+        self.set_scroll_region()
+    }
+
     /// Write a log line above the prompt (within the scroll region).
     pub fn log(&mut self, line: &str) -> io::Result<()> {
         write!(self.writer, "\x1b[{};1H", self.height - 1)?;
