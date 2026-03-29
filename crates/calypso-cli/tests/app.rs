@@ -134,9 +134,12 @@ fn resolve_repo_root_and_branch_report_git_context() {
     std::fs::create_dir_all(&nested_dir).expect("nested dir should be created");
     let canonical_repo_root = std::fs::canonicalize(&repo_root).expect("repo root should resolve");
 
-    assert_eq!(resolve_repo_root(&nested_dir), Some(canonical_repo_root));
     assert_eq!(
-        resolve_current_branch(&repo_root),
+        resolve_repo_root(&nested_dir).ok(),
+        Some(canonical_repo_root)
+    );
+    assert_eq!(
+        resolve_current_branch(&repo_root).ok(),
         Some("feature/test-app-runtime".to_string())
     );
 
@@ -202,6 +205,7 @@ fn run_command_returns_none_when_process_cannot_spawn() {
     assert!(
         run_command(Path::new("."), "/definitely/missing-binary", &[])
             .expect_err("missing binary should return an error")
+            .message
             .contains("failed to spawn")
     );
 }
@@ -209,10 +213,10 @@ fn run_command_returns_none_when_process_cannot_spawn() {
 #[test]
 fn run_command_returns_trimmed_stdout_for_successful_process() {
     let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
-    assert_eq!(
+    assert!(matches!(
         run_command(Path::new("."), "/bin/sh", &["-c", "printf ' hello\\n'"]),
-        Ok(CommandOutput::Success("hello".to_string()))
-    );
+        Ok(CommandOutput::Success(ref s)) if s == "hello"
+    ));
 }
 
 #[test]
@@ -263,8 +267,9 @@ fn resolve_current_pull_request_returns_error_when_no_github_remote() {
         .expect_err("missing remote should return an error");
 
     assert!(
-        error.contains("could not resolve owner/repo"),
-        "error should mention owner/repo resolution: {error}"
+        error.message.contains("could not resolve owner/repo"),
+        "error should mention owner/repo resolution: {}",
+        error.message
     );
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
@@ -417,22 +422,22 @@ fn render_feature_status_labels_all_github_review_and_mergeability_variants() {
 }
 
 #[test]
-fn resolve_repo_root_returns_none_outside_a_git_repo() {
+fn resolve_repo_root_returns_err_outside_a_git_repo() {
     let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     let temp_dir = make_temp_dir("calypso-cli-no-git-root");
 
-    assert_eq!(resolve_repo_root(&temp_dir), None);
+    assert!(resolve_repo_root(&temp_dir).is_err());
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
 
 #[test]
-fn resolve_current_branch_returns_none_for_non_git_directory() {
+fn resolve_current_branch_returns_err_for_non_git_directory() {
     let _lock = EXEC_LOCK.read().unwrap_or_else(|e| e.into_inner());
     // Running git branch --show-current outside a git repo exits non-zero.
     let temp_dir = make_temp_dir("calypso-cli-no-git-branch");
 
-    assert_eq!(resolve_current_branch(&temp_dir), None);
+    assert!(resolve_current_branch(&temp_dir).is_err());
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -496,7 +501,7 @@ fn resolve_current_pull_request_returns_error_for_unrecognised_gh_failure() {
     )
     .expect_err("unrecognised gh failure should return an error");
 
-    assert!(error.contains("repository not found"));
+    assert!(error.message.contains("repository not found"));
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -699,7 +704,7 @@ fn resolve_current_pull_request_returns_error_when_gh_succeeds_with_malformed_js
     )
     .expect_err("malformed JSON from gh should return an error");
 
-    assert!(error.contains("malformed pull request JSON"));
+    assert!(error.message.contains("malformed pull request JSON"));
 
     std::fs::remove_dir_all(temp_dir).expect("temp dir should be removed");
 }
@@ -788,9 +793,9 @@ fn run_doctor_fix_single_returns_error_for_unknown_check_id() {
     std::fs::create_dir_all(&temp_dir).expect("temp dir should be created");
     let result = run_doctor_fix_single(&temp_dir, "definitely-not-a-real-check");
     assert!(result.is_err(), "unknown check id should return Err");
-    let msg = result.unwrap_err();
+    let err = result.unwrap_err();
     assert!(
-        msg.contains("unknown check id"),
+        err.message.contains("unknown check id"),
         "error should mention unknown check id"
     );
     std::fs::remove_dir_all(&temp_dir).ok();

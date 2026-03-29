@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use crate::error::CalypsoError;
 use crate::report::{AgentJsonSession, AgentsJsonReport};
 use crate::state::{AgentSession, AgentSessionStatus, FeatureState};
 
@@ -34,12 +35,13 @@ pub fn agents_json_report(feature: &FeatureState) -> AgentsJsonReport {
 }
 
 /// Load state from `.calypso/repository-state.json` and return the agents JSON report.
-pub fn run_agents_json(cwd: &Path) -> Result<String, String> {
+pub fn run_agents_json(cwd: &Path) -> Result<String, CalypsoError> {
     let state_path = cwd.join(".calypso").join("repository-state.json");
-    let state =
-        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let state = crate::state::RepositoryState::load_from_path(&state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     let json_report = agents_json_report(&state.current_feature);
-    serde_json::to_string_pretty(&json_report).map_err(|e| format!("serialization error: {e}"))
+    serde_json::to_string_pretty(&json_report)
+        .map_err(|e| CalypsoError::state_load(format!("serialization error: {e}")))
 }
 
 /// Render a human-readable agents status from a session list.
@@ -79,9 +81,9 @@ fn session_display_parts(session: &AgentSession) -> (&'static str, &'static str)
 }
 
 /// Load state from `.calypso/repository-state.json` and return a plain-text agents summary.
-pub fn run_agents_plain(cwd: &Path) -> Result<String, String> {
+pub fn run_agents_plain(cwd: &Path) -> Result<String, CalypsoError> {
     let state_path = cwd.join(".calypso").join("repository-state.json");
-    let state =
-        crate::state::RepositoryState::load_from_path(&state_path).map_err(|e| e.to_string())?;
+    let state = crate::state::RepositoryState::load_from_path(&state_path)
+        .map_err(|e| CalypsoError::state_load(e.to_string()))?;
     Ok(render_agents(&state.current_feature))
 }

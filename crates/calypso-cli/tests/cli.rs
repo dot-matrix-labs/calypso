@@ -232,7 +232,10 @@ fn status_command_reports_errors_outside_git_repository() {
     assert!(!output.status.success());
 
     let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
-    assert!(stderr.contains("status error: not inside a git repository"));
+    assert!(
+        stderr.contains("status error:") && stderr.contains("not inside a git repository"),
+        "stderr should contain status error with repo root message: {stderr}"
+    );
 
     std::fs::remove_dir_all(path).expect("temp dir should be removed");
 }

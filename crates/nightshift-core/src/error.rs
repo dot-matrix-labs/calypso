@@ -108,6 +108,9 @@ pub mod codes {
     pub const MISSING_CLARIFICATION: &str = "missing_clarification";
     pub const STATE_CORRUPTION: &str = "state_corruption";
     pub const STUDIO_LIFECYCLE: &str = "studio_lifecycle";
+    pub const REPO_ROOT_NOT_FOUND: &str = "repo_root_not_found";
+    pub const STATE_LOAD: &str = "state_load";
+    pub const WORKFLOW_NOT_FOUND: &str = "workflow_not_found";
 }
 
 // ---------------------------------------------------------------------------
@@ -229,6 +232,26 @@ impl CalypsoError {
             codes::STUDIO_LIFECYCLE,
             message,
             Recoverability::Unrecoverable,
+        )
+    }
+
+    pub fn repo_root_not_found(message: impl Into<String>) -> Self {
+        Self::new(
+            codes::REPO_ROOT_NOT_FOUND,
+            message,
+            Recoverability::UserActionRequired,
+        )
+    }
+
+    pub fn state_load(message: impl Into<String>) -> Self {
+        Self::new(codes::STATE_LOAD, message, Recoverability::Unrecoverable)
+    }
+
+    pub fn workflow_not_found(message: impl Into<String>) -> Self {
+        Self::new(
+            codes::WORKFLOW_NOT_FOUND,
+            message,
+            Recoverability::UserActionRequired,
         )
     }
 }

@@ -4,19 +4,20 @@ use crate::doctor::{
     DoctorReport, DoctorStatus, HostDoctorEnvironment, apply_fix, collect_doctor_report,
     render_doctor_report, render_doctor_report_verbose,
 };
+use crate::error::CalypsoError;
 use crate::report::{DoctorJsonCheck, DoctorJsonReport, DoctorJsonSummary};
 
 use super::helpers::resolve_repo_root;
 
 pub fn run_doctor(cwd: &Path) -> String {
-    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
 
     render_doctor_report(&report)
 }
 
 pub fn run_doctor_verbose(cwd: &Path) -> String {
-    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
 
     render_doctor_report_verbose(&report)
@@ -34,16 +35,16 @@ pub struct FixAttemptResult {
 
 /// Apply the fix for a single failing check, then re-run validation.
 ///
-/// Returns `Ok(result)` with the fix output on success, `Err(message)` on failure.
-pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptResult, String> {
-    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+/// Returns `Ok(result)` with the fix output on success, `Err(CalypsoError)` on failure.
+pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptResult, CalypsoError> {
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
 
     let check = report
         .checks
         .iter()
         .find(|c| c.id.label() == check_id)
-        .ok_or_else(|| format!("unknown check id '{check_id}'"))?;
+        .ok_or_else(|| CalypsoError::state_load(format!("unknown check id '{check_id}'")))?;
 
     if check.status == DoctorStatus::Passing {
         return Ok(FixAttemptResult {
@@ -57,9 +58,9 @@ pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptRes
     let fix = check
         .fix
         .as_ref()
-        .ok_or_else(|| format!("no fix available for '{check_id}'"))?;
+        .ok_or_else(|| CalypsoError::state_load(format!("no fix available for '{check_id}'")))?;
 
-    let output = apply_fix(fix, &repo_root)?;
+    let output = apply_fix(fix, &repo_root).map_err(CalypsoError::state_load)?;
     let is_manual = !fix.is_automatic();
 
     // Re-run the doctor check to validate the fix worked.
@@ -86,7 +87,7 @@ pub fn run_doctor_fix_single(cwd: &Path, check_id: &str) -> Result<FixAttemptRes
 ///
 /// Returns a list of results, one per failing check that was attempted.
 pub fn run_doctor_fix_all(cwd: &Path) -> Vec<FixAttemptResult> {
-    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
 
     let mut results = Vec::new();
@@ -225,7 +226,7 @@ pub fn doctor_json_report(report: &DoctorReport) -> DoctorJsonReport {
 /// Run the doctor check and return the JSON report as a pretty-printed string.
 /// Returns `Ok(json)` when all checks pass, `Err(json)` when any fail.
 pub fn run_doctor_json(cwd: &Path) -> Result<String, String> {
-    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+    let repo_root = resolve_repo_root(cwd).unwrap_or_else(|_| cwd.to_path_buf());
     let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
     let json_report = doctor_json_report(&report);
     let json = serde_json::to_string_pretty(&json_report).expect("DoctorJsonReport must serialize");
