@@ -93,14 +93,14 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run end-to-end tests
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test-e2e
 
       - name: Run select-flow end-to-end tests
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo test-select-flow

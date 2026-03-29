@@ -105,11 +105,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Check formatting
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo fmt-check
 
   clippy:
@@ -153,11 +153,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Run clippy
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo lint
 
   build:
@@ -200,9 +200,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            cli -> target
+            crates/calypso-cli -> target
 
       - name: Build
         if: needs.changes.outputs.rust_relevant == 'true'
-        working-directory: cli
+        working-directory: crates/calypso-cli
         run: cargo build-check
