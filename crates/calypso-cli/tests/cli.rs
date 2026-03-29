@@ -589,3 +589,91 @@ fn keys_list_json_returns_valid_json_array() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── Tracing subscriber integration tests ─────────────────────────────────────
+
+/// `state show` with RUST_LOG=info should produce valid JSON on stdout with no
+/// log noise mixed in.
+#[test]
+fn state_show_json_stdout_is_clean_with_rust_log_info() {
+    let state = sample_state();
+    let dir = temp_project_dir_with_state(&state);
+
+    let output = calypso()
+        .args(["state", "show"])
+        .current_dir(&dir)
+        .env("RUST_LOG", "info")
+        .output()
+        .expect("failed to run calypso-cli state show");
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        output.status.success(),
+        "state show should succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    serde_json::from_str::<serde_json::Value>(&stdout)
+        .expect("state show stdout should be valid JSON with no log noise mixed in");
+}
+
+/// With RUST_LOG=error the subscriber should suppress INFO-level output.
+/// `state show` produces no log output on stderr when RUST_LOG=error.
+#[test]
+fn rust_log_error_suppresses_info_output() {
+    let state = sample_state();
+    let dir = temp_project_dir_with_state(&state);
+
+    let output = calypso()
+        .args(["state", "show"])
+        .current_dir(&dir)
+        .env("RUST_LOG", "error")
+        .output()
+        .expect("failed to run calypso-cli state show");
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        output.status.success(),
+        "state show should succeed with RUST_LOG=error"
+    );
+
+    // With RUST_LOG=error, no INFO-level tracing output should appear on stderr.
+    // (state show itself may write error lines to stderr for actual errors, but
+    //  INFO tracing lines from the subscriber should be absent.)
+    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
+    // The subscriber emits lines like "YYYY-MM-DDTHH:MM:SSZ  INFO ...".
+    // With RUST_LOG=error, no INFO lines should be present.
+    assert!(
+        !stderr.contains(" INFO "),
+        "RUST_LOG=error should suppress INFO output; got stderr: {stderr}"
+    );
+}
+
+/// `state status --json` produces valid JSON on stdout with no log noise.
+#[test]
+fn state_status_json_stdout_is_clean_with_rust_log_info() {
+    let state = sample_state();
+    let dir = temp_project_dir_with_state(&state);
+
+    let output = calypso()
+        .args(["state", "status", "--json"])
+        .current_dir(&dir)
+        .env("RUST_LOG", "info")
+        .output()
+        .expect("failed to run calypso-cli state status --json");
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    assert!(
+        output.status.success(),
+        "state status --json should succeed; stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .expect("state status --json stdout should be valid JSON with no log noise");
+}
