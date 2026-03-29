@@ -138,7 +138,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::Arc;
 
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use crossterm::event::{Event, KeyCode, KeyEvent};
 
     // ── MockBackend ────────────────────────────────────────────────────────
 
