@@ -17,6 +17,7 @@ use nightshift_core::init::{
 };
 use nightshift_core::operator_surface::OperatorSurface;
 use nightshift_core::state::RepositoryState;
+use nightshift_core::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct BuildInfo<'a> {
@@ -112,20 +113,35 @@ fn build_info() -> BuildInfo<'static> {
     }
 }
 
-fn main() {
-    // Initialise structured logging to stderr.  Level defaults to INFO and is
-    // overridable via the RUST_LOG environment variable (e.g. RUST_LOG=debug).
-    // Using stderr keeps stdout clean so that --json commands emit valid JSON
-    // without any log noise mixed in.
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_writer(std::io::stderr)
-        .init();
+fn build_logger() -> Logger {
+    Logger::new().with_format(LogFormat::Text)
+}
 
+fn emit_dispatch_log(logger: &Logger, cwd: &std::path::Path, args: &[String]) {
+    if matches!(args, [flag] if flag == "-h" || flag == "--help" || flag == "-v" || flag == "--version")
+    {
+        return;
+    }
+
+    let command = if args.is_empty() {
+        "(default)".to_string()
+    } else {
+        args.join(" ")
+    };
+
+    logger
+        .entry(
+            LogLevel::Info,
+            &format!("dispatching calypso-cli {command} in {}", cwd.display()),
+        )
+        .component(Component::Cli)
+        .event(LogEvent::Startup)
+        .emit();
+}
+
+fn main() {
     let info = build_info();
+    let logger = build_logger();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
 
     // Strip -p / --path <dir> from args before dispatching.
@@ -138,6 +154,7 @@ fn main() {
     let (select_flow, args_after_select_flow) = extract_select_flow_flag(&args_after_path);
 
     let args = args_after_select_flow;
+    emit_dispatch_log(&logger, &cwd, &args);
 
     match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
