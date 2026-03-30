@@ -435,20 +435,7 @@ fn main() {
         // calypso <path> — positional project directory (kept for backward compatibility)
         [path] if looks_like_path(path) => {
             let project_dir = std::path::Path::new(path);
-            let state_path = project_dir.join(".calypso").join("repository-state.json");
-            let flow = resolve_select_flow(select_flow, project_dir);
-            match flow {
-                Some(SelectedFlow::Workflow(name)) => {
-                    run_workflow_auto(&name, project_dir);
-                }
-                None => {
-                    if state_path.exists() {
-                        run_state_machine_auto(project_dir, &state_path, None);
-                    } else {
-                        println!("{}", run_doctor(project_dir));
-                    }
-                }
-            }
+            run_project_dir(project_dir, select_flow);
         }
         // calypso --step — step mode: one step per Enter keypress
         [flag] if flag == "--step" => {
@@ -461,46 +448,50 @@ fn main() {
         }
         // calypso — no args: drive state machine if initialized, else show doctor output
         [] => {
-            let state_path = cwd.join(".calypso").join("repository-state.json");
-            // Resolve --select-flow before checking whether the state file exists so that
-            // the interactive selector is shown even on an uninitialised project directory.
-            let flow = resolve_select_flow(select_flow, &cwd);
-            match flow {
-                Some(SelectedFlow::Workflow(name)) => {
-                    run_workflow_auto(&name, &cwd);
-                }
-                None => {
-                    if state_path.exists() {
-                        run_state_machine_auto(&cwd, &state_path, None);
-                    } else if !select_flow {
-                        // No --select-flow flag was used: auto-detect local workflow files
-                        // before falling back to doctor output.
-                        let local_flows = collect_eligible_local_flows(&cwd);
-                        match local_flows.len() {
-                            1 => {
-                                run_workflow_auto(&local_flows[0], &cwd);
-                            }
-                            n if n > 1 => {
-                                // Multiple local workflows: prompt the user to pick one.
-                                if let Some(SelectedFlow::Workflow(name)) =
-                                    select_workflow_interactively(&cwd)
-                                {
-                                    run_workflow_auto(&name, &cwd);
-                                }
-                            }
-                            _ => {
-                                // No local workflows: fall back to embedded doctor output.
-                                println!("{}", run_doctor(&cwd));
-                            }
-                        }
-                    } else {
-                        // --select-flow was used but user cancelled or no eligible workflows.
-                        println!("{}", run_doctor(&cwd));
-                    }
-                }
-            }
+            run_project_dir(&cwd, select_flow);
         }
         _ => println!("{}", render_help(info)),
+    }
+}
+
+fn run_project_dir(project_dir: &std::path::Path, select_flow: bool) {
+    let state_path = project_dir.join(".calypso").join("repository-state.json");
+    // Resolve --select-flow before checking whether the state file exists so that
+    // the interactive selector is shown even on an uninitialised project directory.
+    let flow = resolve_select_flow(select_flow, project_dir);
+    match flow {
+        Some(SelectedFlow::Workflow(name)) => {
+            run_workflow_auto(&name, project_dir);
+        }
+        None => {
+            if state_path.exists() {
+                run_state_machine_auto(project_dir, &state_path, None);
+            } else if !select_flow {
+                // No --select-flow flag was used: auto-detect local workflow files
+                // before falling back to doctor output.
+                let local_flows = collect_eligible_local_flows(project_dir);
+                match local_flows.len() {
+                    1 => {
+                        run_workflow_auto(&local_flows[0], project_dir);
+                    }
+                    n if n > 1 => {
+                        // Multiple local workflows: prompt the user to pick one.
+                        if let Some(SelectedFlow::Workflow(name)) =
+                            select_workflow_interactively(project_dir)
+                        {
+                            run_workflow_auto(&name, project_dir);
+                        }
+                    }
+                    _ => {
+                        // No local workflows: fall back to embedded doctor output.
+                        println!("{}", run_doctor(project_dir));
+                    }
+                }
+            } else {
+                // --select-flow was used but user cancelled or no eligible workflows.
+                println!("{}", run_doctor(project_dir));
+            }
+        }
     }
 }
 
