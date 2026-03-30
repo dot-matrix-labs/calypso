@@ -983,7 +983,7 @@ mod tests {
         let wf = EmbeddedWorkflowLibrary::parse(yaml).unwrap();
         // Compile-time proof: accessing wf.states (HashMap<String, StateConfig>)
         // and any StateConfig field is still possible without `checks`.
-        for (_, state_cfg) in &wf.states {
+        for state_cfg in wf.states.values() {
             // Confirm ci_job and completion fields still exist (canonical fields).
             let _ = &state_cfg.ci_job;
             let _ = &state_cfg.completion;
