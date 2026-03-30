@@ -17,10 +17,12 @@ use serde_json::Value;
 // ── Embedded HTML page ────────────────────────────────────────────────────────
 
 const INDEX_HTML: &str = include_str!("webview_index.html");
+const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /// Returns the first non-loopback IPv4 address of this machine, if any.
+#[allow(dead_code)]
 fn public_ip() -> Option<std::net::Ipv4Addr> {
     use std::net::{SocketAddr, UdpSocket};
     // Connect to an external address (no data is sent) to discover the local
@@ -33,22 +35,23 @@ fn public_ip() -> Option<std::net::Ipv4Addr> {
     }
 }
 
-/// Start the local webview HTTP server on `0.0.0.0:{port}` (all interfaces).
+fn webview_bind_host() -> &'static str {
+    "127.0.0.1"
+}
+
+/// Start the local webview HTTP server on `127.0.0.1:{port}`.
 ///
-/// Prints the local URL and the public/LAN IP if detectable. Blocks forever
-/// (until the process is killed). Each connection is handled on a dedicated thread.
+/// Prints the local URL. Blocks forever (until the process is killed). Each
+/// connection is handled on a dedicated thread.
 ///
 /// Returns `Err(CalypsoError)` if the TCP listener cannot bind to the requested
 /// address (e.g. the port is already in use).
 pub fn run_webview(cwd: &Path, port: u16) -> Result<(), CalypsoError> {
-    let addr = format!("0.0.0.0:{port}");
+    let addr = format!("{}:{port}", webview_bind_host());
     let listener = TcpListener::bind(&addr).map_err(|e| {
         CalypsoError::transport(format!("failed to bind webview server to {addr}: {e}"))
     })?;
     println!("Calypso webview running at http://localhost:{port}");
-    if let Some(ip) = public_ip() {
-        println!("                       http://{ip}:{port}  (network)");
-    }
     println!("Press Ctrl+C to stop.");
     for stream in listener.incoming().flatten() {
         let cwd = cwd.to_path_buf();
@@ -78,6 +81,16 @@ fn handle_connection(mut stream: std::net::TcpStream, cwd: &Path) {
         }
     }
 
+    if content_length > MAX_REQUEST_BODY_BYTES {
+        write_response(
+            &mut stream,
+            "413 Payload Too Large",
+            "application/json",
+            json_error_body("request body too large"),
+        );
+        return;
+    }
+
     // Read body for POST requests.
     let mut body = vec![0u8; content_length];
     if content_length > 0 {
@@ -89,13 +102,7 @@ fn handle_connection(mut stream: std::net::TcpStream, cwd: &Path) {
     let path = parts.get(1).copied().unwrap_or("/");
 
     let (status, content_type, body_bytes) = route(method, path, &body, cwd);
-
-    let response = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
-        body_bytes.len()
-    );
-    stream.write_all(response.as_bytes()).ok();
-    stream.write_all(&body_bytes).ok();
+    write_response(&mut stream, status, content_type, body_bytes);
 }
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -120,14 +127,32 @@ fn route(
             let json = read_workflows_json(cwd);
             ("200 OK", "application/json", json.into_bytes())
         }
-        ("POST", "/api/trigger") => {
-            handle_trigger(body, cwd);
-            ("200 OK", "application/json", b"{\"ok\":true}".to_vec())
-        }
-        ("POST", "/api/cron-now") => {
-            handle_cron_now(body, cwd);
-            ("200 OK", "application/json", b"{\"ok\":true}".to_vec())
-        }
+        ("POST", "/api/trigger") => match handle_trigger(body, cwd) {
+            Ok(()) => ("200 OK", "application/json", ok_body()),
+            Err(RequestError::BadRequest) => (
+                "400 Bad Request",
+                "application/json",
+                json_error_body("invalid JSON"),
+            ),
+            Err(RequestError::InternalServerError) => (
+                "500 Internal Server Error",
+                "application/json",
+                json_error_body("failed to persist pending event"),
+            ),
+        },
+        ("POST", "/api/cron-now") => match handle_cron_now(body, cwd) {
+            Ok(()) => ("200 OK", "application/json", ok_body()),
+            Err(RequestError::BadRequest) => (
+                "400 Bad Request",
+                "application/json",
+                json_error_body("invalid JSON"),
+            ),
+            Err(RequestError::InternalServerError) => (
+                "500 Internal Server Error",
+                "application/json",
+                json_error_body("failed to persist pending cron"),
+            ),
+        },
         _ => ("404 Not Found", "text/plain", b"Not found".to_vec()),
     }
 }
@@ -207,22 +232,59 @@ fn read_workflows_json(cwd: &Path) -> String {
     serde_json::to_string(&Value::Array(entries)).unwrap_or_else(|_| "[]".to_string())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RequestError {
+    BadRequest,
+    InternalServerError,
+}
+
+fn ok_body() -> Vec<u8> {
+    b"{\"ok\":true}".to_vec()
+}
+
+fn json_error_body(message: &str) -> Vec<u8> {
+    serde_json::json!({
+        "ok": false,
+        "error": message,
+    })
+    .to_string()
+    .into_bytes()
+}
+
+fn write_response(
+    stream: &mut std::net::TcpStream,
+    status: &str,
+    content_type: &str,
+    body_bytes: Vec<u8>,
+) {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nAccess-Control-Allow-Origin: *\r\nConnection: close\r\n\r\n",
+        body_bytes.len()
+    );
+    stream.write_all(response.as_bytes()).ok();
+    stream.write_all(&body_bytes).ok();
+}
+
 /// Parse `{ "event": "..." }` from body and write to `.calypso/pending-event.json`.
-fn handle_trigger(body: &[u8], cwd: &Path) {
+fn handle_trigger(body: &[u8], cwd: &Path) -> Result<(), RequestError> {
     let calypso_dir = cwd.join(".calypso");
-    if let Ok(parsed) = serde_json::from_slice::<Value>(body) {
-        let out = serde_json::to_string_pretty(&parsed).unwrap_or_default();
-        let _ = std::fs::write(calypso_dir.join("pending-event.json"), out);
-    }
+    let parsed = serde_json::from_slice::<Value>(body).map_err(|_| RequestError::BadRequest)?;
+    let out =
+        serde_json::to_string_pretty(&parsed).map_err(|_| RequestError::InternalServerError)?;
+    std::fs::write(calypso_dir.join("pending-event.json"), out)
+        .map_err(|_| RequestError::InternalServerError)?;
+    Ok(())
 }
 
 /// Parse `{ "workflow": "..." }` from body and write to `.calypso/pending-cron.json`.
-fn handle_cron_now(body: &[u8], cwd: &Path) {
+fn handle_cron_now(body: &[u8], cwd: &Path) -> Result<(), RequestError> {
     let calypso_dir = cwd.join(".calypso");
-    if let Ok(parsed) = serde_json::from_slice::<Value>(body) {
-        let out = serde_json::to_string_pretty(&parsed).unwrap_or_default();
-        let _ = std::fs::write(calypso_dir.join("pending-cron.json"), out);
-    }
+    let parsed = serde_json::from_slice::<Value>(body).map_err(|_| RequestError::BadRequest)?;
+    let out =
+        serde_json::to_string_pretty(&parsed).map_err(|_| RequestError::InternalServerError)?;
+    std::fs::write(calypso_dir.join("pending-cron.json"), out)
+        .map_err(|_| RequestError::InternalServerError)?;
+    Ok(())
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -392,6 +454,38 @@ mod tests {
         assert!(written.is_ok());
         assert!(written.unwrap().contains("calypso-orchestrator-startup"));
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_post_mutations_reject_invalid_json() {
+        let tmp = std::env::temp_dir().join("calypso-webview-invalid-json");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let body = br#"{"event":"missing quote}"#;
+
+        for path in ["/api/trigger", "/api/cron-now"] {
+            let (status, ct, response_body) = route("POST", path, body, &tmp);
+            assert_eq!(status, "400 Bad Request");
+            assert!(ct.contains("application/json"));
+            let parsed: Value = serde_json::from_slice(&response_body).expect("valid JSON");
+            assert_eq!(parsed["ok"], false);
+            assert_eq!(parsed["error"], "invalid JSON");
+        }
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_post_mutations_return_500_when_pending_dir_missing() {
+        let tmp = std::env::temp_dir().join("calypso-webview-missing-pending-dir");
+        let body = br#"{"event":"planning-task-identified"}"#;
+
+        for path in ["/api/trigger", "/api/cron-now"] {
+            let (status, ct, response_body) = route("POST", path, body, &tmp);
+            assert_eq!(status, "500 Internal Server Error");
+            assert!(ct.contains("application/json"));
+            let parsed: Value = serde_json::from_slice(&response_body).expect("valid JSON");
+            assert_eq!(parsed["ok"], false);
+        }
     }
 
     // ── read_state_json tests ────────────────────────────────────────────────
@@ -592,6 +686,11 @@ jobs:
         }
     }
 
+    #[test]
+    fn webview_binds_to_localhost_by_default() {
+        assert_eq!(webview_bind_host(), "127.0.0.1");
+    }
+
     // ── StateKind variants and parse-error path ───────────────────────────────
 
     #[test]
@@ -696,6 +795,42 @@ jobs:
         assert!(
             response.contains("200 OK"),
             "expected 200 OK for POST trigger"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn handle_connection_rejects_oversized_request_body() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let tmp = std::env::temp_dir().join("calypso-webview-handle-conn-too-large");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let cwd = tmp.clone();
+        let handle = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            handle_connection(stream, &cwd);
+        });
+
+        let oversized = MAX_REQUEST_BODY_BYTES + 1;
+        let request = format!(
+            "POST /api/trigger HTTP/1.1\r\nHost: localhost\r\nContent-Length: {oversized}\r\n\r\n"
+        );
+
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client.write_all(request.as_bytes()).unwrap();
+
+        let mut response = String::new();
+        client.read_to_string(&mut response).unwrap();
+        handle.join().unwrap();
+
+        assert!(
+            response.contains("413 Payload Too Large"),
+            "expected 413 response for oversized body"
         );
         let _ = std::fs::remove_dir_all(&tmp);
     }
