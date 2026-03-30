@@ -11,10 +11,7 @@ calypso-templates = { path = "../calypso-templates" }
 calypso-web = { path = "../calypso-web" }
 calypso-workflows = { path = "../calypso-workflows" }
 calypso-workflow-exec = { path = "../calypso-workflow-exec" }
-# Direct dependencies still needed by integration tests or re-exported types
-serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_yaml = "0.9"
 
 [[bin]]
 name = "calypso-cli"
@@ -28,10 +25,11 @@ required-features = ["__dev_only"]
 
 [dev-dependencies]
 crossterm = "0.26.1"
-expectrl = "0.7"
 # Enable the testing helpers (MockBackend, make_prompt) from nightshift-core in
 # unit tests. Cargo merges features from dev-dependencies with the normal dep.
 nightshift-core = { path = "../nightshift-core", features = ["testing"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
 
 [features]
 __dev_only = []

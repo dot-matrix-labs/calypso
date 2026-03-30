@@ -2,6 +2,7 @@ use std::path::Path;
 
 use crate::error::CalypsoError;
 use crate::keys::{KeyName, KeyStore, KeyStoreSnapshot, render_keys_list};
+use crate::timefmt;
 
 /// Path to the key store snapshot file, relative to `.calypso/`.
 const KEY_STORE_FILE: &str = "keys.json";
@@ -35,8 +36,7 @@ fn save_key_store(store: &KeyStore, cwd: &Path) -> Result<(), CalypsoError> {
 }
 
 fn now_iso8601() -> String {
-    // Use chrono for consistent formatting.
-    chrono::Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string()
+    timefmt::now_iso8601()
 }
 
 /// `calypso keys list` — list all managed keys with metadata.
