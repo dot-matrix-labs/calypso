@@ -5,15 +5,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use calypso_templates::TemplateError;
-use nightshift_core::runtime::{
+use calypso_runtime::runtime::{
     GhCliPullRequestResolver, PullRequestResolver, RuntimeError,
     discover_current_repository_context, discover_repository_context,
     load_or_initialize_current_runtime, load_or_initialize_runtime,
 };
-use nightshift_core::state::{
+use calypso_runtime::state::{
     GateInitializationError, PullRequestRef, RepositoryState, StateError, WorkflowState,
 };
+use calypso_templates::TemplateError;
 
 static TEMP_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 static PATH_MUTEX: OnceLock<Mutex<()>> = OnceLock::new();

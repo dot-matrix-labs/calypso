@@ -1,5 +1,7 @@
 mod step;
 
+use calypso_runtime::operator_surface::OperatorSurface;
+use calypso_runtime::state::RepositoryState;
 use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
@@ -15,8 +17,6 @@ use nightshift_core::init::{
     HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
     render_init_status, run_init_interactive, run_init_step,
 };
-use nightshift_core::operator_surface::OperatorSurface;
-use nightshift_core::state::RepositoryState;
 use nightshift_core::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -39,12 +39,12 @@ pub fn run_state_machine_step(
 
 #[cfg(test)]
 mod tests {
+    use calypso_runtime::state::{
+        FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
+    };
     use nightshift_core::driver::{DriverMode, SessionExecutor, StateMachineDriver};
     use nightshift_core::execution::{ExecutionConfig, ExecutionError, ExecutionOutcome};
     use nightshift_core::pinned_prompt::PinnedPrompt;
-    use nightshift_core::state::{
-        FeatureState, FeatureType, PullRequestRef, RepositoryState, SchedulingMeta, WorkflowState,
-    };
     use nightshift_core::step_loop::{StepLoopOutcome, run_step_loop};
     use nightshift_core::testing::{MockBackend, make_prompt};
 

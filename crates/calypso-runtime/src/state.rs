@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use calypso_templates::{AgentTaskKind, TemplateSet};
 
+/// A reference to a managed key, embedded in provider/deployment config.
+/// Contains only the identifier and purpose metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SecureKeyRef {
+    pub name: String,
+    pub purpose: String,
+}
+
 /// Identity metadata for the repository. Contains no secrets.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct RepositoryIdentity {
@@ -14,9 +22,6 @@ pub struct RepositoryIdentity {
     pub github_remote_url: String,
     pub default_branch: String,
 }
-
-// SecureKeyRef lives in crate::keys — re-exported here for state-level access.
-pub use crate::keys::SecureKeyRef;
 
 /// A summary entry for an active feature, used in the repository-level index.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

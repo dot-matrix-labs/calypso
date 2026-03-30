@@ -6,6 +6,7 @@ build = "build.rs"
 default-run = "calypso-cli"
 
 [dependencies]
+calypso-runtime = { path = "../calypso-runtime" }
 nightshift-core = { path = "../nightshift-core" }
 calypso-templates = { path = "../calypso-templates" }
 calypso-web = { path = "../calypso-web" }
