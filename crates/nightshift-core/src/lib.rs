@@ -26,6 +26,7 @@ pub mod sm_audit;
 pub mod state;
 pub mod step_loop;
 pub mod telemetry;
+pub(crate) mod timefmt;
 pub mod workflows;
 
 #[cfg(any(test, feature = "testing"))]

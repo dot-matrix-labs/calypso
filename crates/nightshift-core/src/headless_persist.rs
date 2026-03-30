@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::timefmt;
+
 // ── Exit reason tag ───────────────────────────────────────────────────────────
 
 /// A serialisable, human-readable tag for the cause of an interrupted run.
@@ -143,11 +145,8 @@ impl HeadlessRunState {
 }
 
 /// Build an RFC 3339 timestamp string for the current UTC moment.
-///
-/// Uses [`chrono`] when available, falls back to a Unix-second string when
-/// the time cannot be determined.
 pub fn now_rfc3339() -> String {
-    chrono::Utc::now().to_rfc3339()
+    timefmt::now_rfc3339()
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

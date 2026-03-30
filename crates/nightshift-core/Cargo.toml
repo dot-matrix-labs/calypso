@@ -9,12 +9,9 @@ calypso-templates = { path = "../calypso-templates" }
 calypso-workflow-exec = { path = "../calypso-workflow-exec" }
 calypso-workflows = { path = "../calypso-workflows" }
 crossterm = "0.26.1"
-regex-lite = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-chrono = "0.4"
-cron = "0.12"
 
 [dev-dependencies]
 proptest = "1"

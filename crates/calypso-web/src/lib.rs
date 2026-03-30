@@ -6,18 +6,39 @@
 //! No external HTTP crate is required — the server uses only `std::net::TcpListener`
 //! with one thread per connection.
 
+use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
 use calypso_workflows::{StateKind, WorkflowCatalog};
-use nightshift_core::error::CalypsoError;
 use serde_json::Value;
 
 // ── Embedded HTML page ────────────────────────────────────────────────────────
 
 const INDEX_HTML: &str = include_str!("webview_index.html");
 const MAX_REQUEST_BODY_BYTES: usize = 64 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebviewError {
+    message: String,
+}
+
+impl WebviewError {
+    fn transport(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+        }
+    }
+}
+
+impl fmt::Display for WebviewError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for WebviewError {}
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
@@ -44,12 +65,12 @@ fn webview_bind_host() -> &'static str {
 /// Prints the local URL. Blocks forever (until the process is killed). Each
 /// connection is handled on a dedicated thread.
 ///
-/// Returns `Err(CalypsoError)` if the TCP listener cannot bind to the requested
+/// Returns `Err(WebviewError)` if the TCP listener cannot bind to the requested
 /// address (e.g. the port is already in use).
-pub fn run_webview(cwd: &Path, port: u16) -> Result<(), CalypsoError> {
+pub fn run_webview(cwd: &Path, port: u16) -> Result<(), WebviewError> {
     let addr = format!("{}:{port}", webview_bind_host());
     let listener = TcpListener::bind(&addr).map_err(|e| {
-        CalypsoError::transport(format!("failed to bind webview server to {addr}: {e}"))
+        WebviewError::transport(format!("failed to bind webview server to {addr}: {e}"))
     })?;
     println!("Calypso webview running at http://localhost:{port}");
     println!("Press Ctrl+C to stop.");

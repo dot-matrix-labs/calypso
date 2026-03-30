@@ -45,26 +45,170 @@ pub fn redact(input: &str) -> String {
         }
     }
 
-    // Bearer tokens: `Bearer <value>` where value runs to whitespace / EOL.
-    let bearer_re = regex_lite::Regex::new(r"(?i)Bearer\s+[A-Za-z0-9\-._~+/]+=*").unwrap();
-    output = bearer_re
-        .replace_all(&output, "Bearer [REDACTED]")
-        .into_owned();
-
-    // GitHub PATs: ghp_ and github_pat_ prefixes.
-    let ghp_re = regex_lite::Regex::new(r"ghp_[A-Za-z0-9]{10,}").unwrap();
-    output = ghp_re.replace_all(&output, "[REDACTED]").into_owned();
-
-    let github_pat_re = regex_lite::Regex::new(r"github_pat_[A-Za-z0-9_]{10,}").unwrap();
-    output = github_pat_re
-        .replace_all(&output, "[REDACTED]")
-        .into_owned();
-
-    // Generic hex strings of 40+ characters (e.g. raw API keys / SHA tokens).
-    let hex_re = regex_lite::Regex::new(r"\b[0-9a-fA-F]{40,}\b").unwrap();
-    output = hex_re.replace_all(&output, "[REDACTED]").into_owned();
+    output = scrub_bearer_tokens(&output);
+    output = scrub_prefixed_tokens(&output, "ghp_", is_ascii_alnum, 10);
+    output = scrub_prefixed_tokens(&output, "github_pat_", is_github_pat_char, 10);
+    output = scrub_long_hex_tokens(&output);
 
     output
+}
+
+fn scrub_bearer_tokens(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if is_bearer_prefix_at(input, index) {
+            let prefix_end = index + "Bearer".len();
+            let mut cursor = prefix_end;
+            while let Some(ch) = input[cursor..].chars().next() {
+                if !ch.is_ascii_whitespace() {
+                    break;
+                }
+                cursor += ch.len_utf8();
+            }
+            let token_start = cursor;
+            while let Some(ch) = input[cursor..].chars().next() {
+                if !is_bearer_token_char(ch) {
+                    break;
+                }
+                cursor += ch.len_utf8();
+            }
+            if cursor > token_start {
+                output.push_str(&input[..index]);
+                output.push_str("Bearer [REDACTED]");
+                output.push_str(&scrub_bearer_tokens(&input[cursor..]));
+                return output;
+            }
+        }
+        let ch = input[index..]
+            .chars()
+            .next()
+            .expect("valid utf-8 boundary while redacting");
+        output.push(ch);
+        index += ch.len_utf8();
+    }
+    output
+}
+
+fn scrub_prefixed_tokens(
+    input: &str,
+    prefix: &str,
+    allowed: fn(char) -> bool,
+    min_len: usize,
+) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        if input[index..].starts_with(prefix) {
+            let mut cursor = index + prefix.len();
+            let mut len = 0usize;
+            while let Some(ch) = input[cursor..].chars().next() {
+                if !allowed(ch) {
+                    break;
+                }
+                cursor += ch.len_utf8();
+                len += 1;
+            }
+            if len >= min_len {
+                output.push_str(&input[..index]);
+                output.push_str("[REDACTED]");
+                output.push_str(&scrub_prefixed_tokens(
+                    &input[cursor..],
+                    prefix,
+                    allowed,
+                    min_len,
+                ));
+                return output;
+            }
+        }
+        let ch = input[index..]
+            .chars()
+            .next()
+            .expect("valid utf-8 boundary while redacting");
+        output.push(ch);
+        index += ch.len_utf8();
+    }
+    output
+}
+
+fn scrub_long_hex_tokens(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut index = 0;
+    while index < input.len() {
+        let Some(ch) = input[index..].chars().next() else {
+            break;
+        };
+        if is_hex_char(ch) && is_hex_boundary(input, index, true) {
+            let start = index;
+            let mut cursor = index + ch.len_utf8();
+            let mut count = 1usize;
+            while let Some(next) = input[cursor..].chars().next() {
+                if !is_hex_char(next) {
+                    break;
+                }
+                cursor += next.len_utf8();
+                count += 1;
+            }
+            if count >= 40 && is_hex_boundary(input, cursor, false) {
+                output.push_str(&input[..start]);
+                output.push_str("[REDACTED]");
+                output.push_str(&scrub_long_hex_tokens(&input[cursor..]));
+                return output;
+            }
+        }
+        output.push(ch);
+        index += ch.len_utf8();
+    }
+    output
+}
+
+fn is_bearer_prefix_at(input: &str, index: usize) -> bool {
+    let prefix = "Bearer";
+    let Some(segment) = input.get(index..index + prefix.len()) else {
+        return false;
+    };
+    if !segment.eq_ignore_ascii_case(prefix) {
+        return false;
+    }
+    if index > 0
+        && let Some(prev) = input[..index].chars().next_back()
+        && prev.is_ascii_alphanumeric()
+    {
+        return false;
+    }
+    input[index + prefix.len()..]
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_whitespace())
+}
+
+fn is_bearer_token_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || matches!(ch, '-' | '.' | '_' | '~' | '+' | '/' | '=')
+}
+
+fn is_ascii_alnum(ch: char) -> bool {
+    ch.is_ascii_alphanumeric()
+}
+
+fn is_github_pat_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
+}
+
+fn is_hex_char(ch: char) -> bool {
+    ch.is_ascii_hexdigit()
+}
+
+fn is_hex_boundary(input: &str, index: usize, start: bool) -> bool {
+    if start {
+        return input[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|ch| !is_hex_char(ch));
+    }
+    input[index..]
+        .chars()
+        .next()
+        .is_none_or(|ch| !is_hex_char(ch))
 }
 
 // ---------------------------------------------------------------------------
