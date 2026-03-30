@@ -68,12 +68,7 @@ impl PullRequestResolver for GhCliPullRequestResolver {
         repo_root: &Path,
         branch: &str,
     ) -> Result<PullRequestRef, RuntimeError> {
-        let (owner, repo_name) = crate::github::resolve_owner_repo(repo_root).map_err(|e| {
-            RuntimeError::CommandFailed {
-                program: "git".to_string(),
-                details: e.to_string(),
-            }
-        })?;
+        let (owner, repo_name) = resolve_owner_repo(repo_root)?;
 
         let endpoint =
             format!("repos/{owner}/{repo_name}/pulls?head={owner}:{branch}&per_page=1&state=open");
@@ -231,6 +226,37 @@ fn git_output(current_dir: &Path, args: &[&str]) -> Result<String, RuntimeError>
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn resolve_owner_repo(repo_root: &Path) -> Result<(String, String), RuntimeError> {
+    let url = git_output(repo_root, &["remote", "get-url", "origin"])?;
+    parse_owner_repo_from_url(&url).ok_or_else(|| RuntimeError::CommandFailed {
+        program: "git".to_string(),
+        details: "could not parse owner/repo from remote URL".to_string(),
+    })
+}
+
+fn parse_owner_repo_from_url(url: &str) -> Option<(String, String)> {
+    let trimmed = url.trim().trim_end_matches(".git");
+
+    if let Some(rest) = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+    {
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Some((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    if let Some(rest) = trimmed.strip_prefix("git@github.com:") {
+        let parts: Vec<&str> = rest.splitn(3, '/').collect();
+        if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+            return Some((parts[0].to_string(), parts[1].to_string()));
+        }
+    }
+
+    None
 }
 
 #[derive(Debug, Deserialize)]

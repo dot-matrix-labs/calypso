@@ -60,6 +60,7 @@ checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 name = "calypso-cli"
 version = "0.1.0"
 dependencies = [
+ "calypso-runtime",
  "calypso-templates",
  "calypso-web",
  "calypso-workflow-exec",
@@ -69,6 +70,15 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+]
+
+[[package]]
+name = "calypso-runtime"
+version = "0.1.0"
+dependencies = [
+ "calypso-templates",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -383,6 +393,7 @@ dependencies = [
 name = "nightshift-core"
 version = "0.1.0"
 dependencies = [
+ "calypso-runtime",
  "calypso-templates",
  "calypso-workflow-exec",
  "calypso-workflows",

@@ -7,8 +7,8 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use nightshift_core::operator_surface::OperatorSurface;
-use nightshift_core::state::{
+use calypso_runtime::operator_surface::OperatorSurface;
+use calypso_runtime::state::{
     AgentSession, AgentSessionStatus, AgentTerminalOutcome, ClarificationEntry, FeatureState,
     FeatureType, Gate, GateGroup, GateStatus, PullRequestRef, RepositoryState, SchedulingMeta,
     SessionOutput, SessionOutputStream, WorkflowState,

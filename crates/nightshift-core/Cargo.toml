@@ -5,6 +5,7 @@ edition = "2024"
 build = "build.rs"
 
 [dependencies]
+calypso-runtime = { path = "../calypso-runtime" }
 calypso-templates = { path = "../calypso-templates" }
 calypso-workflow-exec = { path = "../calypso-workflow-exec" }
 calypso-workflows = { path = "../calypso-workflows" }
