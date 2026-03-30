@@ -159,3 +159,107 @@ fn state_file_present_skips_local_workflow_auto_detect() {
         out.stdout
     );
 }
+
+// ── --path dispatch branch ──────────────────────────────────────────────────
+
+/// `calypso --path <dir>` must auto-start a single eligible local workflow
+/// when no repository-state.json is present.
+#[test]
+fn path_flag_single_local_workflow_dispatch_auto_starts_without_select_flow() {
+    let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
+    let out = spawned_calypso()
+        .args(["--path", "{WORK_DIR}"])
+        .calypso_file("dispatch-only.yaml", dispatch_only)
+        .run();
+
+    assert!(
+        out.stdout.contains("Starting workflow:"),
+        "expected 'Starting workflow:' in stdout for --path auto-start; stdout:\n{}\nstderr:\n{}",
+        out.stdout,
+        out.stderr
+    );
+}
+
+/// `calypso --path <dir>` must show the selection menu when multiple eligible
+/// local workflows exist.
+#[test]
+fn path_flag_multiple_local_workflows_show_selection_menu() {
+    let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
+    let hello_world = include_str!("fixtures/workflows/hello-world.yaml");
+    let out = spawned_calypso()
+        .args(["--path", "{WORK_DIR}"])
+        .calypso_file("dispatch-only.yaml", dispatch_only)
+        .calypso_file("hello-world.yaml", hello_world)
+        .stdin("0\n")
+        .run();
+
+    assert!(
+        out.stdout.contains("Available workflows:"),
+        "expected selection menu for --path with multiple local workflows; stdout:\n{}",
+        out.stdout
+    );
+}
+
+/// `calypso --path <dir>` must fall back to doctor output when no eligible
+/// local workflows are present.
+#[test]
+fn path_flag_no_local_workflows_falls_back_to_embedded_behavior() {
+    let out = spawned_calypso().args(["--path", "{WORK_DIR}"]).run();
+
+    assert!(
+        !out.stdout.contains("Starting workflow:"),
+        "expected no auto-started workflow for --path with no local files; stdout:\n{}",
+        out.stdout
+    );
+}
+
+/// `calypso --path <dir>` must still drive the state machine when a repository
+/// state file is present.
+#[test]
+fn path_flag_state_file_present_skips_local_workflow_auto_detect() {
+    let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
+    let state_json = r#"{
+  "current_step": "done",
+  "repo_path": "/tmp",
+  "completed_steps": []
+}"#;
+    let out = spawned_calypso()
+        .args(["--path", "{WORK_DIR}"])
+        .state_file_json(state_json)
+        .calypso_file("dispatch-only.yaml", dispatch_only)
+        .run();
+
+    assert!(
+        !out.stdout.contains("Available workflows:"),
+        "state-machine path must not show a selection menu for --path; stdout:\n{}",
+        out.stdout
+    );
+    assert!(
+        !out.stdout.contains("Starting workflow:"),
+        "state-machine path must not auto-start a local workflow for --path; stdout:\n{}",
+        out.stdout
+    );
+}
+
+/// `calypso --path <dir> --select-flow` must continue to show the selector
+/// instead of auto-starting local workflows.
+#[test]
+fn path_flag_with_select_flow_keeps_selector() {
+    let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
+    let out = spawned_calypso()
+        .args(["--path", "{WORK_DIR}", "--select-flow"])
+        .calypso_file("dispatch-only.yaml", dispatch_only)
+        .stdin("0\n")
+        .run();
+
+    assert!(
+        out.stdout.contains("Available workflows:"),
+        "expected selector for --path with --select-flow; stdout:\n{}",
+        out.stdout
+    );
+    assert!(
+        !out.stdout.contains("Starting workflow:"),
+        "expected no auto-start for --path with --select-flow; stdout:\n{}",
+        out.stdout
+    );
+}

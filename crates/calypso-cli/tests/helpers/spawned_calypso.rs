@@ -121,14 +121,17 @@ impl SpawnedCalypsoBuilder {
                 .expect("extra calypso file should be written");
         }
 
-        // Substitute {STATE_FILE} placeholder in args with the actual path.
+        // Substitute path placeholders in args with the actual paths.
         let state_path_str = state_path.to_string_lossy().into_owned();
+        let work_dir_str = work_dir.to_string_lossy().into_owned();
         let args: Vec<String> = self
             .args
             .iter()
             .map(|a| {
                 if a == "{STATE_FILE}" {
                     state_path_str.clone()
+                } else if a == "{WORK_DIR}" {
+                    work_dir_str.clone()
                 } else {
                     a.clone()
                 }
