@@ -5,6 +5,22 @@
 //!
 //! No external HTTP crate is required — the server uses only `std::net::TcpListener`
 //! with one thread per connection.
+//!
+//! # Daemon-backed API boundary
+//!
+//! As of issue #284, `calypso-web` reads live run state through the daemon-owned
+//! `WorkflowRun` rather than directly from repo-local JSON files.  The new API
+//! endpoints are:
+//!
+//! - `GET /api/run-state` — active `WorkflowRun` fields (workflow, state, locality, …)
+//! - `GET /api/transitions` — ordered transition history from the active run
+//! - `GET /api/checks` — pending deterministic checks (blocking conditions)
+//! - `GET /api/steering` — steering log for the active run
+//! - `POST /api/steering` — append a steering action (retry, abort, clarify, skip, force)
+//!
+//! The legacy `/api/state` endpoint is retained for backward compatibility.
+
+pub mod daemon_api;
 
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -140,6 +156,7 @@ fn route(
             "text/html; charset=utf-8",
             INDEX_HTML.as_bytes().to_vec(),
         ),
+        // ── Legacy file-backed state (retained for backward compatibility) ──
         ("GET", "/api/state") => {
             let json = read_state_json(cwd);
             ("200 OK", "application/json", json.into_bytes())
@@ -174,6 +191,50 @@ fn route(
                 json_error_body("failed to persist pending cron"),
             ),
         },
+        // ── Daemon-backed API endpoints (issue #284) ────────────────────────
+        ("GET", "/api/run-state") => {
+            let json = daemon_api::run_state_json(cwd);
+            ("200 OK", "application/json", json.into_bytes())
+        }
+        ("GET", "/api/transitions") => {
+            let json = daemon_api::transitions_json(cwd);
+            ("200 OK", "application/json", json.into_bytes())
+        }
+        ("GET", "/api/checks") => {
+            let json = daemon_api::checks_json(cwd);
+            ("200 OK", "application/json", json.into_bytes())
+        }
+        ("GET", "/api/steering") => {
+            let json = daemon_api::steering_log_json(cwd);
+            ("200 OK", "application/json", json.into_bytes())
+        }
+        ("POST", "/api/steering") => {
+            match daemon_api::parse_steering(body) {
+                Err(daemon_api::SteeringError::BadRequest) => (
+                    "400 Bad Request",
+                    "application/json",
+                    json_error_body("invalid steering request"),
+                ),
+                Err(_) => (
+                    "500 Internal Server Error",
+                    "application/json",
+                    json_error_body("unexpected parse error"),
+                ),
+                Ok(request) => match daemon_api::apply_steering(cwd, request) {
+                    Ok(()) => ("200 OK", "application/json", ok_body()),
+                    Err(daemon_api::SteeringError::NoActiveRun) => (
+                        "404 Not Found",
+                        "application/json",
+                        json_error_body("no active run"),
+                    ),
+                    Err(_) => (
+                        "500 Internal Server Error",
+                        "application/json",
+                        json_error_body("failed to persist steering action"),
+                    ),
+                },
+            }
+        }
         _ => ("404 Not Found", "text/plain", b"Not found".to_vec()),
     }
 }
@@ -853,6 +914,154 @@ jobs:
             response.contains("413 Payload Too Large"),
             "expected 413 response for oversized body"
         );
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── Daemon-backed route tests ─────────────────────────────────────────────
+
+    #[test]
+    fn route_get_api_run_state_returns_json_when_no_active_run() {
+        let tmp = std::env::temp_dir().join("calypso-webview-run-state-no-run");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let (status, ct, body) = route("GET", "/api/run-state", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        assert_eq!(parsed["active"], false);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_run_state_returns_active_run_fields() {
+        use calypso_runtime::workflow_run::WorkflowRun;
+        let tmp = std::env::temp_dir().join("calypso-webview-run-state-active");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let run = WorkflowRun::new("test-wf", "scan", 1);
+        run.save(&WorkflowRun::default_path(&tmp)).unwrap();
+
+        let (status, ct, body) = route("GET", "/api/run-state", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        assert_eq!(parsed["active"], true);
+        assert_eq!(parsed["workflow_id"], "test-wf");
+        assert_eq!(parsed["current_state"], "scan");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_transitions_returns_empty_array_when_no_run() {
+        let tmp = std::env::temp_dir().join("calypso-webview-transitions-no-run");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let (status, ct, body) = route("GET", "/api/transitions", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        assert!(parsed.as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_transitions_returns_history_when_run_has_transitions() {
+        use calypso_runtime::workflow_run::WorkflowRun;
+        let tmp = std::env::temp_dir().join("calypso-webview-transitions-active");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let mut run = WorkflowRun::new("test-wf", "scan", 1);
+        run.record_transition("check", "on_success");
+        run.save(&WorkflowRun::default_path(&tmp)).unwrap();
+
+        let (status, _ct, body) = route("GET", "/api/transitions", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["to_state"], "check");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_checks_returns_empty_array_when_no_run() {
+        let tmp = std::env::temp_dir().join("calypso-webview-checks-no-run");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let (status, ct, body) = route("GET", "/api/checks", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        assert!(parsed.as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_checks_returns_checks_when_run_is_active() {
+        use calypso_runtime::workflow_run::{CheckStatus, WorkflowRun};
+        let tmp = std::env::temp_dir().join("calypso-webview-checks-active");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let mut run = WorkflowRun::new("test-wf", "check", 1);
+        run.set_check("ci.tests", "CI must pass", CheckStatus::Failing);
+        run.save(&WorkflowRun::default_path(&tmp)).unwrap();
+
+        let (status, _ct, body) = route("GET", "/api/checks", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        let arr = parsed.as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["check_id"], "ci.tests");
+        assert_eq!(arr[0]["status"], "failing");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_get_api_steering_returns_empty_array_when_no_run() {
+        let tmp = std::env::temp_dir().join("calypso-webview-steering-no-run");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let (status, ct, body) = route("GET", "/api/steering", &[], &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&body).expect("valid JSON");
+        assert!(parsed.as_array().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_post_api_steering_retry_appends_steering_entry() {
+        use calypso_runtime::workflow_run::WorkflowRun;
+        let tmp = std::env::temp_dir().join("calypso-webview-steering-retry");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let run = WorkflowRun::new("test-wf", "stuck", 1);
+        run.save(&WorkflowRun::default_path(&tmp)).unwrap();
+
+        let body = br#"{"action":"retry"}"#;
+        let (status, ct, response) = route("POST", "/api/steering", body, &tmp);
+        assert_eq!(status, "200 OK");
+        assert!(ct.contains("application/json"));
+        let parsed: Value = serde_json::from_slice(&response).expect("valid JSON");
+        assert_eq!(parsed["ok"], true);
+
+        // Verify entry was saved to the run file.
+        let path = WorkflowRun::default_path(&tmp);
+        let loaded = WorkflowRun::load(&path).unwrap().unwrap();
+        assert_eq!(loaded.steering.len(), 1);
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_post_api_steering_invalid_action_returns_400() {
+        let tmp = std::env::temp_dir().join("calypso-webview-steering-bad-action");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        let body = br#"{"action":"teleport"}"#;
+        let (status, _ct, _) = route("POST", "/api/steering", body, &tmp);
+        assert_eq!(status, "400 Bad Request");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn route_post_api_steering_no_active_run_returns_404() {
+        let tmp = std::env::temp_dir().join("calypso-webview-steering-no-active");
+        std::fs::create_dir_all(tmp.join(".calypso")).unwrap();
+        // No run file written — apply_steering should return NoActiveRun.
+        let body = br#"{"action":"abort"}"#;
+        let (status, _ct, _) = route("POST", "/api/steering", body, &tmp);
+        assert_eq!(status, "404 Not Found");
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

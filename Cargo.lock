@@ -93,6 +93,7 @@ dependencies = [
 name = "calypso-web"
 version = "0.1.0"
 dependencies = [
+ "calypso-runtime",
  "calypso-workflows",
  "serde_json",
 ]
