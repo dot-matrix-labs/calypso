@@ -234,7 +234,9 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             // Use the signal's exit code (143 for SIGTERM, etc.) — default to 1.
             1
         }
-        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries => {
+        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries {
+            ref user_action_workflows,
+        } => {
             logger
                 .entry(
                     LogLevel::Info,
@@ -243,7 +245,7 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
                 .component(Component::StateMachine)
                 .event(LogEvent::Startup)
                 .emit();
-            // No scheduled work to do — clean exit.
+            print_no_cron_hint(user_action_workflows);
             0
         }
         crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
@@ -402,7 +404,9 @@ pub fn run_headless_daemon_mode_with_logger(
             );
             1
         }
-        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries => {
+        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries {
+            ref user_action_workflows,
+        } => {
             logger
                 .entry(
                     LogLevel::Info,
@@ -411,6 +415,7 @@ pub fn run_headless_daemon_mode_with_logger(
                 .component(Component::StateMachine)
                 .event(LogEvent::Startup)
                 .emit();
+            print_no_cron_hint(user_action_workflows);
             0
         }
         crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
@@ -821,6 +826,30 @@ fn evaluate_and_log_gates(
     }
 
     0
+}
+
+/// Print a user-facing hint when the daemon exits because no cron-scheduled
+/// entry points were found.
+///
+/// If `workflow_dispatch` workflows exist they are listed by name, and the
+/// operator is told how to invoke them manually.
+fn print_no_cron_hint(user_action_workflows: &[String]) {
+    if user_action_workflows.is_empty() {
+        println!(
+            "No workflow files with a cron schedule were found. \
+             Add a `schedule:` block to a workflow file to use daemon mode."
+        );
+    } else {
+        let names = user_action_workflows
+            .iter()
+            .map(|n| format!("{n}.yaml"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "Found {names} which are correctly formed, but none start on a cron, exiting now.\n\
+             To start a specific action based on a manual trigger use --select-flow"
+        );
+    }
 }
 
 #[cfg(test)]

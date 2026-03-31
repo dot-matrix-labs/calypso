@@ -65,7 +65,11 @@ pub enum SchedulerOutcome {
     /// A shutdown signal was received before the next cron fire.
     Interrupted,
     /// No cron-scheduled entry points were found.
-    NoCronEntries,
+    NoCronEntries {
+        /// Names of `workflow_dispatch` (user-action) entry points that were found but
+        /// cannot be started automatically.
+        user_action_workflows: Vec<String>,
+    },
     /// The workflow interpreter failed to load.
     LoadError(String),
 }
@@ -140,14 +144,38 @@ pub fn run_interpreter_scheduler(
             let (workflow_name, cron_expr) = match cron_entry {
                 Some(pair) => pair,
                 None => {
-                    logger
-                        .entry(
-                            LogLevel::Warn,
-                            "interpreter scheduler: no cron-scheduled entry points found",
+                    let user_action_workflows: Vec<String> = entry_points
+                        .iter()
+                        .filter_map(|e| {
+                            if let EntryPoint::UserAction { workflow, .. } = e {
+                                Some(workflow.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
+
+                    let msg = if user_action_workflows.is_empty() {
+                        "interpreter scheduler: no cron-scheduled entry points found".to_string()
+                    } else {
+                        let names = user_action_workflows
+                            .iter()
+                            .map(|n| format!("{n}.yaml"))
+                            .collect::<Vec<_>>()
+                            .join(", ");
+                        format!(
+                            "interpreter scheduler: no cron-scheduled entry points found; \
+                             manual workflows available: {names}"
                         )
+                    };
+
+                    logger
+                        .entry(LogLevel::Warn, &msg)
                         .component(Component::StateMachine)
                         .emit();
-                    return SchedulerOutcome::NoCronEntries;
+                    return SchedulerOutcome::NoCronEntries {
+                        user_action_workflows,
+                    };
                 }
             };
 
@@ -603,7 +631,9 @@ mod tests {
 
     #[test]
     fn scheduler_outcome_debug_format() {
-        let o = SchedulerOutcome::NoCronEntries;
+        let o = SchedulerOutcome::NoCronEntries {
+            user_action_workflows: vec![],
+        };
         assert!(format!("{o:?}").contains("NoCronEntries"));
 
         let o2 = SchedulerOutcome::LoadError("oops".to_string());
