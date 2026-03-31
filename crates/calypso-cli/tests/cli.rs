@@ -129,7 +129,8 @@ fn help_flag_exposes_version_information() {
     assert!(stdout.contains("Git hash: "));
     assert!(stdout.contains("Usage:"));
     assert!(stdout.contains("--path"));
-    assert!(stdout.contains("feature-start <id> --worktree-base <path>"));
+    assert!(stdout.contains("Daemon commands:"));
+    assert!(stdout.contains("run list"));
 }
 
 #[test]
@@ -397,24 +398,6 @@ fn state_show_fails_gracefully_when_no_state_file_exists() {
 }
 
 #[test]
-fn init_state_subcommand_exits_cleanly_when_no_init_state_exists() {
-    let dir = temp_non_git_dir();
-
-    let output = calypso()
-        .args(["init", "--state"])
-        .current_dir(&dir)
-        .output()
-        .expect("failed to run calypso-cli init --state");
-
-    std::fs::remove_dir_all(&dir).ok();
-
-    // No init state yet — should print a message and exit 0 (informational, not an error)
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("No init state found") || stdout.contains("init"));
-}
-
-#[test]
 fn template_validate_succeeds_for_bundled_templates() {
     // Run from the cli crate root where the embedded templates live
     let output = calypso()
@@ -454,36 +437,81 @@ fn unknown_command_prints_help_and_exits_zero() {
     assert!(stdout.contains("Daemon commands:"));
 }
 
-// ── calypso keys subcommands ──────────────────────────────────────────────
+// ── Deprecated command surface removal ───────────────────────────────────────
 
+/// `calypso init` is no longer a first-class product command; the dispatch arm
+/// was removed. The CLI should respond with the help output (falls through to the
+/// unknown-command catch-all).
 #[test]
-fn keys_list_on_empty_store_reports_no_keys() {
-    let dir = temp_non_git_dir();
-    // Ensure .calypso/ exists but has no keys.json
-    std::fs::create_dir_all(dir.join(".calypso")).expect("create .calypso dir");
+fn init_command_is_no_longer_dispatched_as_a_product_command() {
+    let output = calypso()
+        .arg("init")
+        .output()
+        .expect("failed to run calypso-cli init");
 
+    // Falls through to the catch-all help output — exits 0.
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed init command, got: {stdout}"
+    );
+}
+
+/// `calypso dev-status` is no longer a first-class product command.
+#[test]
+fn dev_status_command_is_no_longer_dispatched_as_a_product_command() {
+    let output = calypso()
+        .arg("dev-status")
+        .output()
+        .expect("failed to run calypso-cli dev-status");
+
+    // Falls through to the catch-all help output — exits 0.
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed dev-status command, got: {stdout}"
+    );
+}
+
+/// `calypso feature-start` is no longer a first-class product command.
+#[test]
+fn feature_start_command_is_no_longer_dispatched_as_a_product_command() {
+    let output = calypso()
+        .args(["feature-start", "123", "--worktree-base", "/tmp"])
+        .output()
+        .expect("failed to run calypso-cli feature-start");
+
+    // Falls through to the catch-all help output — exits 0.
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed feature-start command, got: {stdout}"
+    );
+}
+
+/// `calypso keys` is no longer a first-class product command.
+#[test]
+fn keys_command_is_no_longer_dispatched_as_a_product_command() {
     let output = calypso()
         .args(["keys", "list"])
-        .current_dir(&dir)
         .output()
         .expect("failed to run calypso-cli keys list");
 
+    // Falls through to the catch-all help output — exits 0.
+    assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(
-        output.status.success(),
-        "keys list should exit 0; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
+        stdout.contains("Usage:"),
+        "expected help output for removed keys command, got: {stdout}"
     );
-    assert!(
-        stdout.contains("No managed keys"),
-        "expected 'No managed keys' in output: {stdout}"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// The primary help output must not advertise deprecated commands.
 #[test]
-fn help_output_documents_keys_commands() {
+fn help_output_does_not_expose_deprecated_commands() {
     let output = calypso()
         .arg("--help")
         .output()
@@ -491,103 +519,21 @@ fn help_output_documents_keys_commands() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(
-        stdout.contains("keys list"),
-        "expected 'keys list' in help output"
+        !stdout.contains("feature-start"),
+        "help must not expose deprecated feature-start command"
     );
     assert!(
-        stdout.contains("keys rotate"),
-        "expected 'keys rotate' in help output"
+        !stdout.contains("dev-status"),
+        "help must not expose deprecated dev-status command"
     );
     assert!(
-        stdout.contains("keys revoke"),
-        "expected 'keys revoke' in help output"
+        !stdout.contains("keys list"),
+        "help must not expose deprecated keys command"
     );
-}
-
-#[test]
-fn doctor_output_includes_key_store_health_check() {
-    let output = calypso()
-        .arg("doctor")
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("failed to run calypso-cli doctor");
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(
-        stdout.contains("key-store-health"),
-        "expected key-store-health check in doctor output: {stdout}"
+        !stdout.contains("keys rotate"),
+        "help must not expose deprecated keys command"
     );
-}
-
-#[test]
-fn keys_rotate_non_existent_key_exits_nonzero() {
-    let dir = temp_non_git_dir();
-    std::fs::create_dir_all(dir.join(".calypso")).expect("create .calypso dir");
-
-    let output = calypso()
-        .args(["keys", "rotate", "no-such-key"])
-        .current_dir(&dir)
-        .output()
-        .expect("failed to run calypso-cli keys rotate");
-
-    assert!(
-        !output.status.success(),
-        "rotate of non-existent key should exit nonzero"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn keys_revoke_non_existent_key_exits_nonzero() {
-    let dir = temp_non_git_dir();
-    std::fs::create_dir_all(dir.join(".calypso")).expect("create .calypso dir");
-
-    let output = calypso()
-        .args(["keys", "revoke", "no-such-key"])
-        .current_dir(&dir)
-        .output()
-        .expect("failed to run calypso-cli keys revoke");
-
-    assert!(
-        !output.status.success(),
-        "revoke of non-existent key should exit nonzero"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn keys_list_json_returns_valid_json_array() {
-    let dir = temp_non_git_dir();
-    std::fs::create_dir_all(dir.join(".calypso")).expect("create .calypso dir");
-
-    let output = calypso()
-        .args(["keys", "list", "--json"])
-        .current_dir(&dir)
-        .output()
-        .expect("failed to run calypso-cli keys list --json");
-
-    assert!(
-        output.status.success(),
-        "keys list --json should exit 0; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    // Should parse as a JSON array.
-    let parsed: Result<serde_json::Value, _> = serde_json::from_str(stdout.trim());
-    assert!(
-        parsed.is_ok(),
-        "keys list --json output should be valid JSON: {stdout}"
-    );
-    let val = parsed.unwrap();
-    assert!(
-        val.is_array(),
-        "keys list --json should return a JSON array"
-    );
-
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // ── Logger integration tests ─────────────────────────────────────────────────

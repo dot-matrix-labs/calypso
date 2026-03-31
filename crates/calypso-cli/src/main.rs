@@ -8,18 +8,12 @@ use calypso_runtime::workflow_run::WorkflowRun;
 use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
-    render_fix_results, run_agents_json, run_agents_plain, run_dev_status, run_dev_status_json,
-    run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json, run_doctor_verbose,
-    run_keys_list, run_keys_list_json, run_keys_revoke, run_keys_rotate, run_state_status_json,
+    render_fix_results, run_agents_json, run_agents_plain, run_doctor, run_doctor_fix_all,
+    run_doctor_fix_single, run_doctor_json, run_doctor_verbose, run_state_status_json,
     run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
     run_workflows_validate,
 };
 use nightshift_core::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
-use nightshift_core::feature_start::{FeatureStartRequest, run_feature_start};
-use nightshift_core::init::{
-    HostInitEnvironment, InitProgress, RepoInitStatus, detect_repo_status, refresh_workflows,
-    render_init_status, run_init_interactive, run_init_step,
-};
 use nightshift_core::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,30 +85,13 @@ Diagnostics:
   agents              Show active agent sessions
   agents --json       Output agent sessions as JSON
 
-Setup:
-  init                Initialise a repository for Calypso
-  init --reinit       Re-initialise an already-initialised repository
-  init --json         Initialise and output results as JSON
-  init --hello-world  Initialise with a minimalist hello-world example
-  init --status       Show current init state machine progress
-  init --step <step>  Manually trigger a specific init step
-  init --refresh      Refresh/overwrite GitHub Actions workflow files
-  init --org <org> --repo <name>
-                      Create upstream GitHub remote during init
-  dev-status          Show the current development lifecycle phase
-  dev-status --json   Output development lifecycle phase as JSON
-  feature-start <id> --worktree-base <path>
-                      Create a feature branch, worktree, draft PR, and state file
+Workflows:
   template validate   Validate the local workflow template
   workflows list      List effective workflow names for the project directory
   workflows show <name>
                       Print the raw YAML for the named workflow
   workflows validate <name>
                       Parse the named workflow and report OK or the parse error
-  keys list           List all managed keys with metadata
-  keys list --json    List managed keys as JSON
-  keys rotate <name>  Rotate the named key (generates new material, archives old)
-  keys revoke <name>  Revoke the named key (marks it unusable)
 
 Git hash: {}  Built: {}  Tags: {}",
         info.version, info.git_hash, info.build_time, info.git_tags
@@ -254,78 +231,6 @@ fn main() {
         [command, flag, path, _headless] if command == "status" && flag == "--run" => {
             render_run_status(path)
         }
-        // calypso dev-status [--json]
-        [command] if command == "dev-status" => match run_dev_status(&cwd) {
-            Ok(output) => println!("{output}"),
-            Err(error) => {
-                eprintln!("dev-status error: {error}");
-                std::process::exit(1);
-            }
-        },
-        [command, flag] if command == "dev-status" && flag == "--json" => {
-            match run_dev_status_json(&cwd) {
-                Ok(json) => println!("{json}"),
-                Err(error) => {
-                    eprintln!("dev-status error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        [command] if command == "init" => {
-            run_calypso_init(&cwd, false, None, None, false);
-        }
-        [command, flag] if command == "init" && flag == "--reinit" => {
-            run_calypso_init(&cwd, true, None, None, false);
-        }
-        [command, flag] if command == "init" && flag == "--hello-world" => {
-            run_calypso_init(&cwd, false, None, None, true);
-        }
-        [command, flag] if command == "init" && flag == "--json" => {
-            run_calypso_init_json(&cwd, false, None, None, false);
-        }
-        [command, flag] if command == "init" && flag == "--status" => {
-            run_init_status(&cwd);
-        }
-        [command, flag] if command == "init" && flag == "--refresh" => {
-            run_init_refresh(&cwd);
-        }
-        [command, flag, step_name] if command == "init" && flag == "--step" => {
-            run_init_step_cmd(&cwd, step_name);
-        }
-        [command, flag] if command == "init" && flag == "--state" => {
-            run_init_state_show(&cwd);
-        }
-        // calypso init --org <org> --repo <name>
-        args if args.first().is_some_and(|c| c == "init") && args.len() >= 2 => {
-            let mut allow_reinit = false;
-            let mut org: Option<String> = None;
-            let mut repo_name: Option<String> = None;
-            let mut json = false;
-            let mut hello_world = false;
-            let mut i = 1;
-            while i < args.len() {
-                match args[i].as_str() {
-                    "--reinit" => allow_reinit = true,
-                    "--json" => json = true,
-                    "--org" if i + 1 < args.len() => {
-                        org = Some(args[i + 1].clone());
-                        i += 1;
-                    }
-                    "--repo" if i + 1 < args.len() => {
-                        repo_name = Some(args[i + 1].clone());
-                        i += 1;
-                    }
-                    "--hello-world" => hello_world = true,
-                    _ => {}
-                }
-                i += 1;
-            }
-            if json {
-                run_calypso_init_json(&cwd, allow_reinit, org, repo_name, hello_world);
-            } else {
-                run_calypso_init(&cwd, allow_reinit, org, repo_name, hello_world);
-            }
-        }
         // calypso state (no subcommand) — alias for `calypso state status`
         [command] if command == "state" => match run_state_status_plain(&cwd) {
             Ok(output) => println!("{output}"),
@@ -392,35 +297,6 @@ fn main() {
                 std::process::exit(1);
             }
         },
-        [command, feature_id, flag, worktree_base]
-            if command == "feature-start" && flag == "--worktree-base" =>
-        {
-            let request = FeatureStartRequest {
-                feature_id: feature_id.to_string(),
-                worktree_base: std::path::PathBuf::from(worktree_base),
-                title: None,
-                body: None,
-                allow_dirty: false,
-                allow_non_main: false,
-            };
-
-            match run_feature_start(&cwd, &request) {
-                Ok(result) => {
-                    println!("Feature started");
-                    println!("Branch: {}", result.branch);
-                    println!("Worktree: {}", result.worktree_path.display());
-                    println!(
-                        "Pull request: #{} {}",
-                        result.pull_request.number, result.pull_request.url
-                    );
-                    println!("State: {}", result.state_path.display());
-                }
-                Err(error) => {
-                    eprintln!("feature-start error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
         // calypso run <feature-id> --role <role>
         [command, _feature_id, role_flag, role] if command == "run" && role_flag == "--role" => {
             let state_path = cwd.join(".calypso/repository-state.json");
@@ -464,47 +340,6 @@ fn main() {
                 Ok(message) => println!("{message}"),
                 Err(error) => {
                     eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // calypso keys list [--json]
-        [command, subcommand] if command == "keys" && subcommand == "list" => {
-            match run_keys_list(&cwd) {
-                Ok(output) => println!("{output}"),
-                Err(error) => {
-                    eprintln!("keys list error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        [command, subcommand, flag]
-            if command == "keys" && subcommand == "list" && flag == "--json" =>
-        {
-            match run_keys_list_json(&cwd) {
-                Ok(json) => println!("{json}"),
-                Err(error) => {
-                    eprintln!("keys list error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // calypso keys rotate <name>
-        [command, subcommand, name] if command == "keys" && subcommand == "rotate" => {
-            match run_keys_rotate(&cwd, name) {
-                Ok(output) => println!("{output}"),
-                Err(error) => {
-                    eprintln!("keys rotate error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // calypso keys revoke <name>
-        [command, subcommand, name] if command == "keys" && subcommand == "revoke" => {
-            match run_keys_revoke(&cwd, name) {
-                Ok(output) => println!("{output}"),
-                Err(error) => {
-                    eprintln!("keys revoke error: {error}");
                     std::process::exit(1);
                 }
             }
@@ -733,176 +568,6 @@ fn extract_path_flag(args: &[String]) -> (Option<std::path::PathBuf>, Vec<String
         }
     }
     (path, remaining)
-}
-
-fn run_calypso_init(
-    cwd: &std::path::Path,
-    allow_reinit: bool,
-    org: Option<String>,
-    repo_name: Option<String>,
-    hello_world: bool,
-) {
-    // Print detected status.
-    let status = detect_repo_status(cwd, &HostInitEnvironment);
-    println!("Detected: {status}");
-
-    // For fully configured repos without --reinit, just validate.
-    if status == RepoInitStatus::FullyConfigured && !allow_reinit {
-        println!("Repository is already fully configured.");
-        println!(
-            "Use `calypso init --reinit` to re-initialise or `calypso init --refresh` to update workflows."
-        );
-        return;
-    }
-
-    let mut progress =
-        match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
-            Ok(p) => p,
-            Err(error) => {
-                eprintln!("init error: {error}");
-                std::process::exit(1);
-            }
-        };
-
-    // Store org/repo if provided (used for upstream creation).
-    if org.is_some() {
-        progress.github_org = org;
-    }
-    if repo_name.is_some() {
-        progress.github_repo = repo_name;
-    }
-
-    println!("Init complete: {}", progress.current_step);
-    println!("Completed steps:");
-    for step in &progress.completed_steps {
-        println!("  [x] {step}");
-    }
-}
-
-fn run_calypso_init_json(
-    cwd: &std::path::Path,
-    allow_reinit: bool,
-    org: Option<String>,
-    repo_name: Option<String>,
-    hello_world: bool,
-) {
-    let status = detect_repo_status(cwd, &HostInitEnvironment);
-
-    // For fully configured repos without --reinit, report and exit.
-    if status == RepoInitStatus::FullyConfigured && !allow_reinit {
-        let report = serde_json::json!({
-            "status": status,
-            "message": "already configured",
-            "completed": true
-        });
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&report).expect("json serialization")
-        );
-        return;
-    }
-
-    let mut progress =
-        match run_init_interactive(cwd, allow_reinit, &HostInitEnvironment, hello_world) {
-            Ok(p) => p,
-            Err(error) => {
-                let report = serde_json::json!({
-                    "status": status,
-                    "error": error.to_string(),
-                    "completed": false
-                });
-                println!(
-                    "{}",
-                    serde_json::to_string_pretty(&report).expect("json serialization")
-                );
-                std::process::exit(1);
-            }
-        };
-
-    if org.is_some() {
-        progress.github_org = org;
-    }
-    if repo_name.is_some() {
-        progress.github_repo = repo_name;
-    }
-
-    let report = serde_json::json!({
-        "status": status,
-        "current_step": progress.current_step.as_str(),
-        "completed_steps": progress.completed_steps.iter().map(|s| s.as_str()).collect::<Vec<_>>(),
-        "completed": progress.current_step.is_complete()
-    });
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&report).expect("json serialization")
-    );
-}
-
-fn run_init_status(cwd: &std::path::Path) {
-    let status = detect_repo_status(cwd, &HostInitEnvironment);
-    println!("Repository status: {status}");
-
-    // Show saved init progress if available.
-    match InitProgress::load(cwd) {
-        Ok(Some(progress)) => {
-            println!("{}", render_init_status(&progress));
-            if let Some(ref org) = progress.github_org {
-                println!("GitHub org: {org}");
-            }
-            if let Some(ref repo) = progress.github_repo {
-                println!("GitHub repo: {repo}");
-            }
-        }
-        Ok(None) => {
-            println!("No init state found — run `calypso init` to set up this repository.");
-        }
-        Err(error) => {
-            eprintln!("Error loading init state: {error}");
-        }
-    }
-}
-
-fn run_init_refresh(cwd: &std::path::Path) {
-    let status = detect_repo_status(cwd, &HostInitEnvironment);
-    if status == RepoInitStatus::NoGit {
-        eprintln!("Cannot refresh: not a git repository.");
-        std::process::exit(1);
-    }
-
-    match refresh_workflows(cwd, &HostInitEnvironment) {
-        Ok(refreshed) => {
-            println!("Refreshed {} workflow files:", refreshed.len());
-            for name in &refreshed {
-                println!("  {name}");
-            }
-        }
-        Err(error) => {
-            eprintln!("refresh error: {error}");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn run_init_step_cmd(cwd: &std::path::Path, step_name: &str) {
-    match run_init_step(cwd, step_name, &HostInitEnvironment) {
-        Ok(progress) => {
-            println!("{}", render_init_status(&progress));
-        }
-        Err(error) => {
-            eprintln!("init step error: {error}");
-            std::process::exit(1);
-        }
-    }
-}
-
-fn run_init_state_show(cwd: &std::path::Path) {
-    let state_path = cwd.join(".calypso").join("init-state.json");
-    match std::fs::read_to_string(&state_path) {
-        Ok(contents) => println!("{contents}"),
-        Err(_) => {
-            println!("No init state found — run `calypso-cli init` to set up this repository.");
-        }
-    }
 }
 
 fn looks_like_path(arg: &str) -> bool {
