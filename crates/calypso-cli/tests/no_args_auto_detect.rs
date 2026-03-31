@@ -4,21 +4,22 @@ use helpers::spawned_calypso::spawned_calypso;
 
 // ── Single eligible local workflow ────────────────────────────────────────────
 
-/// When a single eligible local workflow exists in `.calypso/` and calypso is
-/// invoked with no arguments, it must auto-start that workflow without
-/// requiring --select-flow or any user interaction.
+/// With daemon-first design, a single eligible local workflow is no longer
+/// auto-started when calypso is invoked with no arguments. The daemon-default
+/// path checks for a state file instead. Use `--select-flow` for the legacy
+/// interactive workflow selection behavior.
 #[test]
-fn single_local_workflow_dispatch_auto_starts_without_select_flow() {
+fn single_local_workflow_not_auto_started_without_select_flow() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let out = spawned_calypso()
-        // No --select-flow flag.
+        // No --select-flow flag: daemon-first, not auto-detect.
         .calypso_file("dispatch-only.yaml", dispatch_only)
         .run();
 
-    // The binary should print "Starting workflow: dispatch-only" to stdout.
+    // Daemon-first: no auto-start of local workflows without --select-flow.
     assert!(
-        out.stdout.contains("Starting workflow:"),
-        "expected 'Starting workflow:' in stdout (auto-started without --select-flow); \
+        !out.stdout.contains("Starting workflow:"),
+        "expected no auto-start without --select-flow in daemon-first mode; \
          stdout:\n{}\nstderr:\n{}",
         out.stdout,
         out.stderr
@@ -43,24 +44,24 @@ fn single_local_workflow_does_not_show_selection_menu() {
 
 // ── Multiple eligible local workflows ────────────────────────────────────────
 
-/// When multiple eligible local workflows exist in `.calypso/` and calypso is
-/// invoked with no arguments, it must show the selection menu (same as
-/// --select-flow) rather than auto-starting or failing silently.
+/// With daemon-first design, multiple eligible local workflows no longer
+/// trigger interactive selection when calypso is invoked with no arguments.
+/// The daemon-default path checks for a state file instead. Use `--select-flow`
+/// for the legacy interactive workflow selection behavior.
 #[test]
-fn multiple_local_workflows_show_selection_menu() {
+fn multiple_local_workflows_no_menu_without_select_flow() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let hello_world = include_str!("fixtures/workflows/hello-world.yaml");
     let out = spawned_calypso()
-        // No --select-flow flag.
+        // No --select-flow flag: daemon-first, not auto-detect.
         .calypso_file("dispatch-only.yaml", dispatch_only)
         .calypso_file("hello-world.yaml", hello_world)
-        // Send an out-of-range selection so the process exits cleanly.
-        .stdin("0\n")
         .run();
 
+    // Daemon-first: no interactive selection without --select-flow.
     assert!(
-        out.stdout.contains("Available workflows:"),
-        "expected selection menu for multiple local workflows; stdout:\n{}",
+        !out.stdout.contains("Available workflows:"),
+        "expected no selection menu in daemon-first mode; stdout:\n{}",
         out.stdout
     );
 }
@@ -162,40 +163,41 @@ fn state_file_present_skips_local_workflow_auto_detect() {
 
 // ── --path dispatch branch ──────────────────────────────────────────────────
 
-/// `calypso --path <dir>` must auto-start a single eligible local workflow
-/// when no repository-state.json is present.
+/// With daemon-first design, `calypso --path <dir>` with no subcommand also
+/// uses the daemon-default path and does not auto-start local workflows.
 #[test]
-fn path_flag_single_local_workflow_dispatch_auto_starts_without_select_flow() {
+fn path_flag_single_local_workflow_not_auto_started_without_select_flow() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let out = spawned_calypso()
         .args(["--path", "{WORK_DIR}"])
         .calypso_file("dispatch-only.yaml", dispatch_only)
         .run();
 
+    // Daemon-first: no auto-start without --select-flow.
     assert!(
-        out.stdout.contains("Starting workflow:"),
-        "expected 'Starting workflow:' in stdout for --path auto-start; stdout:\n{}\nstderr:\n{}",
+        !out.stdout.contains("Starting workflow:"),
+        "expected no auto-start in daemon-first mode for --path; stdout:\n{}\nstderr:\n{}",
         out.stdout,
         out.stderr
     );
 }
 
-/// `calypso --path <dir>` must show the selection menu when multiple eligible
-/// local workflows exist.
+/// With daemon-first design, `calypso --path <dir>` with multiple local
+/// workflows also does not show interactive selection.
 #[test]
-fn path_flag_multiple_local_workflows_show_selection_menu() {
+fn path_flag_multiple_local_workflows_no_menu_without_select_flow() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let hello_world = include_str!("fixtures/workflows/hello-world.yaml");
     let out = spawned_calypso()
         .args(["--path", "{WORK_DIR}"])
         .calypso_file("dispatch-only.yaml", dispatch_only)
         .calypso_file("hello-world.yaml", hello_world)
-        .stdin("0\n")
         .run();
 
+    // Daemon-first: no interactive selection without --select-flow.
     assert!(
-        out.stdout.contains("Available workflows:"),
-        "expected selection menu for --path with multiple local workflows; stdout:\n{}",
+        !out.stdout.contains("Available workflows:"),
+        "expected no selection menu in daemon-first mode for --path; stdout:\n{}",
         out.stdout
     );
 }

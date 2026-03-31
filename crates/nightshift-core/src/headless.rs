@@ -190,6 +190,8 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
 
     let scheduler_outcome =
         run_interpreter_scheduler(&repo_root, SchedulerMode::SinglePass, &shutdown, logger);
+    // NOTE: run_headless always uses SinglePass for backward compatibility.
+    // For continuous daemon scheduling use run_headless_daemon_mode instead.
 
     // Map scheduler outcome to exit code and log the result.
     let exit_code = match scheduler_outcome {
@@ -258,6 +260,184 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         Component::Cli,
         LogEvent::Shutdown,
         "headless run complete",
+        BTreeMap::new(),
+    );
+
+    exit_code
+}
+
+/// Run the headless daemon with continuous scheduling.
+///
+/// This is the daemon-first entry point for normal operation.  It follows the
+/// same pipeline as [`run_headless`] (doctor checks, state load, gate evaluation)
+/// but enters the interpreter scheduler in [`SchedulerMode::Daemon`] mode,
+/// which blocks on cron-scheduled workflows and fires them when their scheduled
+/// time arrives.
+///
+/// The daemon runs until interrupted by a signal (SIGINT/SIGTERM).
+///
+/// Returns the process exit code (0 = success, 1 = doctor failure / signal,
+/// 2 = configuration error).
+pub fn run_headless_daemon_mode(cwd: &Path, config: &HeadlessConfig) -> i32 {
+    let logger = Logger::with_level(config.verbosity).with_format(config.log_format);
+    run_headless_daemon_mode_with_logger(cwd, config, &logger)
+}
+
+/// Inner implementation of daemon mode that accepts a logger.
+pub fn run_headless_daemon_mode_with_logger(
+    cwd: &Path,
+    config: &HeadlessConfig,
+    logger: &Logger,
+) -> i32 {
+    // 1. If env override, emit notice
+    if let Some(env_val) = &config.env_log_override {
+        logger.log_level_override_notice(env_val, config.verbosity);
+    }
+
+    // 2. Log startup
+    logger.log_event(
+        LogLevel::Info,
+        Component::Cli,
+        LogEvent::Startup,
+        "calypso daemon mode starting (continuous scheduling)",
+        BTreeMap::new(),
+    );
+
+    // 3. Install signal handlers
+    let shutdown = install_signal_handlers();
+
+    // 4. Resolve repo root
+    let repo_root = match resolve_repo_root(cwd) {
+        Ok(root) => root,
+        Err(_) => {
+            logger.log_event(
+                LogLevel::Error,
+                Component::Cli,
+                LogEvent::DoctorFailed,
+                "not inside a git repository",
+                BTreeMap::new(),
+            );
+            return 1;
+        }
+    };
+
+    // 5. Run doctor checks
+    logger.log_event(
+        LogLevel::Info,
+        Component::Doctor,
+        LogEvent::DoctorCheck,
+        "running prerequisite checks",
+        BTreeMap::new(),
+    );
+
+    let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
+    let doctor_exit = log_doctor_results(logger, &report);
+
+    if doctor_exit != 0 {
+        logger.log_event(
+            LogLevel::Error,
+            Component::Doctor,
+            LogEvent::DoctorFailed,
+            "prerequisite checks failed",
+            BTreeMap::new(),
+        );
+        return doctor_exit;
+    }
+
+    // Check for shutdown between phases
+    if let Some(signal) = shutdown.try_recv() {
+        logger.log_event(
+            LogLevel::Warn,
+            Component::Cli,
+            LogEvent::Shutdown,
+            &format!("received {signal}, shutting down"),
+            BTreeMap::new(),
+        );
+        return signal.exit_code();
+    }
+
+    // 6. Enter interpreter scheduler in Daemon mode (continuous scheduling).
+    //
+    // Unlike the single-pass mode in run_headless, Daemon mode blocks until
+    // a cron-scheduled workflow fires or a shutdown signal is received.
+    logger.log_event(
+        LogLevel::Info,
+        Component::StateMachine,
+        LogEvent::StateTransition,
+        "entering interpreter scheduler (daemon mode)",
+        BTreeMap::new(),
+    );
+
+    let scheduler_outcome =
+        run_interpreter_scheduler(&repo_root, SchedulerMode::Daemon, &shutdown, logger);
+
+    // Map scheduler outcome to exit code.
+    let exit_code = match scheduler_outcome {
+        crate::interpreter_scheduler::SchedulerOutcome::Fired {
+            ref workflow,
+            ref initial_state,
+        } => {
+            logger
+                .entry(
+                    LogLevel::Info,
+                    &format!("daemon scheduler fired '{workflow}'"),
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::StateTransition)
+                .field("workflow", workflow.as_str())
+                .field("initial_state", initial_state.as_str())
+                .emit();
+            run_workflow_executor(logger, workflow, &shutdown)
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::Interrupted => {
+            logger.log_event(
+                LogLevel::Warn,
+                Component::Cli,
+                LogEvent::Shutdown,
+                "daemon scheduler interrupted by signal",
+                BTreeMap::new(),
+            );
+            1
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries => {
+            logger
+                .entry(
+                    LogLevel::Info,
+                    "daemon scheduler: no cron entries found; exiting",
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .emit();
+            0
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
+            logger
+                .entry(LogLevel::Error, "daemon scheduler load error")
+                .component(Component::StateMachine)
+                .field("error", e.as_str())
+                .emit();
+            2
+        }
+        crate::interpreter_scheduler::SchedulerOutcome::Discovered { entry_point_count } => {
+            // Daemon mode should not produce Discovered, but handle gracefully.
+            logger
+                .entry(
+                    LogLevel::Info,
+                    "daemon scheduler: discovered entry points (unexpected in daemon mode)",
+                )
+                .component(Component::StateMachine)
+                .field("entry_point_count", entry_point_count.to_string())
+                .emit();
+            0
+        }
+    };
+
+    // 7. Log completion
+    logger.log_event(
+        LogLevel::Info,
+        Component::Cli,
+        LogEvent::Shutdown,
+        "daemon run complete",
         BTreeMap::new(),
     );
 

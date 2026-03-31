@@ -1,3 +1,5 @@
+mod daemon;
+mod run_control;
 mod step;
 
 use calypso_runtime::operator_surface::OperatorSurface;
@@ -53,9 +55,27 @@ Options:
 Positional:
   [path]              Project directory (alternative to --path)
 
-Commands:
-  (none)              Drive the state machine for the project directory
-  --step              Drive the state machine one step at a time
+Daemon commands:
+  (none)              Start the daemon (continuous scheduling, non-interactive)
+  daemon start        Start the daemon explicitly
+  daemon start --single-pass
+                      Run one scheduling pass and exit (CI/test mode)
+
+Run inspection and control:
+  run list            List workflow runs
+  run inspect [run-id]
+                      Show details for the current or specified workflow run
+  run retry           Retry the current step of the active workflow run
+  run abort           Abort the active workflow run
+  run clarify <message>
+                      Provide clarification to a stuck agent step
+  run force-transition <state> --reason <reason>
+                      Force-transition to a state with recorded operator intent
+
+Debug:
+  --step              Drive the state machine one step at a time (debug tooling)
+
+Diagnostics:
   doctor              Check local prerequisites and environment
   doctor --verbose    Show detailed remediation steps for failing checks
   doctor --json       Output doctor results as JSON (exit 1 if any failing)
@@ -69,6 +89,8 @@ Commands:
   state show          Print the current state file as raw JSON
   agents              Show active agent sessions
   agents --json       Output agent sessions as JSON
+
+Setup:
   init                Initialise a repository for Calypso
   init --reinit       Re-initialise an already-initialised repository
   init --json         Initialise and output results as JSON
@@ -159,6 +181,39 @@ fn main() {
     match args.as_slice() {
         [flag] if flag == "-h" || flag == "--help" => println!("{}", render_help(info)),
         [flag] if flag == "-v" || flag == "--version" => println!("{}", render_version(info)),
+        // ── Daemon commands ──────────────────────────────────────────────
+        [command, subcommand] if command == "daemon" && subcommand == "start" => {
+            daemon::run_daemon_start(&cwd, false);
+        }
+        [command, subcommand, flag]
+            if command == "daemon" && subcommand == "start" && flag == "--single-pass" =>
+        {
+            daemon::run_daemon_start(&cwd, true);
+        }
+        // ── Run inspection and control ───────────────────────────────────
+        [command, subcommand] if command == "run" && subcommand == "list" => {
+            run_control::run_list(&cwd);
+        }
+        [command, subcommand] if command == "run" && subcommand == "inspect" => {
+            run_control::run_inspect(&cwd, None);
+        }
+        [command, subcommand, run_id] if command == "run" && subcommand == "inspect" => {
+            run_control::run_inspect(&cwd, Some(run_id));
+        }
+        [command, subcommand] if command == "run" && subcommand == "retry" => {
+            run_control::run_retry(&cwd);
+        }
+        [command, subcommand] if command == "run" && subcommand == "abort" => {
+            run_control::run_abort(&cwd);
+        }
+        [command, subcommand, message] if command == "run" && subcommand == "clarify" => {
+            run_control::run_clarify(&cwd, message);
+        }
+        [command, subcommand, target_state, flag, reason]
+            if command == "run" && subcommand == "force-transition" && flag == "--reason" =>
+        {
+            run_control::run_force_transition(&cwd, target_state, reason);
+        }
         [command] if command == "doctor" => {
             println!("{}", run_doctor(&cwd));
         }
@@ -454,7 +509,7 @@ fn main() {
             let project_dir = std::path::Path::new(path);
             run_project_dir(project_dir, select_flow);
         }
-        // calypso --step — step mode: one step per Enter keypress
+        // calypso --step — debug tooling: drive the state machine one step at a time
         [flag] if flag == "--step" => {
             let state_path = cwd.join(".calypso").join("repository-state.json");
             if state_path.exists() {
@@ -463,9 +518,15 @@ fn main() {
                 println!("{}", run_doctor(&cwd));
             }
         }
-        // calypso — no args: drive state machine if initialized, else show doctor output
+        // calypso — no args: daemon-first continuous scheduling if initialized,
+        // else show doctor output. The --select-flow flag falls back to legacy
+        // interactive selection for backward compatibility.
         [] => {
-            run_project_dir(&cwd, select_flow);
+            if select_flow {
+                run_project_dir(&cwd, select_flow);
+            } else {
+                daemon::run_daemon_default(&cwd);
+            }
         }
         _ => println!("{}", render_help(info)),
     }
@@ -1409,7 +1470,7 @@ prompts:
         assert!(output.contains("calypso-cli"));
         assert!(output.contains("0.1.0+abc123"));
         assert!(output.contains("Git hash: abc123"));
-        assert!(output.contains("Commands:"));
+        assert!(output.contains("Daemon commands:"));
         assert!(output.contains("--path"));
         assert!(output.contains("-h, --help"));
     }

@@ -451,7 +451,7 @@ fn unknown_command_prints_help_and_exits_zero() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
     assert!(stdout.contains("Usage:"));
-    assert!(stdout.contains("Commands:"));
+    assert!(stdout.contains("Daemon commands:"));
 }
 
 // ── calypso keys subcommands ──────────────────────────────────────────────
