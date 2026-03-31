@@ -164,9 +164,16 @@ pub fn checks_json(cwd: &Path) -> String {
 pub enum SteeringRequest {
     Retry,
     Abort,
-    Clarify { message: String },
-    Skip { target_state: String },
-    Force { target_state: String, reason: String },
+    Clarify {
+        message: String,
+    },
+    Skip {
+        target_state: String,
+    },
+    Force {
+        target_state: String,
+        reason: String,
+    },
 }
 
 /// Errors produced when parsing or applying a steering request.
@@ -182,8 +189,7 @@ pub enum SteeringError {
 
 /// Parse a steering request from raw JSON bytes.
 pub fn parse_steering(body: &[u8]) -> Result<SteeringRequest, SteeringError> {
-    let parsed: Value =
-        serde_json::from_slice(body).map_err(|_| SteeringError::BadRequest)?;
+    let parsed: Value = serde_json::from_slice(body).map_err(|_| SteeringError::BadRequest)?;
 
     let action = parsed
         .get("action")
@@ -400,7 +406,11 @@ mod tests {
         let dir = tmp_dir("web-daemon-checks-active");
         let mut run = WorkflowRun::new("test-wf", "check", 1);
         run.set_check("ci.tests", "CI test suite", CheckStatus::Failing);
-        run.set_check("branch.up-to-date", "Branch must be rebased", CheckStatus::Passing);
+        run.set_check(
+            "branch.up-to-date",
+            "Branch must be rebased",
+            CheckStatus::Passing,
+        );
         save_run(&dir, &run);
 
         let json = checks_json(&dir);

@@ -208,33 +208,31 @@ fn route(
             let json = daemon_api::steering_log_json(cwd);
             ("200 OK", "application/json", json.into_bytes())
         }
-        ("POST", "/api/steering") => {
-            match daemon_api::parse_steering(body) {
-                Err(daemon_api::SteeringError::BadRequest) => (
-                    "400 Bad Request",
+        ("POST", "/api/steering") => match daemon_api::parse_steering(body) {
+            Err(daemon_api::SteeringError::BadRequest) => (
+                "400 Bad Request",
+                "application/json",
+                json_error_body("invalid steering request"),
+            ),
+            Err(_) => (
+                "500 Internal Server Error",
+                "application/json",
+                json_error_body("unexpected parse error"),
+            ),
+            Ok(request) => match daemon_api::apply_steering(cwd, request) {
+                Ok(()) => ("200 OK", "application/json", ok_body()),
+                Err(daemon_api::SteeringError::NoActiveRun) => (
+                    "404 Not Found",
                     "application/json",
-                    json_error_body("invalid steering request"),
+                    json_error_body("no active run"),
                 ),
                 Err(_) => (
                     "500 Internal Server Error",
                     "application/json",
-                    json_error_body("unexpected parse error"),
+                    json_error_body("failed to persist steering action"),
                 ),
-                Ok(request) => match daemon_api::apply_steering(cwd, request) {
-                    Ok(()) => ("200 OK", "application/json", ok_body()),
-                    Err(daemon_api::SteeringError::NoActiveRun) => (
-                        "404 Not Found",
-                        "application/json",
-                        json_error_body("no active run"),
-                    ),
-                    Err(_) => (
-                        "500 Internal Server Error",
-                        "application/json",
-                        json_error_body("failed to persist steering action"),
-                    ),
-                },
-            }
-        }
+            },
+        },
         _ => ("404 Not Found", "text/plain", b"Not found".to_vec()),
     }
 }
