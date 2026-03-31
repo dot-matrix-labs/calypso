@@ -8,10 +8,6 @@ pub fn now_rfc3339() -> String {
     format_epoch_seconds(secs)
 }
 
-pub fn now_iso8601() -> String {
-    now_rfc3339()
-}
-
 fn format_epoch_seconds(secs: u64) -> String {
     let s = secs % 60;
     let m = (secs / 60) % 60;
