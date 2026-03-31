@@ -185,7 +185,7 @@ fn doctor_report_collects_expected_check_results() {
 }
 
 #[test]
-fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
+fn doctor_report_marks_missing_forge_checks_as_warnings() {
     let report = collect_doctor_report(&FakeEnvironment::default(), Path::new("/tmp/calypso"));
     let statuses = status_map(&report);
 
@@ -193,18 +193,20 @@ fn doctor_report_marks_missing_dependencies_and_remote_checks_as_failing() {
         statuses[&DoctorCheckId::GitInitialized],
         DoctorStatus::Failing
     );
-    assert_eq!(statuses[&DoctorCheckId::GhInstalled], DoctorStatus::Failing);
+    // Forge-specific checks are advisory — they produce warnings, not failures,
+    // so the daemon can run local workflows without GitHub prerequisites.
+    assert_eq!(statuses[&DoctorCheckId::GhInstalled], DoctorStatus::Warning);
     assert_eq!(
         statuses[&DoctorCheckId::CodexInstalled],
         DoctorStatus::Warning
     );
     assert_eq!(
         statuses[&DoctorCheckId::GhAuthenticated],
-        DoctorStatus::Failing
+        DoctorStatus::Warning
     );
     assert_eq!(
         statuses[&DoctorCheckId::GithubRemoteConfigured],
-        DoctorStatus::Failing
+        DoctorStatus::Warning
     );
     assert_eq!(
         statuses[&DoctorCheckId::RequiredWorkflowFilesPresent],
@@ -553,8 +555,14 @@ fn doctor_report_render_shows_warn_for_advisory_checks() {
         rendered.contains("[WARN] codex-installed"),
         "advisory check should render as WARN"
     );
+    // gh-installed is now advisory (forge-specific), so it renders as WARN.
     assert!(
-        rendered.contains("[FAIL] gh-installed"),
+        rendered.contains("[WARN] gh-installed"),
+        "forge-specific check should render as WARN"
+    );
+    // git-initialized is a hard requirement, so it renders as FAIL.
+    assert!(
+        rendered.contains("[FAIL] git-initialized"),
         "required check should render as FAIL"
     );
 }
@@ -681,4 +689,74 @@ fn doctor_local_workflow_layout_renders_as_warn_in_report() {
     );
 
     std::fs::remove_dir_all(&tmp).ok();
+}
+
+// ── Forge-optional readiness tests ──────────────────────────────────────────
+
+#[test]
+fn doctor_report_forge_checks_do_not_cause_hard_failures() {
+    // Verify that a report where ONLY forge-specific checks are non-passing
+    // has no hard failures — only advisory warnings.  This means daemon
+    // readiness is not blocked by missing GitHub prerequisites.
+    use nightshift_core::doctor::{DoctorCheck, DoctorCheckScope, DoctorReport};
+
+    let forge_check_ids = [
+        DoctorCheckId::GhInstalled,
+        DoctorCheckId::GhAuthenticated,
+        DoctorCheckId::GithubRemoteConfigured,
+    ];
+
+    let report = DoctorReport {
+        checks: forge_check_ids
+            .iter()
+            .map(|&id| {
+                let severity = id.severity();
+                let status = if severity == nightshift_core::doctor::CheckSeverity::Advisory {
+                    DoctorStatus::Warning
+                } else {
+                    DoctorStatus::Failing
+                };
+                DoctorCheck {
+                    id,
+                    scope: DoctorCheckScope::LocalConfiguration,
+                    status,
+                    detail: None,
+                    remediation: None,
+                    fix: None,
+                }
+            })
+            .collect(),
+    };
+
+    assert!(
+        !report.has_failures(),
+        "forge-specific checks must not produce hard failures; \
+         they should all be advisory (Warning)"
+    );
+    assert!(
+        report.has_warnings(),
+        "forge-specific checks should surface as warnings"
+    );
+}
+
+#[test]
+fn doctor_forge_checks_are_all_advisory_severity() {
+    // Direct assertion on the severity classification of forge-specific checks.
+    use nightshift_core::doctor::CheckSeverity;
+
+    assert_eq!(
+        DoctorCheckId::GhInstalled.severity(),
+        CheckSeverity::Advisory,
+        "GhInstalled must be advisory"
+    );
+    assert_eq!(
+        DoctorCheckId::GhAuthenticated.severity(),
+        CheckSeverity::Advisory,
+        "GhAuthenticated must be advisory"
+    );
+    assert_eq!(
+        DoctorCheckId::GithubRemoteConfigured.severity(),
+        CheckSeverity::Advisory,
+        "GithubRemoteConfigured must be advisory"
+    );
 }

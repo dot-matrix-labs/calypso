@@ -119,7 +119,16 @@ pub fn discover_repository_context(
         return Err(RuntimeError::DetachedHead);
     }
 
-    let pull_request = pull_request_resolver.resolve_for_branch(&repo_root, &branch)?;
+    // Pull request resolution is optional — local-only workflows can execute
+    // without a forge remote or an open PR.  When resolution fails the runtime
+    // falls back to a sentinel PullRequestRef (number 0) so downstream code
+    // can distinguish "no PR" from "PR #0".
+    let pull_request = pull_request_resolver
+        .resolve_for_branch(&repo_root, &branch)
+        .unwrap_or_else(|_| PullRequestRef {
+            number: 0,
+            url: String::new(),
+        });
     let repo_id = repo_root
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
@@ -326,3 +335,61 @@ impl fmt::Display for RuntimeError {
 }
 
 impl std::error::Error for RuntimeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A resolver that always fails — simulates no GitHub remote / no PR.
+    struct FailingPullRequestResolver;
+
+    impl PullRequestResolver for FailingPullRequestResolver {
+        fn resolve_for_branch(
+            &self,
+            _repo_root: &Path,
+            _branch: &str,
+        ) -> Result<PullRequestRef, RuntimeError> {
+            Err(RuntimeError::PullRequestNotFound(
+                "no-pr-branch".to_string(),
+            ))
+        }
+    }
+
+    #[test]
+    fn discover_context_falls_back_to_sentinel_pr_when_resolver_fails() {
+        // Use the current repo root (this test runs inside a git checkout).
+        let cwd = std::env::current_dir().expect("current dir should exist");
+        let result = discover_repository_context(&cwd, &FailingPullRequestResolver);
+
+        match result {
+            Ok(ctx) => {
+                // The context should succeed with a sentinel PR.
+                assert_eq!(ctx.feature.pull_request.number, 0);
+                assert!(ctx.feature.pull_request.url.is_empty());
+            }
+            Err(RuntimeError::DetachedHead) => {
+                // CI environments may have detached HEAD — acceptable.
+            }
+            Err(other) => {
+                panic!("unexpected error: {other}");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_returns_none_for_non_github_url() {
+        assert!(parse_owner_repo_from_url("https://gitlab.com/org/repo.git").is_none());
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_handles_github_https() {
+        let result = parse_owner_repo_from_url("https://github.com/org/repo.git");
+        assert_eq!(result, Some(("org".to_string(), "repo".to_string())));
+    }
+
+    #[test]
+    fn parse_owner_repo_from_url_handles_github_ssh() {
+        let result = parse_owner_repo_from_url("git@github.com:org/repo.git");
+        assert_eq!(result, Some(("org".to_string(), "repo".to_string())));
+    }
+}

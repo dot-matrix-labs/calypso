@@ -64,6 +64,14 @@ impl DoctorCheckId {
             DoctorCheckId::KeyStoreHealth => CheckSeverity::Advisory,
             // Legacy layout is advisory — runtime still works, but migration is recommended.
             DoctorCheckId::LocalWorkflowLayout => CheckSeverity::Advisory,
+            // Forge-specific checks are advisory — the daemon can execute useful
+            // local workflows without GitHub auth, remote configuration, or the
+            // `gh` CLI.  When a workflow explicitly depends on forge integration
+            // the adapter surface will report the missing prerequisite at step
+            // execution time rather than blocking baseline daemon readiness.
+            DoctorCheckId::GhInstalled => CheckSeverity::Advisory,
+            DoctorCheckId::GhAuthenticated => CheckSeverity::Advisory,
+            DoctorCheckId::GithubRemoteConfigured => CheckSeverity::Advisory,
             // All other checks are hard requirements.
             _ => CheckSeverity::Required,
         }
