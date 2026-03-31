@@ -4,6 +4,7 @@ mod step;
 
 use calypso_runtime::operator_surface::OperatorSurface;
 use calypso_runtime::state::RepositoryState;
+use calypso_runtime::workflow_run::WorkflowRun;
 use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
@@ -248,6 +249,10 @@ fn main() {
         [command, flag, path] if command == "status" && flag == "--state" => render_status(path),
         [command, flag, path, _headless] if command == "status" && flag == "--state" => {
             render_status(path)
+        }
+        [command, flag, path] if command == "status" && flag == "--run" => render_run_status(path),
+        [command, flag, path, _headless] if command == "status" && flag == "--run" => {
+            render_run_status(path)
         }
         // calypso dev-status [--json]
         [command] if command == "dev-status" => match run_dev_status(&cwd) {
@@ -961,6 +966,14 @@ fn render_status(path: &str) {
     let state = RepositoryState::load_from_path(std::path::Path::new(path))
         .expect("status state file should load");
     let surface = OperatorSurface::from_feature_state(&state.current_feature);
+    println!("{}", surface.render());
+}
+
+fn render_run_status(path: &str) {
+    let run = WorkflowRun::load(std::path::Path::new(path))
+        .expect("workflow run file should load")
+        .expect("workflow run file should exist");
+    let surface = OperatorSurface::from_workflow_run(&run);
     println!("{}", surface.render());
 }
 
