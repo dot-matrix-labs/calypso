@@ -173,7 +173,9 @@ pub fn run_interpreter_scheduler(
                         .entry(LogLevel::Warn, &msg)
                         .component(Component::StateMachine)
                         .emit();
-                    return SchedulerOutcome::NoCronEntries { user_action_workflows };
+                    return SchedulerOutcome::NoCronEntries {
+                        user_action_workflows,
+                    };
                 }
             };
 
