@@ -163,6 +163,124 @@
     .status { padding: 40px; text-align: center; font-size: 0.875rem; }
     .status.err { color: #f87171; }
     .status.load { color: #64748b; }
+
+    /* ── Daemon run-state panel ─────────────────────────────────────────────── */
+    .run-panel {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 16px;
+    }
+    .run-panel-title {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #38bdf8; margin-bottom: 12px;
+    }
+    .run-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+      gap: 10px;
+    }
+    .run-field { display: flex; flex-direction: column; gap: 3px; }
+    .run-field-label {
+      font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.09em;
+      color: #475569; font-weight: 700;
+    }
+    .run-field-value {
+      font-size: 0.79rem; color: #e2e8f0; font-family: ui-monospace, monospace;
+    }
+    .run-field-value.dim { color: #475569; font-style: italic; }
+    .run-stopped { color: #f87171; }
+    .run-active  { color: #10b981; }
+
+    /* ── Transitions table ──────────────────────────────────────────────────── */
+    .transitions-panel {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 16px;
+    }
+    .transitions-title {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #64748b; margin-bottom: 10px;
+    }
+    .transitions-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+    .transitions-table th {
+      text-align: left; font-size: 0.62rem; text-transform: uppercase;
+      letter-spacing: 0.09em; color: #475569; font-weight: 700;
+      padding: 4px 8px; border-bottom: 1px solid #334155;
+    }
+    .transitions-table td {
+      padding: 5px 8px; border-bottom: 1px solid #0f172a55;
+      font-family: ui-monospace, monospace; color: #e2e8f0;
+    }
+    .transitions-table tr:last-child td { border-bottom: none; }
+    .transition-arrow { color: #38bdf8; }
+    .transition-trigger { color: #94a3b8; }
+    .transition-ts { color: #475569; font-size: 0.68rem; }
+
+    /* ── Checks / blocking conditions panel ─────────────────────────────────── */
+    .checks-panel {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 16px;
+    }
+    .checks-title {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #64748b; margin-bottom: 10px;
+    }
+    .check-row {
+      display: flex; align-items: flex-start; gap: 10px; padding: 6px 0;
+      border-bottom: 1px solid #0f172a55; flex-wrap: wrap;
+    }
+    .check-row:last-child { border-bottom: none; }
+    .check-status {
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 4px; white-space: nowrap;
+      letter-spacing: 0.06em; flex-shrink: 0;
+    }
+    .check-status.passing  { background: #10b98120; color: #10b981; border: 1px solid #10b98140; }
+    .check-status.failing  { background: #f8717120; color: #f87171; border: 1px solid #f8717140; }
+    .check-status.pending  { background: #f59e0b20; color: #f59e0b; border: 1px solid #f59e0b40; }
+    .check-id   { font-family: ui-monospace, monospace; font-size: 0.78rem; color: #e2e8f0; }
+    .check-desc { font-size: 0.73rem; color: #64748b; flex: 1; }
+
+    /* ── Steering panel ──────────────────────────────────────────────────────── */
+    .steering-panel {
+      background: #1e293b; border: 1px solid #334155; border-radius: 8px;
+      padding: 14px 18px; margin-bottom: 16px;
+    }
+    .steering-title {
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: #64748b; margin-bottom: 10px;
+    }
+    .steering-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+    .steer-btn {
+      background: #1e293b; border: 1px solid #334155; border-radius: 6px;
+      color: #94a3b8; padding: 5px 12px; font-size: 0.78rem;
+      cursor: pointer; transition: all 0.12s; font-family: inherit;
+    }
+    .steer-btn:hover { border-color: #475569; color: #e2e8f0; }
+    .steer-btn.danger { border-color: #f8717155; color: #f87171; }
+    .steer-btn.danger:hover { background: #f8717115; border-color: #f87171; }
+    .steering-clarify-row {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+    }
+    .steering-input {
+      flex: 1; min-width: 200px;
+      background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+      color: #e2e8f0; padding: 5px 10px; font-size: 0.82rem; font-family: inherit;
+      outline: none;
+    }
+    .steering-input:focus { border-color: #38bdf8; }
+    .steering-log { }
+    .steering-log-entry {
+      display: flex; align-items: center; gap: 10px; padding: 5px 0;
+      border-bottom: 1px solid #0f172a55; font-size: 0.78rem; flex-wrap: wrap;
+    }
+    .steering-log-entry:last-child { border-bottom: none; }
+    .steer-outcome {
+      font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 4px; letter-spacing: 0.06em; flex-shrink: 0;
+    }
+    .steer-outcome.applied  { background: #10b98120; color: #10b981; border: 1px solid #10b98140; }
+    .steer-outcome.pending  { background: #f59e0b20; color: #f59e0b; border: 1px solid #f59e0b40; }
+    .steer-outcome.rejected { background: #f8717120; color: #f87171; border: 1px solid #f8717140; }
+    .steer-action { font-family: ui-monospace, monospace; color: #e2e8f0; flex: 1; }
+    .steer-ts { color: #475569; font-size: 0.68rem; white-space: nowrap; }
   </style>
 </head>
 <body>
@@ -363,6 +481,19 @@
         loading: true,
         error: null,
         kindEntries: Object.entries(KIND).map(([key, { color, label }]) => ({ key, color, label })),
+        // ── Daemon-backed state (issue #284) ─────────────────────────────────
+        runState: null,           // WorkflowRun summary or null
+        transitions: [],          // ordered TransitionRecord list
+        checks: [],               // PendingCheck list
+        steeringLog: [],          // SteeringEntry list
+        clarifyMessage: '',       // current clarify input
+        skipTargetState: '',      // current skip target input
+        forceTargetState: '',     // current force target input
+        forceReason: '',          // current force reason input
+        _lastRunStateJson: null,
+        _lastTransitionsJson: null,
+        _lastChecksJson: null,
+        _lastSteeringJson: null,
       },
 
       computed: {
@@ -377,6 +508,27 @@
         kindBadgeBorder() { const k = KIND[this.activeStateKind]; return k ? `1px solid ${k.color}55` : 'none'; },
         isViewDiagram() { return this.view === 'diagram'; },
         isViewCron() { return this.view === 'cron'; },
+        isViewRun() { return this.view === 'run'; },
+        // Daemon run state fields
+        runActive() { return this.runState?.active === true; },
+        runStopped() { return this.runState?.is_stopped === true; },
+        runStatusLabel() {
+          if (!this.runState?.active) return 'no active run';
+          return this.runStopped ? 'stopped' : 'running';
+        },
+        runStatusClass() { return this.runStopped ? 'run-stopped' : (this.runActive ? 'run-active' : ''); },
+        runId() { return this.runState?.run_id || '—'; },
+        runWorkflowId() { return this.runState?.workflow_id || '—'; },
+        runCurrentState() { return this.runState?.current_state || '—'; },
+        runLocality() { return this.runState?.locality || '—'; },
+        runIteration() { return this.runState?.iteration ?? '—'; },
+        runUpdatedAt() { return this.runState?.updated_at || '—'; },
+        runTerminalReason() { return this.runState?.terminal_reason || null; },
+        hasTransitions() { return this.transitions.length > 0; },
+        hasChecks() { return this.checks.length > 0; },
+        hasSteeringLog() { return this.steeringLog.length > 0; },
+        hasFailingChecks() { return this.checks.some(c => c.status === 'failing'); },
+        failingCheckCount() { return this.checks.filter(c => c.status === 'failing').length; },
         showTriggerPanel() { return this.activeStateKind === 'human' && this.availableTransitions.length > 0; },
         showCronPanel() { return this.cronWorkflows.length > 0; },
         holisticBtnText() { return this.holistic ? '\u2296 collapse' : '\u2295 expand all'; },
@@ -386,8 +538,14 @@
 
       methods: {
         mount() {
-          this.loadWorkflows().then(() => this.pollState());
-          this._pollTimer = setInterval(() => this.pollState(), POLL_MS);
+          this.loadWorkflows().then(() => {
+            this.pollState();
+            this.pollDaemonState();
+          });
+          this._pollTimer = setInterval(() => {
+            this.pollState();
+            this.pollDaemonState();
+          }, POLL_MS);
         },
 
         unmount() {
@@ -449,6 +607,105 @@
               if (d) this.doc = d;
             }
           } catch { /* silent — server may not be ready */ }
+        },
+
+        // ── Daemon API polling (issue #284) ─────────────────────────────────
+
+        async pollDaemonState() {
+          try {
+            // Run state
+            const rsRes = await fetch('/api/run-state');
+            if (rsRes.ok) {
+              const json = await rsRes.text();
+              if (json !== this._lastRunStateJson) {
+                this._lastRunStateJson = json;
+                this.runState = JSON.parse(json);
+                // Keep legacy state fields in sync with daemon run state when
+                // the daemon run is active.
+                if (this.runState?.active) {
+                  const newWf = this.runState.workflow_id;
+                  const newSt = this.runState.current_state;
+                  if (newWf !== this.activeWorkflow || newSt !== this.activeState) {
+                    this.liveFlash = true;
+                    setTimeout(() => { this.liveFlash = false; }, 800);
+                  }
+                  this.activeWorkflow = newWf;
+                  this.activeState = newSt;
+                  if (newWf && !this.selectedWfName) {
+                    const d = this.workflowsByName[newWf];
+                    if (d) this.doc = d;
+                  }
+                }
+              }
+            }
+          } catch { /* silent */ }
+
+          try {
+            // Transition history
+            const trRes = await fetch('/api/transitions');
+            if (trRes.ok) {
+              const json = await trRes.text();
+              if (json !== this._lastTransitionsJson) {
+                this._lastTransitionsJson = json;
+                this.transitions = JSON.parse(json);
+              }
+            }
+          } catch { /* silent */ }
+
+          try {
+            // Deterministic checks
+            const chRes = await fetch('/api/checks');
+            if (chRes.ok) {
+              const json = await chRes.text();
+              if (json !== this._lastChecksJson) {
+                this._lastChecksJson = json;
+                this.checks = JSON.parse(json);
+              }
+            }
+          } catch { /* silent */ }
+
+          try {
+            // Steering log
+            const stRes = await fetch('/api/steering');
+            if (stRes.ok) {
+              const json = await stRes.text();
+              if (json !== this._lastSteeringJson) {
+                this._lastSteeringJson = json;
+                this.steeringLog = JSON.parse(json);
+              }
+            }
+          } catch { /* silent */ }
+        },
+
+        async steer(action, extra) {
+          try {
+            await fetch('/api/steering', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action, ...extra }),
+            });
+            // Immediately refresh steering log and run state.
+            await this.pollDaemonState();
+          } catch { /* best effort */ }
+        },
+
+        async steerRetry()  { await this.steer('retry'); },
+        async steerAbort()  { await this.steer('abort'); },
+        async steerClarify() {
+          if (!this.clarifyMessage.trim()) return;
+          await this.steer('clarify', { message: this.clarifyMessage });
+          this.clarifyMessage = '';
+        },
+        async steerSkip() {
+          if (!this.skipTargetState.trim()) return;
+          await this.steer('skip', { target_state: this.skipTargetState });
+          this.skipTargetState = '';
+        },
+        async steerForce() {
+          if (!this.forceTargetState.trim() || !this.forceReason.trim()) return;
+          await this.steer('force', { target_state: this.forceTargetState, reason: this.forceReason });
+          this.forceTargetState = '';
+          this.forceReason = '';
         },
 
         setView(v) { this.view = v; },
@@ -551,6 +808,7 @@
                       children: [
                         { button: { class: { tab: true, active: $.isViewDiagram }, text: 'diagram', click: "setView('diagram')" } },
                         { button: { class: { tab: true, active: $.isViewCron }, text: 'cron', click: "setView('cron')" } },
+                        { button: { class: { tab: true, active: $.isViewRun }, text: 'run', click: "setView('run')" } },
                       ],
                     },
                   },
@@ -739,6 +997,241 @@
                         when: $.not.showCronPanel,
                         children: [{ div: { class: 'status load', text: 'No scheduled workflows found.' } }],
                       },
+                    ],
+                  },
+
+                  // ── Run tab (daemon-backed) ───────────────────────────────────
+                  {
+                    when: $.isViewRun,
+                    children: [
+
+                      // Run state summary
+                      {
+                        div: {
+                          class: 'run-panel',
+                          children: [
+                            { div: { class: 'run-panel-title', text: '\u25a3 Daemon run state' } },
+                            {
+                              div: {
+                                class: 'run-grid',
+                                children: [
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Status' } },
+                                      { div: { class: ['run-field-value', $.runStatusClass], text: $.runStatusLabel } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Run ID' } },
+                                      { div: { class: 'run-field-value', text: $.runId } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Workflow' } },
+                                      { div: { class: 'run-field-value', text: $.runWorkflowId } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Current state' } },
+                                      { div: { class: 'run-field-value', text: $.runCurrentState } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Locality' } },
+                                      { div: { class: 'run-field-value', text: $.runLocality } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Iteration' } },
+                                      { div: { class: 'run-field-value', text: $.runIteration } },
+                                    ]},
+                                  },
+                                  {
+                                    div: { class: 'run-field', children: [
+                                      { div: { class: 'run-field-label', text: 'Last updated' } },
+                                      { div: { class: 'run-field-value', text: $.runUpdatedAt } },
+                                    ]},
+                                  },
+                                ],
+                              },
+                            },
+                            {
+                              when: $.runTerminalReason,
+                              children: [{
+                                div: {
+                                  style: { marginTop: '10px', fontSize: '0.78rem', color: '#f87171', fontFamily: 'ui-monospace, monospace' },
+                                  children: [
+                                    { span: { style: { color: '#475569', marginRight: '6px' }, text: 'Terminal reason:' } },
+                                    { span: { text: $.runTerminalReason } },
+                                  ],
+                                },
+                              }],
+                            },
+                          ],
+                        },
+                      },
+
+                      // Blocking conditions / deterministic checks
+                      {
+                        div: {
+                          class: 'checks-panel',
+                          children: [
+                            { div: { class: 'checks-title', text: '\u25a0 Deterministic checks / blocking conditions' } },
+                            {
+                              when: $.hasChecks,
+                              children: [
+                                {
+                                  each: $.checks,
+                                  as: 'ch',
+                                  key: 'ch.check_id',
+                                  children: [{
+                                    div: {
+                                      class: 'check-row',
+                                      children: [
+                                        { div: { class: ['check-status', $.ch.status], text: $.ch.status } },
+                                        { span: { class: 'check-id', text: $.ch.check_id } },
+                                        { span: { class: 'check-desc', text: $.ch.description } },
+                                      ],
+                                    },
+                                  }],
+                                },
+                              ],
+                            },
+                            {
+                              when: $.not.hasChecks,
+                              children: [{ div: { style: { color: '#475569', fontSize: '0.78rem', paddingTop: '4px' }, text: 'No pending checks.' } }],
+                            },
+                          ],
+                        },
+                      },
+
+                      // Transition history
+                      {
+                        div: {
+                          class: 'transitions-panel',
+                          children: [
+                            { div: { class: 'transitions-title', text: '\u2192 Transition history' } },
+                            {
+                              when: $.hasTransitions,
+                              children: [{
+                                table: {
+                                  class: 'transitions-table',
+                                  children: [
+                                    { thead: { children: [{ tr: { children: [
+                                      { th: { text: 'From' } },
+                                      { th: { text: '' } },
+                                      { th: { text: 'To' } },
+                                      { th: { text: 'Trigger' } },
+                                      { th: { text: 'Timestamp' } },
+                                    ]}}]}},
+                                    { tbody: {
+                                      children: [{
+                                        each: $.transitions,
+                                        as: 'tr',
+                                        children: [{
+                                          tr: { children: [
+                                            { td: { text: $.tr.from_state } },
+                                            { td: { class: 'transition-arrow', text: '\u2192' } },
+                                            { td: { text: $.tr.to_state } },
+                                            { td: { class: 'transition-trigger', text: $.tr.trigger } },
+                                            { td: { class: 'transition-ts', text: $.tr.timestamp } },
+                                          ]},
+                                        }],
+                                      }],
+                                    }},
+                                  ],
+                                },
+                              }],
+                            },
+                            {
+                              when: $.not.hasTransitions,
+                              children: [{ div: { style: { color: '#475569', fontSize: '0.78rem', paddingTop: '4px' }, text: 'No transitions recorded yet.' } }],
+                            },
+                          ],
+                        },
+                      },
+
+                      // Steering controls
+                      {
+                        div: {
+                          class: 'steering-panel',
+                          children: [
+                            { div: { class: 'steering-title', text: '\u2699 Steering & clarification' } },
+                            {
+                              div: {
+                                class: 'steering-actions',
+                                children: [
+                                  { button: { class: 'steer-btn', click: 'steerRetry', text: '\u21ba Retry' } },
+                                  { button: { class: 'steer-btn danger', click: 'steerAbort', text: '\u2715 Abort' } },
+                                ],
+                              },
+                            },
+                            // Clarify row
+                            {
+                              div: {
+                                class: 'steering-clarify-row',
+                                children: [
+                                  { input: { class: 'steering-input', model: $.clarifyMessage, placeholder: 'Clarification message…' } },
+                                  { button: { class: 'steer-btn', click: 'steerClarify', text: 'Clarify' } },
+                                ],
+                              },
+                            },
+                            // Skip row
+                            {
+                              div: {
+                                class: 'steering-clarify-row',
+                                children: [
+                                  { input: { class: 'steering-input', model: $.skipTargetState, placeholder: 'Skip to state…' } },
+                                  { button: { class: 'steer-btn', click: 'steerSkip', text: 'Skip' } },
+                                ],
+                              },
+                            },
+                            // Force transition row
+                            {
+                              div: {
+                                class: 'steering-clarify-row',
+                                children: [
+                                  { input: { class: 'steering-input', model: $.forceTargetState, placeholder: 'Force target state…', style: { flex: '0 0 180px' } } },
+                                  { input: { class: 'steering-input', model: $.forceReason, placeholder: 'Reason…' } },
+                                  { button: { class: 'steer-btn danger', click: 'steerForce', text: 'Force' } },
+                                ],
+                              },
+                            },
+                            // Steering log
+                            {
+                              when: $.hasSteeringLog,
+                              children: [
+                                { div: { style: { fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.09em', color: '#475569', fontWeight: 700, marginTop: '10px', marginBottom: '6px' }, text: 'Steering log' } },
+                                {
+                                  div: {
+                                    class: 'steering-log',
+                                    children: [{
+                                      each: $.steeringLog,
+                                      as: 'se',
+                                      children: [{
+                                        div: {
+                                          class: 'steering-log-entry',
+                                          children: [
+                                            { div: { class: ['steer-outcome', $.se.outcome], text: $.se.outcome } },
+                                            { span: { class: 'steer-action', text: $.se.action } },
+                                            { span: { class: 'steer-ts', text: $.se.requested_at } },
+                                          ],
+                                        },
+                                      }],
+                                    }],
+                                  },
+                                },
+                              ],
+                            },
+                          ],
+                        },
+                      },
+
                     ],
                   },
 
