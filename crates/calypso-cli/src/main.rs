@@ -37,7 +37,7 @@ fn render_help(info: BuildInfo<'_>) -> String {
 calypso-cli {}
 
 Usage:
-  calypso [OPTIONS] [path] [COMMAND]
+  calypso [OPTIONS] [COMMAND]
 
 Options:
   -p, --path <dir>    Project directory (default: current working directory)
@@ -46,9 +46,6 @@ Options:
   -v, --version       Show build version information
   -v, -vv             Verbosity: -v = info, -vv = debug (default: debug)
   --json              Emit JSON-lines instead of human-readable text
-
-Positional:
-  [path]              Project directory (alternative to --path)
 
 Daemon commands:
   (none)              Start the daemon (continuous scheduling, non-interactive)
@@ -147,11 +144,23 @@ fn main() {
     // Strip -p / --path <dir> from args before dispatching.
     // This makes --path a global flag that works with every subcommand.
     let (path_override, args_after_path) = extract_path_flag(&raw_args);
+
+    // If no --path flag was given, absorb a bare positional path argument so that
+    // `calypso ~/some-dir` and `calypso --path ~/some-dir` behave identically and
+    // both route through daemon::run_daemon_default.  Any invocation that does not
+    // explicitly include --select-flow therefore reaches daemon::run_daemon_default
+    // regardless of how the project directory was supplied.
+    let (positional_path_override, args_after_positional) = if path_override.is_none() {
+        extract_positional_path_flag(&args_after_path)
+    } else {
+        (None, args_after_path)
+    };
     let cwd = path_override
+        .or(positional_path_override)
         .unwrap_or_else(|| std::env::current_dir().expect("current directory should resolve"));
 
     // Strip --select-flow from args before dispatching.
-    let (select_flow, args_after_select_flow) = extract_select_flow_flag(&args_after_path);
+    let (select_flow, args_after_select_flow) = extract_select_flow_flag(&args_after_positional);
 
     let args = args_after_select_flow;
     emit_dispatch_log(&logger, &cwd, &args);
@@ -343,11 +352,6 @@ fn main() {
                     std::process::exit(1);
                 }
             }
-        }
-        // calypso <path> — positional project directory (kept for backward compatibility)
-        [path] if looks_like_path(path) => {
-            let project_dir = std::path::Path::new(path);
-            run_project_dir(project_dir, select_flow);
         }
         // calypso --step — debug tooling: drive the state machine one step at a time
         [flag] if flag == "--step" => {
@@ -575,6 +579,34 @@ fn looks_like_path(arg: &str) -> bool {
         || arg.starts_with('/')
         || arg.starts_with('~')
         || std::path::Path::new(arg).is_dir()
+}
+
+/// If the argument list consists solely of a single path-like argument (optionally
+/// combined with `--select-flow` which is stripped later), extract that argument as
+/// a project-directory override and return the remaining args with it removed.
+///
+/// This lets `calypso ~/some-dir` behave identically to `calypso --path ~/some-dir`:
+/// the directory is resolved as `cwd` and the dispatch falls through to
+/// `daemon::run_daemon_default` (or `run_project_dir` when `--select-flow` is set).
+fn extract_positional_path_flag(args: &[String]) -> (Option<std::path::PathBuf>, Vec<String>) {
+    // Only absorb the positional arg when it is the sole non-select-flow token.
+    // Multi-arg invocations (e.g. `calypso ./dir doctor`) are left to fall through
+    // to the help output so the user sees a clear error rather than a silent mis-route.
+    let non_select_flow: Vec<&String> = args
+        .iter()
+        .filter(|a| a.as_str() != "--select-flow")
+        .collect();
+    if non_select_flow.len() == 1 && looks_like_path(non_select_flow[0]) {
+        let path = std::path::PathBuf::from(non_select_flow[0]);
+        let remaining: Vec<String> = args
+            .iter()
+            .filter(|a| *a != non_select_flow[0])
+            .cloned()
+            .collect();
+        (Some(path), remaining)
+    } else {
+        (None, args.to_vec())
+    }
 }
 
 fn run_doctor_fix(check_id: &str, cwd: &std::path::Path) {
@@ -971,8 +1003,8 @@ fn run_state_machine_step(repo_root: &std::path::Path, state_path: &std::path::P
 #[cfg(test)]
 mod tests {
     use super::{
-        BuildInfo, extract_path_flag, extract_select_flow_flag, looks_like_path, render_help,
-        render_version, resolve_state_machine_template,
+        BuildInfo, extract_path_flag, extract_positional_path_flag, extract_select_flow_flag,
+        render_help, render_version, resolve_state_machine_template,
     };
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1008,39 +1040,88 @@ prompts:
 
     static TEMPLATE_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+    // ── extract_positional_path_flag ─────────────────────────────────────────
+    // The positional [path] dispatch arm was removed from main(). A bare path-like
+    // argument is now absorbed by extract_positional_path_flag so that
+    // `calypso ~/some-dir` behaves identically to `calypso --path ~/some-dir`,
+    // routing through daemon::run_daemon_default rather than run_project_dir.
+
     #[test]
-    fn looks_like_path_recognises_dot_relative() {
-        assert!(looks_like_path("./my-project"));
-        assert!(looks_like_path("../sibling"));
-        assert!(looks_like_path("."));
+    fn positional_path_absorbed_for_dot_relative() {
+        let args = s(&["./my-project"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert_eq!(path, Some(std::path::PathBuf::from("./my-project")));
+        assert!(remaining.is_empty());
     }
 
     #[test]
-    fn looks_like_path_recognises_absolute() {
-        assert!(looks_like_path("/home/user/project"));
-        assert!(looks_like_path("/tmp"));
+    fn positional_path_absorbed_for_absolute() {
+        let args = s(&["/home/user/project"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert_eq!(path, Some(std::path::PathBuf::from("/home/user/project")));
+        assert!(remaining.is_empty());
     }
 
     #[test]
-    fn looks_like_path_recognises_tilde() {
-        assert!(looks_like_path("~/projects/calypso"));
+    fn positional_path_absorbed_for_tilde() {
+        let args = s(&["~/projects/calypso"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert_eq!(
+            path,
+            Some(std::path::PathBuf::from("~/projects/calypso"))
+        );
+        assert!(remaining.is_empty());
     }
 
     #[test]
-    fn looks_like_path_rejects_subcommands() {
-        assert!(!looks_like_path("doctor"));
-        assert!(!looks_like_path("status"));
-        assert!(!looks_like_path("watch"));
-        assert!(!looks_like_path("--version"));
-        assert!(!looks_like_path("-v"));
+    fn positional_path_not_absorbed_for_subcommand() {
+        // Subcommand names must not be consumed as paths.
+        for cmd in &["doctor", "status", "watch", "--version", "-v"] {
+            let args = s(&[cmd]);
+            let (path, remaining) = extract_positional_path_flag(&args);
+            assert!(path.is_none(), "should not absorb subcommand '{cmd}'");
+            assert_eq!(remaining, args);
+        }
     }
 
     #[test]
-    fn looks_like_path_accepts_existing_directory() {
+    fn positional_path_not_absorbed_when_path_flag_already_set() {
+        // When --path was already extracted, extract_positional_path_flag is
+        // skipped entirely in main(). This test confirms that a lone subcommand
+        // after --path stripping is left untouched.
+        let args = s(&["doctor"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert!(path.is_none());
+        assert_eq!(remaining, args);
+    }
+
+    #[test]
+    fn positional_path_absorbed_alongside_select_flow() {
+        // `calypso ./my-dir --select-flow` should absorb ./my-dir as cwd while
+        // leaving --select-flow for later extraction.
+        let args = s(&["./my-project", "--select-flow"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert_eq!(path, Some(std::path::PathBuf::from("./my-project")));
+        assert_eq!(remaining, s(&["--select-flow"]));
+    }
+
+    #[test]
+    fn positional_path_not_absorbed_for_multi_arg_invocation() {
+        // `calypso ./dir doctor` — ambiguous; leave it for the help/default arm.
+        let args = s(&["./my-project", "doctor"]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert!(path.is_none(), "should not absorb path when multiple non-select-flow args are present");
+        assert_eq!(remaining, args);
+    }
+
+    #[test]
+    fn positional_path_absorbed_for_existing_directory() {
         let tmp = std::env::temp_dir();
-        assert!(looks_like_path(
-            tmp.to_str().expect("temp dir should be valid utf-8")
-        ));
+        let tmp_str = tmp.to_str().expect("temp dir should be valid utf-8");
+        let args = s(&[tmp_str]);
+        let (path, remaining) = extract_positional_path_flag(&args);
+        assert_eq!(path, Some(tmp));
+        assert!(remaining.is_empty());
     }
 
     #[test]
