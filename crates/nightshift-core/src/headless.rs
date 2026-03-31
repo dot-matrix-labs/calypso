@@ -8,7 +8,9 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::app::{gate_status_label, resolve_repo_root};
-use crate::doctor::{DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report};
+use crate::doctor::{
+    DoctorEnvironment, DoctorReport, DoctorStatus, HostDoctorEnvironment, collect_doctor_report,
+};
 use crate::github::{HostGithubEnvironment, collect_github_report};
 use crate::interpreter_scheduler::{SchedulerMode, run_interpreter_scheduler};
 use crate::policy::{HostPolicyEnvironment, collect_policy_evidence};
@@ -709,19 +711,24 @@ fn evaluate_gates_headless(logger: &Logger, repo_root: &Path, state: &Repository
     // Build a mutable copy of the feature to evaluate gates
     let mut feature = state.current_feature.clone();
 
-    // Collect evidence from doctor, github, and policy
-    let doctor_evidence =
-        collect_doctor_report(&HostDoctorEnvironment, repo_root).to_builtin_evidence();
-
-    let github_report =
-        collect_github_report(&HostGithubEnvironment::default(), &feature.pull_request);
-    let github_evidence = github_report.to_builtin_evidence();
+    // Collect evidence from doctor and policy.  GitHub evidence is only
+    // gathered when a GitHub remote is actually configured — this lets the
+    // daemon execute local workflows without requiring forge prerequisites.
+    let doctor_env = HostDoctorEnvironment;
+    let doctor_evidence = collect_doctor_report(&doctor_env, repo_root).to_builtin_evidence();
 
     let policy_evidence = collect_policy_evidence(&HostPolicyEnvironment, repo_root, &template);
 
-    let evidence = doctor_evidence
-        .merge(&github_evidence)
-        .merge(&policy_evidence);
+    let evidence = if doctor_env.has_github_remote(repo_root) && feature.pull_request.number != 0 {
+        let github_report =
+            collect_github_report(&HostGithubEnvironment::default(), &feature.pull_request);
+        let github_evidence = github_report.to_builtin_evidence();
+        doctor_evidence
+            .merge(&github_evidence)
+            .merge(&policy_evidence)
+    } else {
+        doctor_evidence.merge(&policy_evidence)
+    };
 
     evaluate_and_log_gates(logger, &mut feature, &template, &evidence)
 }
