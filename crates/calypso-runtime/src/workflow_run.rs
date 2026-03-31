@@ -229,7 +229,10 @@ pub enum TerminalReason {
     /// The workflow hit its step/time limit.
     Timeout { detail: String },
     /// The workflow is being retried from an earlier state.
-    Retry { from_state: String, to_state: String },
+    Retry {
+        from_state: String,
+        to_state: String,
+    },
 }
 
 impl fmt::Display for TerminalReason {
@@ -354,7 +357,11 @@ impl WorkflowRun {
     /// Add or update a pending deterministic check.
     pub fn set_check(&mut self, check_id: &str, description: &str, status: CheckStatus) {
         let now = now_rfc3339();
-        if let Some(existing) = self.pending_checks.iter_mut().find(|c| c.check_id == check_id) {
+        if let Some(existing) = self
+            .pending_checks
+            .iter_mut()
+            .find(|c| c.check_id == check_id)
+        {
             existing.status = status;
             existing.last_evaluated_at = Some(now);
         } else {
@@ -417,9 +424,12 @@ impl WorkflowRun {
     /// Resolve the most recent pending steering entry.
     pub fn resolve_steering(&mut self, outcome: SteeringOutcome) {
         let now = now_rfc3339();
-        if let Some(entry) = self.steering.iter_mut().rev().find(|e| {
-            matches!(e.outcome, SteeringOutcome::Pending)
-        }) {
+        if let Some(entry) = self
+            .steering
+            .iter_mut()
+            .rev()
+            .find(|e| matches!(e.outcome, SteeringOutcome::Pending))
+        {
             entry.outcome = outcome;
             entry.resolved_at = Some(now.clone());
         }
@@ -445,8 +455,7 @@ impl WorkflowRun {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(WorkflowRunError::Io)?;
         }
-        let json =
-            serde_json::to_string_pretty(self).map_err(WorkflowRunError::Json)?;
+        let json = serde_json::to_string_pretty(self).map_err(WorkflowRunError::Json)?;
         let tmp_path = path.with_extension("tmp");
         std::fs::write(&tmp_path, &json).map_err(WorkflowRunError::Io)?;
         std::fs::rename(&tmp_path, path).map_err(WorkflowRunError::Io)?;
@@ -461,8 +470,7 @@ impl WorkflowRun {
             return Ok(None);
         }
         let bytes = std::fs::read(path).map_err(WorkflowRunError::Io)?;
-        let run: Self =
-            serde_json::from_slice(&bytes).map_err(WorkflowRunError::Json)?;
+        let run: Self = serde_json::from_slice(&bytes).map_err(WorkflowRunError::Json)?;
         Ok(Some(run))
     }
 
@@ -646,17 +654,11 @@ mod tests {
         let mut run = WorkflowRun::new("wf", "a", 1);
         run.set_check("ci.tests", "CI test suite", CheckStatus::Pending);
         assert_eq!(run.pending_checks.len(), 1);
-        assert!(matches!(
-            run.pending_checks[0].status,
-            CheckStatus::Pending
-        ));
+        assert!(matches!(run.pending_checks[0].status, CheckStatus::Pending));
 
         run.set_check("ci.tests", "CI test suite", CheckStatus::Passing);
         assert_eq!(run.pending_checks.len(), 1);
-        assert!(matches!(
-            run.pending_checks[0].status,
-            CheckStatus::Passing
-        ));
+        assert!(matches!(run.pending_checks[0].status, CheckStatus::Passing));
     }
 
     #[test]
@@ -664,10 +666,7 @@ mod tests {
         let mut run = WorkflowRun::new("wf", "implement", 1);
         run.start_agent_run("session-1", "implement");
         assert_eq!(run.agent_runs.len(), 1);
-        assert!(matches!(
-            run.agent_runs[0].status,
-            AgentRunStatus::Running
-        ));
+        assert!(matches!(run.agent_runs[0].status, AgentRunStatus::Running));
 
         run.complete_agent_run("session-1", AgentRunStatus::Completed, Some("ok".into()));
         assert!(matches!(
@@ -682,16 +681,10 @@ mod tests {
         let mut run = WorkflowRun::new("wf", "stuck", 1);
         run.add_steering(SteeringAction::Retry);
         assert_eq!(run.steering.len(), 1);
-        assert!(matches!(
-            run.steering[0].outcome,
-            SteeringOutcome::Pending
-        ));
+        assert!(matches!(run.steering[0].outcome, SteeringOutcome::Pending));
 
         run.resolve_steering(SteeringOutcome::Applied);
-        assert!(matches!(
-            run.steering[0].outcome,
-            SteeringOutcome::Applied
-        ));
+        assert!(matches!(run.steering[0].outcome, SteeringOutcome::Applied));
     }
 
     #[test]

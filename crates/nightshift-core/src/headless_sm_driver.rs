@@ -31,9 +31,7 @@
 
 use std::path::PathBuf;
 
-use calypso_runtime::workflow_run::{
-    AgentRunStatus, TerminalReason, WorkflowRun,
-};
+use calypso_runtime::workflow_run::{AgentRunStatus, TerminalReason, WorkflowRun};
 
 use crate::headless_persist::{ExitReasonTag, HeadlessRunState, now_rfc3339};
 use crate::headless_sm::{HeadlessAction, HeadlessStateMachine};
@@ -252,52 +250,51 @@ impl<'sm> HeadlessSmDriver<'sm> {
         // Priority: resume_workflow_run > resume_state > initial_state.
         // When a WorkflowRun is available it is authoritative because it
         // carries full transition history and agent metadata.
-        let (mut current_state, mut iteration) =
-            if let Some(ref wfr) = self.resume_workflow_run {
-                logger
-                    .entry(
-                        LogLevel::Warn,
-                        &format!(
-                            "resuming from workflow run '{}' state '{}' (iteration {})",
-                            wfr.run_id, wfr.current_state, wfr.iteration,
-                        ),
-                    )
-                    .component(Component::StateMachine)
-                    .event(LogEvent::Startup)
-                    .field("run_id", wfr.run_id.as_str())
-                    .field("resumed_from_state", &wfr.current_state)
-                    .field("previous_iteration", wfr.iteration.to_string())
-                    .field("state_count", self.sm.states.len().to_string())
-                    .emit();
-                (wfr.current_state.clone(), wfr.iteration)
-            } else if let Some(ref prev) = self.resume_state {
-                logger
-                    .entry(
-                        LogLevel::Warn,
-                        &format!(
-                            "resuming from state '{}' (previous run: {}, iteration {})",
-                            prev.current_state, prev.exit_reason, prev.iteration,
-                        ),
-                    )
-                    .component(Component::StateMachine)
-                    .event(LogEvent::Startup)
-                    .field("resumed_from_state", &prev.current_state)
-                    .field("previous_exit_reason", prev.exit_reason.as_str())
-                    .field("previous_iteration", prev.iteration.to_string())
-                    .field("state_count", self.sm.states.len().to_string())
-                    .emit();
-                (prev.current_state.clone(), prev.iteration)
-            } else {
-                let initial = self.sm.initial_state.clone();
-                logger
-                    .entry(LogLevel::Info, "headless sm driver starting")
-                    .component(Component::StateMachine)
-                    .event(LogEvent::Startup)
-                    .field("initial_state", &initial)
-                    .field("state_count", self.sm.states.len().to_string())
-                    .emit();
-                (initial, 0)
-            };
+        let (mut current_state, mut iteration) = if let Some(ref wfr) = self.resume_workflow_run {
+            logger
+                .entry(
+                    LogLevel::Warn,
+                    &format!(
+                        "resuming from workflow run '{}' state '{}' (iteration {})",
+                        wfr.run_id, wfr.current_state, wfr.iteration,
+                    ),
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .field("run_id", wfr.run_id.as_str())
+                .field("resumed_from_state", &wfr.current_state)
+                .field("previous_iteration", wfr.iteration.to_string())
+                .field("state_count", self.sm.states.len().to_string())
+                .emit();
+            (wfr.current_state.clone(), wfr.iteration)
+        } else if let Some(ref prev) = self.resume_state {
+            logger
+                .entry(
+                    LogLevel::Warn,
+                    &format!(
+                        "resuming from state '{}' (previous run: {}, iteration {})",
+                        prev.current_state, prev.exit_reason, prev.iteration,
+                    ),
+                )
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .field("resumed_from_state", &prev.current_state)
+                .field("previous_exit_reason", prev.exit_reason.as_str())
+                .field("previous_iteration", prev.iteration.to_string())
+                .field("state_count", self.sm.states.len().to_string())
+                .emit();
+            (prev.current_state.clone(), prev.iteration)
+        } else {
+            let initial = self.sm.initial_state.clone();
+            logger
+                .entry(LogLevel::Info, "headless sm driver starting")
+                .component(Component::StateMachine)
+                .event(LogEvent::Startup)
+                .field("initial_state", &initial)
+                .field("state_count", self.sm.states.len().to_string())
+                .emit();
+            (initial, 0)
+        };
         let mut steps_taken: usize = 0;
 
         // Initialize the daemon-native workflow run tracker.
@@ -305,19 +302,19 @@ impl<'sm> HeadlessSmDriver<'sm> {
         // If resuming from a persisted WorkflowRun, clone it and continue
         // appending transitions.  Otherwise create a fresh run when
         // workflow_run_path is configured.
-        let mut workflow_run: Option<WorkflowRun> =
-            if let Some(ref wfr) = self.resume_workflow_run {
-                Some(wfr.clone())
-            } else if self.workflow_run_path.is_some() {
-                let wf_name = self
-                    .sm
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "headless".to_string());
-                Some(WorkflowRun::new(&wf_name, &current_state, 1))
-            } else {
-                None
-            };
+        let mut workflow_run: Option<WorkflowRun> = if let Some(ref wfr) = self.resume_workflow_run
+        {
+            Some(wfr.clone())
+        } else if self.workflow_run_path.is_some() {
+            let wf_name = self
+                .sm
+                .name
+                .clone()
+                .unwrap_or_else(|| "headless".to_string());
+            Some(WorkflowRun::new(&wf_name, &current_state, 1))
+        } else {
+            None
+        };
 
         loop {
             iteration += 1;
@@ -2483,10 +2480,9 @@ states:
             "workflow run file should persist on error exit"
         );
 
-        let run =
-            calypso_runtime::workflow_run::WorkflowRun::load(&wfr_path)
-                .unwrap()
-                .unwrap();
+        let run = calypso_runtime::workflow_run::WorkflowRun::load(&wfr_path)
+            .unwrap()
+            .unwrap();
         assert_eq!(run.current_state, "scan");
         assert!(run.is_stopped());
         assert!(run.agent_runs.len() == 1);
@@ -2580,8 +2576,7 @@ states:
         let sm = load_and_validate(yaml, "<test>").unwrap();
 
         // Create a pre-existing workflow run at state "b" (as if resumed).
-        let mut existing_run =
-            calypso_runtime::workflow_run::WorkflowRun::new("headless", "a", 1);
+        let mut existing_run = calypso_runtime::workflow_run::WorkflowRun::new("headless", "a", 1);
         existing_run.record_transition("b", "on_success");
 
         let executor = ScriptedExecutor::new(vec![AgentOutcome::Success], vec![]);
@@ -2672,8 +2667,7 @@ states:
             Some("ok".to_string()),
         );
 
-        let surface =
-            calypso_runtime::operator_surface::OperatorSurface::from_workflow_run(&run);
+        let surface = calypso_runtime::operator_surface::OperatorSurface::from_workflow_run(&run);
         let rendered = surface.render();
 
         // The rendered surface should contain the run ID and current state.
