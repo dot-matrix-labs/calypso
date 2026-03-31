@@ -502,7 +502,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                     match outcome {
                         AgentOutcome::Success => {
                             let next = on_success.clone();
-                            let agent_id = format!("agent-{}-{iteration}", current_state);
+                            let agent_id = format!("agent-{current_state}-{iteration}");
                             if let Some(ref mut wfr) = workflow_run {
                                 wfr.start_agent_run(&agent_id, &current_state);
                                 wfr.complete_agent_run(
@@ -544,7 +544,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                         }
                         AgentOutcome::Failure { reason } => {
                             let next = on_failure.clone();
-                            let agent_id = format!("agent-{}-{iteration}", current_state);
+                            let agent_id = format!("agent-{current_state}-{iteration}");
                             if let Some(ref mut wfr) = workflow_run {
                                 wfr.start_agent_run(&agent_id, &current_state);
                                 wfr.complete_agent_run(
@@ -587,7 +587,7 @@ impl<'sm> HeadlessSmDriver<'sm> {
                             current_state = next;
                         }
                         AgentOutcome::Error { error } => {
-                            let agent_id = format!("agent-{}-{iteration}", current_state);
+                            let agent_id = format!("agent-{current_state}-{iteration}");
                             if let Some(ref mut wfr) = workflow_run {
                                 wfr.start_agent_run(&agent_id, &current_state);
                                 wfr.complete_agent_run(
