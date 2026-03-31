@@ -91,31 +91,15 @@ jobs:
         if: needs.changes.outputs.init_relevant == 'true'
         run: cargo build -p calypso-cli
 
-      - name: Test Default Initialization
+      - name: Verify init is no longer a first-class product command
         if: needs.changes.outputs.init_relevant == 'true'
         run: |
-          mkdir -p $HOME/calypso-tests
-          TEST_PATH=$HOME/calypso-tests/test-default
-          # Initialize without hello-world (default)
-          ./target/debug/calypso-cli init --path "$TEST_PATH"
-          echo "🩺 Running Doctor on default init..."
-          ./target/debug/calypso-cli doctor --path "$TEST_PATH"
-
-      - name: Test Hello World Initialization
-        if: needs.changes.outputs.init_relevant == 'true'
-        run: |
-          TEST_PATH=$HOME/calypso-tests/test-hello-world
-          # Initialize with hello-world
-          ./target/debug/calypso-cli init --path "$TEST_PATH" --hello-world
-          echo "🩺 Running Doctor on hello-world init..."
-          ./target/debug/calypso-cli doctor --path "$TEST_PATH"
-          
-          echo "🌍 Verifying hello-world files existence..."
-          # Verify the specific files created in hello-world mode
-          test -f "$TEST_PATH/.calypso/state-machine.yml"
-          test -f "$TEST_PATH/.github/workflows/hello-world.yml"
-          test -f "$TEST_PATH/.githooks/pre-commit"
-          # Ensure hook is executable
-          test -x "$TEST_PATH/.githooks/pre-commit"
-          
-          echo "✅ Hello-world files verified."
+          # The `init` command has been removed from the primary product surface.
+          # Running `calypso-cli init` must fall through to the help output
+          # (the unknown-command catch-all) and exit 0.
+          output=$(./target/debug/calypso-cli init 2>&1)
+          if ! echo "$output" | grep -q "Usage:"; then
+            echo "Expected help output for removed init command, got: $output"
+            exit 1
+          fi
+          echo "✅ init correctly falls through to help (deprecated command removed)"
