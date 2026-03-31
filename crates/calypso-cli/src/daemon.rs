@@ -102,22 +102,23 @@ mod tests {
     fn run_daemon_default_starts_without_repository_state_json() {
         // When there is no .calypso/repository-state.json, run_daemon_default
         // must not fall back to doctor output — it should call run_daemon_start
-        // unconditionally. We verify that the function returns without panicking
-        // on a non-git temp dir (the daemon exits early because it cannot resolve
-        // a git repo root, but no doctor output is printed to stdout).
+        // unconditionally.
+        //
+        // run_daemon_default exits via std::process::exit on failure, so we
+        // cannot call it directly in a unit test.  Instead we verify:
+        //   1. run_daemon_default and run_daemon_start have the expected
+        //      signatures (compile-time check via function pointer assignment).
+        //   2. A temp dir without a state file satisfies the precondition.
         let dir = temp_non_git_dir();
-        // run_daemon_default must not panic or print doctor output. It exits via
-        // std::process::exit, so we do not call it directly in a unit test.
-        // Instead we verify that the state_path check no longer gates execution by
-        // confirming run_daemon_start is the unconditional path (checked by code
-        // review — this test documents the expected invariant).
+
+        // Compile-time: verify function exists and has the expected signature.
+        let _: fn(&Path) = run_daemon_default;
+        let _: fn(&Path, bool) = run_daemon_start;
+
         assert!(
             !dir.join(".calypso").join("repository-state.json").exists(),
             "precondition: state file must not exist"
         );
-        // If this line compiles and no panic/fallback branch exists in
-        // run_daemon_default, the guard has been removed successfully.
-        let _ = &dir; // confirm dir exists without calling the daemon
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
