@@ -1066,10 +1066,7 @@ prompts:
     fn positional_path_absorbed_for_tilde() {
         let args = s(&["~/projects/calypso"]);
         let (path, remaining) = extract_positional_path_flag(&args);
-        assert_eq!(
-            path,
-            Some(std::path::PathBuf::from("~/projects/calypso"))
-        );
+        assert_eq!(path, Some(std::path::PathBuf::from("~/projects/calypso")));
         assert!(remaining.is_empty());
     }
 
@@ -1110,7 +1107,10 @@ prompts:
         // `calypso ./dir doctor` — ambiguous; leave it for the help/default arm.
         let args = s(&["./my-project", "doctor"]);
         let (path, remaining) = extract_positional_path_flag(&args);
-        assert!(path.is_none(), "should not absorb path when multiple non-select-flow args are present");
+        assert!(
+            path.is_none(),
+            "should not absorb path when multiple non-select-flow args are present"
+        );
         assert_eq!(remaining, args);
     }
 
