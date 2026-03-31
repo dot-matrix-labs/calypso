@@ -39,15 +39,28 @@ fn temp_project_with_run(state: &str) -> std::path::PathBuf {
 }
 
 #[test]
-fn running_without_arguments_exits_cleanly() {
-    // With no .calypso/state.json in the test working directory, the binary
-    // attempts to launch the doctor TUI. In a non-terminal environment the TUI
-    // setup fails gracefully and the process exits 0.
+fn running_without_state_file_reaches_daemon_path() {
+    // Before fix #294, invoking `calypso --path <non-git-dir>` would print
+    // doctor output to stdout and exit 0.  After the fix, the daemon always
+    // starts — it exits non-zero (can't resolve git repo) but stdout is clean.
+    let dir = std::env::temp_dir().join(format!("calypso-e2e-noargs-{}", unique_id()));
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+
     let output = Command::new(env!("CARGO_BIN_EXE_calypso-cli"))
+        .args(["--path"])
+        .arg(&dir)
         .output()
         .expect("failed to run calypso-cli");
 
-    assert!(output.status.success());
+    let _ = std::fs::remove_dir_all(&dir);
+
+    // Daemon mode exits non-zero when repo root cannot be resolved.
+    // stdout must be empty (daemon mode writes structured logs to stderr only).
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.is_empty(),
+        "daemon path must not write to stdout: {stdout}"
+    );
 }
 
 #[test]
@@ -331,4 +344,39 @@ fn step_mode_still_available_as_debug_tooling() {
         .expect("run calypso --step");
 
     assert!(output.status.success());
+}
+
+// ── --path without repository-state.json reaches the scheduler ───────────────
+
+#[test]
+fn path_flag_without_state_file_does_not_print_doctor_output() {
+    // Regression test for fix #294: before the fix, `calypso --path <non-git-dir>`
+    // would print doctor output to stdout and exit 0.  After the fix, the daemon
+    // starts unconditionally — it exits non-zero when repo root cannot be
+    // resolved, but stdout must be empty (daemon logs go to stderr only).
+    let dir = std::env::temp_dir().join(format!("calypso-e2e-nostate-{}", unique_id()));
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let output = calypso()
+        .args(["--path"])
+        .arg(&dir)
+        .output()
+        .expect("run calypso --path <non-git-dir>");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // The old doctor-fallback path printed a table to stdout.
+    // After the fix, stdout must be empty.
+    assert!(
+        stdout.is_empty(),
+        "--path without state file must not print doctor output to stdout: {stdout}"
+    );
+
+    // Non-zero exit: non-git dir → repo-root resolution fails → exit 1.
+    assert!(
+        !output.status.success(),
+        "--path on a non-git dir must exit non-zero"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

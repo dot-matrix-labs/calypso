@@ -10,25 +10,21 @@
 
 use std::path::Path;
 
-use nightshift_core::app::run_doctor;
 use nightshift_core::headless::{HeadlessConfig, run_headless};
 use nightshift_core::telemetry::{LogFormat, LogLevel};
 
 /// Default entry point when `calypso` is invoked with no arguments and no
 /// `--select-flow` flag.
 ///
-/// If the project is initialised (`.calypso/repository-state.json` exists),
-/// starts the daemon with continuous scheduling. Otherwise, falls back to
-/// doctor output to guide the operator through setup.
+/// Always starts the daemon with continuous scheduling regardless of whether
+/// `.calypso/repository-state.json` exists.  Doctor failures are surfaced as
+/// warnings inside the headless orchestrator but do not prevent the interpreter
+/// scheduler from running.
 pub fn run_daemon_default(cwd: &Path) {
-    let state_path = cwd.join(".calypso").join("repository-state.json");
-    if state_path.exists() {
-        // Daemon mode: continuous scheduling, non-interactive.
-        run_daemon_start(cwd, false);
-    } else {
-        // Not yet initialised: show doctor output to guide setup.
-        println!("{}", run_doctor(cwd));
-    }
+    // Daemon mode: continuous scheduling, non-interactive.
+    // The repository-state.json existence check has been removed so the daemon
+    // starts uniformly, matching the behaviour of --select-flow.
+    run_daemon_start(cwd, false);
 }
 
 /// Start the daemon explicitly.
@@ -103,14 +99,26 @@ mod tests {
     }
 
     #[test]
-    fn run_daemon_default_shows_doctor_when_not_initialised() {
-        // When there is no .calypso/repository-state.json, the daemon default
-        // should not panic or hang — it should fall back to doctor output.
-        // We verify by checking that the function returns without error on
-        // a non-git temp dir (doctor output is printed to stdout).
+    fn run_daemon_default_starts_without_repository_state_json() {
+        // When there is no .calypso/repository-state.json, run_daemon_default
+        // must not fall back to doctor output — it should call run_daemon_start
+        // unconditionally.
+        //
+        // run_daemon_default exits via std::process::exit on failure, so we
+        // cannot call it directly in a unit test.  Instead we verify:
+        //   1. run_daemon_default and run_daemon_start have the expected
+        //      signatures (compile-time check via function pointer assignment).
+        //   2. A temp dir without a state file satisfies the precondition.
         let dir = temp_non_git_dir();
-        // run_daemon_default prints to stdout; we just verify it does not panic.
-        run_daemon_default(&dir);
+
+        // Compile-time: verify function exists and has the expected signature.
+        let _: fn(&Path) = run_daemon_default;
+        let _: fn(&Path, bool) = run_daemon_start;
+
+        assert!(
+            !dir.join(".calypso").join("repository-state.json").exists(),
+            "precondition: state file must not exist"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

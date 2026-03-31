@@ -66,9 +66,15 @@ fn multiple_local_workflows_no_menu_without_select_flow() {
     );
 }
 
-/// With multiple local workflows, both workflow names must appear in the menu.
+/// With daemon-first design, multiple local workflows placed under `.calypso/`
+/// do not trigger an interactive menu.  The daemon always starts silently —
+/// stdout is empty, workflow names must not appear in stdout.
+///
+/// (The old behaviour showed workflow names via the `LocalWorkflowLayout`
+/// doctor check remediation text; that code path is no longer reachable from
+/// the default no-args invocation after fix #294.)
 #[test]
-fn multiple_local_workflows_menu_lists_both_files() {
+fn multiple_local_workflows_no_stdout_in_daemon_mode() {
     let dispatch_only = include_str!("fixtures/workflows/dispatch-only.yaml");
     let hello_world = include_str!("fixtures/workflows/hello-world.yaml");
     let out = spawned_calypso()
@@ -77,14 +83,10 @@ fn multiple_local_workflows_menu_lists_both_files() {
         .stdin("0\n")
         .run();
 
+    // Daemon mode never writes to stdout — all structured logs go to stderr.
     assert!(
-        out.stdout.contains("dispatch-only.yaml"),
-        "expected 'dispatch-only.yaml' in menu; stdout:\n{}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("hello-world.yaml"),
-        "expected 'hello-world.yaml' in menu; stdout:\n{}",
+        out.stdout.is_empty(),
+        "daemon mode must not write to stdout; stdout:\n{}",
         out.stdout
     );
 }
