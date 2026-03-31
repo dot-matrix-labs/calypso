@@ -7,6 +7,7 @@ use crate::state::{
     AgentSessionStatus, EvidenceStatus, FeatureState, GateGroupStatus, GateStatus,
     GithubMergeability, GithubReviewStatus, WorkflowState,
 };
+use crate::workflow_run::{AgentRunStatus, CheckStatus, SteeringOutcome, WorkflowRun};
 
 // ── Public types ────────────────────────────────────────────────────────────
 
@@ -102,6 +103,121 @@ impl OperatorSurface {
                 .flat_map(|session| session.pending_follow_ups.iter().cloned())
                 .collect(),
             last_event: "idle".to_string(),
+        }
+    }
+
+    /// Build an `OperatorSurface` from a daemon-native [`WorkflowRun`].
+    ///
+    /// This satisfies acceptance criterion #4: operator-facing inspection data
+    /// is derived from persisted run state rather than best-effort log inference.
+    ///
+    /// The resulting surface uses the workflow run's current state, transition
+    /// history, pending checks, active agent runs, and steering state to
+    /// populate all display fields.
+    pub fn from_workflow_run(run: &WorkflowRun) -> Self {
+        let blocking_gate_ids: Vec<String> = run
+            .pending_checks
+            .iter()
+            .filter(|c| !matches!(c.status, CheckStatus::Passing))
+            .map(|c| c.check_id.clone())
+            .collect();
+
+        let gate_groups = if run.pending_checks.is_empty() {
+            Vec::new()
+        } else {
+            vec![GateGroupView {
+                label: "Deterministic checks".to_string(),
+                group_status: if run
+                    .pending_checks
+                    .iter()
+                    .any(|c| matches!(c.status, CheckStatus::Failing))
+                {
+                    "blocked".to_string()
+                } else if run
+                    .pending_checks
+                    .iter()
+                    .any(|c| matches!(c.status, CheckStatus::Pending))
+                {
+                    "pending".to_string()
+                } else {
+                    "passing".to_string()
+                },
+                gates: run
+                    .pending_checks
+                    .iter()
+                    .map(|c| {
+                        let status = match c.status {
+                            CheckStatus::Passing => "passing",
+                            CheckStatus::Failing => "failing",
+                            CheckStatus::Pending => "pending",
+                        };
+                        GateView {
+                            label: c.description.clone(),
+                            status: status.to_string(),
+                            is_blocking: !matches!(c.status, CheckStatus::Passing),
+                        }
+                    })
+                    .collect(),
+            }]
+        };
+
+        let sessions: Vec<SessionView> = run
+            .agent_runs
+            .iter()
+            .map(|r| {
+                let status = match r.status {
+                    AgentRunStatus::Running => "running",
+                    AgentRunStatus::Completed => "completed",
+                    AgentRunStatus::Failed => "failed",
+                    AgentRunStatus::TimedOut => "failed",
+                    AgentRunStatus::Aborted => "aborted",
+                };
+                SessionView {
+                    role: r.state_name.clone(),
+                    session_id: r.agent_run_id.clone(),
+                    status: status.to_string(),
+                    output: r
+                        .outcome
+                        .as_ref()
+                        .map(|o| vec![o.clone()])
+                        .unwrap_or_else(|| vec!["No output yet.".to_string()]),
+                }
+            })
+            .collect();
+
+        let pending_clarifications: Vec<PendingClarification> = run
+            .steering
+            .iter()
+            .filter(|s| matches!(s.outcome, SteeringOutcome::Pending))
+            .filter_map(|s| {
+                if let crate::workflow_run::SteeringAction::Clarify { ref message } = s.action {
+                    Some(PendingClarification {
+                        session_id: "operator".to_string(),
+                        question: message.clone(),
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        Self {
+            feature_id: run.run_id.as_str().to_string(),
+            branch: String::new(),
+            workflow: run.current_state.clone(),
+            pull_request_number: 0,
+            github: None,
+            github_error: None,
+            blocking_gate_ids,
+            gate_groups,
+            sessions,
+            pending_clarifications,
+            queued_follow_ups: Vec::new(),
+            last_event: run
+                .terminal_reason
+                .as_ref()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|| "running".to_string()),
         }
     }
 
