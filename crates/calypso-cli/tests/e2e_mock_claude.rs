@@ -166,4 +166,3 @@ fn run_role_dispatch_removed_falls_through_to_help() {
         "removed run --role must not produce legacy outcome output"
     );
 }
-

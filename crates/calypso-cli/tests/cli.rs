@@ -25,16 +25,6 @@ fn temp_non_git_dir() -> std::path::PathBuf {
     dir
 }
 
-/// Create a temp project directory that has a `.calypso/repository-state.json`.
-fn temp_project_dir_with_state(state: &RepositoryState) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!("calypso-cli-project-{}", unique_id()));
-    let calypso_dir = dir.join(".calypso");
-    std::fs::create_dir_all(&calypso_dir).expect("project dir should be created");
-    let state_path = calypso_dir.join("repository-state.json");
-    state.save_to_path(&state_path).expect("state should save");
-    dir
-}
-
 fn calypso() -> Command {
     Command::new(env!("CARGO_BIN_EXE_calypso-cli"))
 }
@@ -343,7 +333,10 @@ fn state_show_falls_through_to_help_when_removed() {
     // Falls through to help output — exits 0.
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("Usage:"), "expected help output for removed state show command");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed state show command"
+    );
 }
 
 #[test]
@@ -357,7 +350,10 @@ fn template_validate_falls_through_to_help_when_removed() {
     // Falls through to help output — exits 0.
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("Usage:"), "expected help output for removed template validate command");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed template validate command"
+    );
 }
 
 #[test]

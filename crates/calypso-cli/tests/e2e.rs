@@ -346,7 +346,10 @@ fn step_flag_removed_falls_through_to_help() {
     // Falls through to help output — exits 0.
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf-8");
-    assert!(stdout.contains("Usage:"), "expected help output for removed --step flag");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed --step flag"
+    );
 }
 
 // ── --path without repository-state.json reaches the scheduler ───────────────
