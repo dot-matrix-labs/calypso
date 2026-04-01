@@ -380,3 +380,76 @@ fn path_flag_without_state_file_does_not_print_doctor_output() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+// ── Positional path argument routes to daemon (issue #298) ───────────────────
+
+/// A bare positional path argument must reach `daemon::run_daemon_default`, not
+/// the legacy `run_project_dir` path.  The observable contract is identical to
+/// the `--path` flag: daemon exits non-zero on a non-git dir and writes nothing
+/// to stdout (daemon logs go to stderr only).
+#[test]
+fn positional_path_arg_routes_to_daemon_not_legacy_path() {
+    let dir = std::env::temp_dir().join(format!("calypso-e2e-pos-path-{}", unique_id()));
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let output = calypso()
+        .arg(&dir)
+        .output()
+        .expect("run calypso <positional-path>");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // Daemon path: stdout must be empty (daemon logs go to stderr only).
+    // Before fix #298 this would have printed doctor output via run_project_dir.
+    assert!(
+        stdout.is_empty(),
+        "positional path must not print doctor output to stdout; got: {stdout}"
+    );
+
+    // Non-zero exit: non-git dir → repo-root resolution fails → exit 1.
+    assert!(
+        !output.status.success(),
+        "positional path on a non-git dir must exit non-zero"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Passing a positional path and `--path` pointing to the same non-git directory
+/// must behave identically — both reach the daemon and emit no stdout.
+#[test]
+fn positional_path_arg_and_path_flag_behave_identically() {
+    let dir = std::env::temp_dir().join(format!("calypso-e2e-equiv-{}", unique_id()));
+    std::fs::create_dir_all(&dir).expect("create dir");
+
+    let positional_output = calypso()
+        .arg(&dir)
+        .output()
+        .expect("run calypso <positional-path>");
+
+    let flag_output = calypso()
+        .args(["--path"])
+        .arg(&dir)
+        .output()
+        .expect("run calypso --path <dir>");
+
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let pos_stdout = String::from_utf8_lossy(&positional_output.stdout);
+    let flag_stdout = String::from_utf8_lossy(&flag_output.stdout);
+
+    assert!(
+        pos_stdout.is_empty(),
+        "positional path stdout must be empty: {pos_stdout}"
+    );
+    assert!(
+        flag_stdout.is_empty(),
+        "--path flag stdout must be empty: {flag_stdout}"
+    );
+
+    assert_eq!(
+        positional_output.status.code(),
+        flag_output.status.code(),
+        "positional path and --path flag must produce the same exit code"
+    );
+}

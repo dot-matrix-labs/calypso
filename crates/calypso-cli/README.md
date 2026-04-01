@@ -13,35 +13,37 @@ The command-line interface for Calypso, built in Rust.
 
 ```sh
 # From the repository root or crates/calypso-cli/ directory:
-cargo run                        # launch TUI from current directory
-cargo run -- ./my-project        # launch TUI for a specific project directory
-cargo run -- /abs/path/to/proj   # absolute path also works
-cargo run -- ~/projects/calypso  # tilde paths also work
+cargo run                              # start daemon from current directory
+cargo run -- --path ./my-project       # start daemon for a specific project directory
+cargo run -- --path /abs/path/to/proj  # absolute path also works
+cargo run -- --path ~/projects/calypso # tilde paths also work
 
 cargo run -- doctor              # run prerequisite checks
 cargo run -- status              # print feature gate summary
-cargo run -- watch               # live-reload TUI from current directory
 
 # Release builds work the same way:
-cargo run --release              # launch TUI (optimized build)
+cargo run --release              # start daemon (optimized build)
 cargo run --release -- doctor    # run doctor (optimized build)
 ```
 
 ## Path argument
 
-`calypso [path]` accepts an optional project directory. If the argument looks like a path (starts with `.`, `/`, or `~`, or is an existing directory), Calypso launches the TUI for that project's `.calypso/state.json`. If no argument is given, the current working directory is used.
+Use `--path <dir>` (or `-p <dir>`) to specify the project directory. If omitted, the current working directory is used. All invocations that do not include `--select-flow` route to the headless workflow daemon regardless of how the directory was supplied.
 
 ```sh
-calypso                  # uses $PWD/.calypso/state.json
-calypso ./my-project     # uses ./my-project/.calypso/state.json
-calypso /abs/path        # uses /abs/path/.calypso/state.json
+calypso                        # daemon uses $PWD
+calypso --path ./my-project    # daemon uses ./my-project
+calypso --path /abs/path       # daemon uses /abs/path
 ```
+
+The positional `[path]` argument form (`calypso ./my-dir`) was removed in favour of the explicit `--path` flag. Using a bare path as a positional argument previously activated a legacy code path; it now has no special meaning and falls through to the help output.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `calypso [path]` | Launch TUI for a project directory (defaults to cwd) |
+| `calypso` | Start the headless workflow daemon (uses cwd) |
+| `calypso --path <dir>` | Start the daemon for a specific project directory |
 | `calypso doctor` | Run prerequisite health checks |
 | `calypso doctor --fix <check-id>` | Apply fix for a specific check |
 | `calypso status` | Print feature gate summary |
