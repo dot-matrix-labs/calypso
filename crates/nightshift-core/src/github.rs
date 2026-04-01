@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
@@ -142,6 +145,94 @@ impl GithubEnvironment for HostGithubEnvironment {
             }
         };
         fetch_pull_request_snapshot(&owner, &repo, pull_request)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TTL cache for GitHub PR snapshots
+// ---------------------------------------------------------------------------
+
+/// Default TTL for cached [`GithubPullRequestSnapshot`] entries (15 seconds).
+pub const GITHUB_SNAPSHOT_TTL: Duration = Duration::from_secs(15);
+
+/// Cache key: `(owner, repo, pr_number)`.
+type CacheKey = (String, String, u64);
+
+/// In-memory TTL cache that wraps any [`GithubEnvironment`] and deduplicates
+/// repeated `pull_request_snapshot` calls within the TTL window.
+///
+/// Two scheduling passes within the TTL for the same PR share one subprocess
+/// call. A pass after TTL expiry issues a fresh call and refreshes the entry.
+/// Explicit [`CachedGithubEnvironment::invalidate`] drops a cached entry
+/// immediately, so steering actions that mutate PR state see fresh data.
+pub struct CachedGithubEnvironment<E: GithubEnvironment> {
+    inner: E,
+    ttl: Duration,
+    cache: Mutex<HashMap<CacheKey, (Instant, GithubPullRequestSnapshot)>>,
+}
+
+impl<E: GithubEnvironment> CachedGithubEnvironment<E> {
+    /// Wrap `inner` with the default 15-second TTL.
+    pub fn new(inner: E) -> Self {
+        Self::with_ttl(inner, GITHUB_SNAPSHOT_TTL)
+    }
+
+    /// Wrap `inner` with an explicit TTL (useful for tests).
+    pub fn with_ttl(inner: E, ttl: Duration) -> Self {
+        Self {
+            inner,
+            ttl,
+            cache: Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// Resolve `(owner, repo)` from a [`PullRequestRef`] URL.
+    fn owner_repo(pull_request: &PullRequestRef) -> Result<(String, String), GithubSnapshotError> {
+        parse_owner_repo_from_pr_url(&pull_request.url)
+    }
+
+    /// Invalidate the cached entry for the given PR, forcing the next call to
+    /// issue a fresh subprocess. Call this after any steering action that
+    /// mutates PR state (e.g. marking ready, merging).
+    pub fn invalidate(&self, owner: &str, repo: &str, pr_number: u64) {
+        let key = (owner.to_string(), repo.to_string(), pr_number);
+        self.cache
+            .lock()
+            .expect("github snapshot cache lock should not be poisoned")
+            .remove(&key);
+    }
+}
+
+impl<E: GithubEnvironment> GithubEnvironment for CachedGithubEnvironment<E> {
+    fn pull_request_snapshot(
+        &self,
+        pull_request: &PullRequestRef,
+    ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+        let (owner, repo) = Self::owner_repo(pull_request)?;
+        let key: CacheKey = (owner, repo, pull_request.number);
+
+        // Check the cache first.
+        {
+            let cache = self
+                .cache
+                .lock()
+                .expect("github snapshot cache lock should not be poisoned");
+            if let Some((fetched_at, snapshot)) = cache.get(&key) {
+                if fetched_at.elapsed() < self.ttl {
+                    return Ok(snapshot.clone());
+                }
+            }
+        }
+
+        // Cache miss or TTL expired — call the inner environment.
+        let snapshot = self.inner.pull_request_snapshot(pull_request)?;
+
+        self.cache
+            .lock()
+            .expect("github snapshot cache lock should not be poisoned")
+            .insert(key, (Instant::now(), snapshot.clone()));
+
+        Ok(snapshot)
     }
 }
 
@@ -925,6 +1016,116 @@ exit 1
         assert_eq!(
             parse_mergeability_rest(None).unwrap(),
             GithubMergeability::Unknown
+        );
+    }
+
+    // ── CachedGithubEnvironment tests ────────────────────────────────────────
+
+    /// A stub `GithubEnvironment` that counts how many times it has been called
+    /// and always returns a fixed snapshot.
+    struct CountingGithubEnvironment {
+        call_count: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        snapshot: GithubPullRequestSnapshot,
+    }
+
+    impl CountingGithubEnvironment {
+        fn new(snapshot: GithubPullRequestSnapshot) -> (Self, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+            let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            (
+                Self {
+                    call_count: std::sync::Arc::clone(&counter),
+                    snapshot,
+                },
+                counter,
+            )
+        }
+    }
+
+    impl GithubEnvironment for CountingGithubEnvironment {
+        fn pull_request_snapshot(
+            &self,
+            _pull_request: &PullRequestRef,
+        ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
+            self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(self.snapshot.clone())
+        }
+    }
+
+    fn dummy_snapshot() -> GithubPullRequestSnapshot {
+        GithubPullRequestSnapshot {
+            is_draft: false,
+            review_status: GithubReviewStatus::ReviewRequired,
+            checks: crate::state::EvidenceStatus::Pending,
+            mergeability: GithubMergeability::Unknown,
+        }
+    }
+
+    fn dummy_pr(number: u64) -> PullRequestRef {
+        PullRequestRef {
+            number,
+            url: format!("https://github.com/owner/repo/pull/{number}"),
+        }
+    }
+
+    /// Two fetches within the TTL window produce exactly one subprocess call.
+    #[test]
+    fn cached_env_returns_cached_snapshot_within_ttl() {
+        let (inner, counter) = CountingGithubEnvironment::new(dummy_snapshot());
+        // Use a long TTL so the cache never expires within this test.
+        let env = CachedGithubEnvironment::with_ttl(inner, Duration::from_secs(60));
+        let pr = dummy_pr(1);
+
+        let first = env.pull_request_snapshot(&pr).expect("first fetch should succeed");
+        let second = env.pull_request_snapshot(&pr).expect("second fetch should succeed");
+
+        assert_eq!(first, second, "both fetches should return the same snapshot");
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "inner environment should be called exactly once within TTL"
+        );
+    }
+
+    /// A fetch after TTL expiry issues a fresh subprocess call and updates the cache.
+    #[test]
+    fn cached_env_refetches_after_ttl_expiry() {
+        let (inner, counter) = CountingGithubEnvironment::new(dummy_snapshot());
+        // Use a zero-duration TTL so every access is expired.
+        let env = CachedGithubEnvironment::with_ttl(inner, Duration::ZERO);
+        let pr = dummy_pr(2);
+
+        env.pull_request_snapshot(&pr).expect("first fetch should succeed");
+        // Yield briefly so elapsed() > Duration::ZERO.
+        std::thread::sleep(Duration::from_millis(1));
+        env.pull_request_snapshot(&pr).expect("second fetch should succeed");
+
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "inner environment should be called twice after TTL expiry"
+        );
+    }
+
+    /// After a steering invalidation the cache entry is absent.
+    #[test]
+    fn cached_env_invalidation_removes_entry() {
+        let (inner, counter) = CountingGithubEnvironment::new(dummy_snapshot());
+        let env = CachedGithubEnvironment::with_ttl(inner, Duration::from_secs(60));
+        let pr = dummy_pr(3);
+
+        // Populate the cache.
+        env.pull_request_snapshot(&pr).expect("first fetch should succeed");
+        assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Invalidate simulating a steering action.
+        env.invalidate("owner", "repo", 3);
+
+        // Next fetch must issue a new subprocess call.
+        env.pull_request_snapshot(&pr).expect("post-invalidation fetch should succeed");
+        assert_eq!(
+            counter.load(std::sync::atomic::Ordering::SeqCst),
+            2,
+            "inner environment should be called again after invalidation"
         );
     }
 }
