@@ -5,12 +5,14 @@
 //! For CI and test environments, `--single-pass` runs one scheduling pass
 //! and exits.
 //!
-//! See `docs/prd.md` for the headless daemon architecture and `review-2026-03-30.md`
-//! for the design rationale behind making the CLI daemon-first.
+//! See `docs/prd.md` for the orchestrator daemon architecture and
+//! `review-2026-03-30.md` for the design rationale behind making the CLI
+//! daemon-first.
 
 use std::path::Path;
 
-use nightshift_core::headless::{HeadlessConfig, run_headless};
+use nightshift_core::interpreter_scheduler::SchedulerMode;
+use nightshift_core::orchestrator::{OrchestratorConfig, run_orchestrator};
 use nightshift_core::telemetry::{LogFormat, LogLevel};
 
 /// Default entry point when `calypso` is invoked with no arguments and no
@@ -18,7 +20,7 @@ use nightshift_core::telemetry::{LogFormat, LogLevel};
 ///
 /// Always starts the daemon with continuous scheduling regardless of whether
 /// `.calypso/repository-state.json` exists.  Doctor failures are surfaced as
-/// warnings inside the headless orchestrator but do not prevent the interpreter
+/// warnings inside the orchestrator but do not prevent the interpreter
 /// scheduler from running.
 pub fn run_daemon_default(cwd: &Path) {
     // Daemon mode: continuous scheduling, non-interactive.
@@ -33,51 +35,25 @@ pub fn run_daemon_default(cwd: &Path) {
 ///   runs until interrupted by a signal.
 /// - `single_pass = true`: one scheduling pass and exit (CI/test mode).
 ///
-/// Both modes use the headless orchestrator which runs prerequisite checks,
+/// Both modes use the orchestrator which runs prerequisite checks,
 /// loads state, evaluates gates, and enters the interpreter scheduler.
 pub fn run_daemon_start(cwd: &Path, single_pass: bool) {
-    let config = HeadlessConfig {
+    let config = OrchestratorConfig {
         verbosity: LogLevel::Debug,
         log_format: LogFormat::Text,
         env_log_override: None,
     };
 
-    if single_pass {
-        // Single-pass mode uses the existing headless orchestrator which
-        // already runs the interpreter scheduler in SinglePass mode.
-        let exit_code = run_headless(cwd, &config);
-        if exit_code != 0 {
-            std::process::exit(exit_code);
-        }
+    let mode = if single_pass {
+        SchedulerMode::SinglePass
     } else {
-        // Continuous daemon mode: run the headless orchestrator which uses
-        // the interpreter scheduler. The current headless implementation
-        // dispatches through SchedulerMode based on the run_headless call.
-        //
-        // We use run_headless_daemon which runs the scheduler in Daemon mode,
-        // blocking until interrupted by a signal.
-        let exit_code = run_headless_daemon(cwd, &config);
-        if exit_code != 0 {
-            std::process::exit(exit_code);
-        }
-    }
-}
+        SchedulerMode::Daemon
+    };
 
-/// Run the headless daemon with continuous scheduling.
-///
-/// This wraps the headless orchestrator but switches the interpreter scheduler
-/// to `Daemon` mode so it blocks on cron-scheduled workflows and fires them
-/// when their scheduled time arrives.
-fn run_headless_daemon(cwd: &Path, config: &HeadlessConfig) -> i32 {
-    // For continuous daemon mode, we delegate to the headless module's
-    // daemon-mode entry point. If the headless module does not yet expose
-    // a separate daemon entry, we fall back to single-pass mode with a
-    // note that full daemon mode requires the scheduler upgrade.
-    //
-    // The headless module's run_headless already supports the full
-    // orchestration pipeline; the only difference is the scheduler mode.
-    // We call run_headless_daemon_mode which uses SchedulerMode::Daemon.
-    nightshift_core::headless::run_headless_daemon_mode(cwd, config)
+    let exit_code = run_orchestrator(cwd, &config, mode);
+    if exit_code != 0 {
+        std::process::exit(exit_code);
+    }
 }
 
 #[cfg(test)]

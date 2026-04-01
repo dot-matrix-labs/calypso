@@ -1,6 +1,7 @@
-//! Headless-only entry point for the nightshift engine.
+//! Orchestrator entry point for the nightshift engine.
 
-use nightshift_core::headless::HeadlessConfig;
+use nightshift_core::interpreter_scheduler::SchedulerMode;
+use nightshift_core::orchestrator::OrchestratorConfig;
 use nightshift_core::telemetry::{LogFormat, LogLevel};
 
 fn main() {
@@ -10,11 +11,11 @@ fn main() {
     } else {
         std::env::current_dir().expect("current directory should be accessible")
     };
-    let config = HeadlessConfig {
+    let config = OrchestratorConfig {
         verbosity: LogLevel::Debug,
         log_format: LogFormat::Text,
         env_log_override: None,
     };
-    let exit = nightshift_core::headless::run_headless(&cwd, &config);
+    let exit = nightshift_core::orchestrator::run_orchestrator(&cwd, &config, SchedulerMode::SinglePass);
     std::process::exit(exit);
 }
