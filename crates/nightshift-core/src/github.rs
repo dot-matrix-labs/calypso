@@ -217,10 +217,10 @@ impl<E: GithubEnvironment> GithubEnvironment for CachedGithubEnvironment<E> {
                 .cache
                 .lock()
                 .expect("github snapshot cache lock should not be poisoned");
-            if let Some((fetched_at, snapshot)) = cache.get(&key) {
-                if fetched_at.elapsed() < self.ttl {
-                    return Ok(snapshot.clone());
-                }
+            if let Some((fetched_at, snapshot)) = cache.get(&key)
+                && fetched_at.elapsed() < self.ttl
+            {
+                return Ok(snapshot.clone());
             }
         }
 
@@ -1029,7 +1029,9 @@ exit 1
     }
 
     impl CountingGithubEnvironment {
-        fn new(snapshot: GithubPullRequestSnapshot) -> (Self, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        fn new(
+            snapshot: GithubPullRequestSnapshot,
+        ) -> (Self, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
             let counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             (
                 Self {
@@ -1046,7 +1048,8 @@ exit 1
             &self,
             _pull_request: &PullRequestRef,
         ) -> Result<GithubPullRequestSnapshot, GithubSnapshotError> {
-            self.call_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.call_count
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(self.snapshot.clone())
         }
     }
@@ -1075,10 +1078,17 @@ exit 1
         let env = CachedGithubEnvironment::with_ttl(inner, Duration::from_secs(60));
         let pr = dummy_pr(1);
 
-        let first = env.pull_request_snapshot(&pr).expect("first fetch should succeed");
-        let second = env.pull_request_snapshot(&pr).expect("second fetch should succeed");
+        let first = env
+            .pull_request_snapshot(&pr)
+            .expect("first fetch should succeed");
+        let second = env
+            .pull_request_snapshot(&pr)
+            .expect("second fetch should succeed");
 
-        assert_eq!(first, second, "both fetches should return the same snapshot");
+        assert_eq!(
+            first, second,
+            "both fetches should return the same snapshot"
+        );
         assert_eq!(
             counter.load(std::sync::atomic::Ordering::SeqCst),
             1,
@@ -1094,10 +1104,12 @@ exit 1
         let env = CachedGithubEnvironment::with_ttl(inner, Duration::ZERO);
         let pr = dummy_pr(2);
 
-        env.pull_request_snapshot(&pr).expect("first fetch should succeed");
+        env.pull_request_snapshot(&pr)
+            .expect("first fetch should succeed");
         // Yield briefly so elapsed() > Duration::ZERO.
         std::thread::sleep(Duration::from_millis(1));
-        env.pull_request_snapshot(&pr).expect("second fetch should succeed");
+        env.pull_request_snapshot(&pr)
+            .expect("second fetch should succeed");
 
         assert_eq!(
             counter.load(std::sync::atomic::Ordering::SeqCst),
@@ -1114,14 +1126,16 @@ exit 1
         let pr = dummy_pr(3);
 
         // Populate the cache.
-        env.pull_request_snapshot(&pr).expect("first fetch should succeed");
+        env.pull_request_snapshot(&pr)
+            .expect("first fetch should succeed");
         assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
 
         // Invalidate simulating a steering action.
         env.invalidate("owner", "repo", 3);
 
         // Next fetch must issue a new subprocess call.
-        env.pull_request_snapshot(&pr).expect("post-invalidation fetch should succeed");
+        env.pull_request_snapshot(&pr)
+            .expect("post-invalidation fetch should succeed");
         assert_eq!(
             counter.load(std::sync::atomic::Ordering::SeqCst),
             2,
