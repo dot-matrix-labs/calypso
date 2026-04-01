@@ -16,6 +16,7 @@ fn main() {
         log_format: LogFormat::Text,
         env_log_override: None,
     };
-    let exit = nightshift_core::orchestrator::run_orchestrator(&cwd, &config, SchedulerMode::SinglePass);
+    let exit =
+        nightshift_core::orchestrator::run_orchestrator(&cwd, &config, SchedulerMode::SinglePass);
     std::process::exit(exit);
 }

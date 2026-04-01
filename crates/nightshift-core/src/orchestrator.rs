@@ -645,8 +645,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("calypso-orchestrator-test-startup");
         let _ = std::fs::create_dir_all(&tmp);
 
-        let exit =
-            run_orchestrator_with_logger(&tmp, &config, SchedulerMode::SinglePass, &logger);
+        let exit = run_orchestrator_with_logger(&tmp, &config, SchedulerMode::SinglePass, &logger);
         let _ = std::fs::remove_dir_all(&tmp);
 
         // Should have logged startup
