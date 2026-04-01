@@ -217,13 +217,7 @@ fn main() {
             }
         },
         [command, flag, path] if command == "status" && flag == "--state" => render_status(path),
-        [command, flag, path, _headless] if command == "status" && flag == "--state" => {
-            render_status(path)
-        }
         [command, flag, path] if command == "status" && flag == "--run" => render_run_status(path),
-        [command, flag, path, _headless] if command == "status" && flag == "--run" => {
-            render_run_status(path)
-        }
         // calypso webview
         [command] if command == "webview" => {
             if let Err(error) = run_webview(&cwd, 7373) {

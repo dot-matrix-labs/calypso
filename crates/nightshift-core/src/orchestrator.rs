@@ -452,10 +452,10 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
     let mut any_failing = false;
 
     for check in &report.checks {
-        let status_str = match check.status {
-            DoctorStatus::Passing => "pass",
-            DoctorStatus::Warning => "warn",
-            DoctorStatus::Failing => "fail",
+        let (status_str, level) = match check.status {
+            DoctorStatus::Passing => ("pass", LogLevel::Info),
+            DoctorStatus::Warning => ("warn", LogLevel::Warn),
+            DoctorStatus::Failing => ("fail", LogLevel::Warn),
         };
 
         let mut fields = BTreeMap::new();
@@ -473,12 +473,6 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
                 serde_json::Value::String(detail.clone()),
             );
         }
-
-        let level = match check.status {
-            DoctorStatus::Passing => LogLevel::Info,
-            DoctorStatus::Warning => LogLevel::Warn,
-            DoctorStatus::Failing => LogLevel::Warn,
-        };
 
         logger.log_event(
             level,
