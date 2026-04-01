@@ -125,7 +125,8 @@ fn help_documents_daemon_start_command() {
 }
 
 #[test]
-fn help_documents_step_as_debug_tooling() {
+fn help_does_not_document_removed_step_flag() {
+    // --step was a legacy debug tool and has been removed.
     let output = calypso()
         .arg("--help")
         .output()
@@ -133,12 +134,12 @@ fn help_documents_step_as_debug_tooling() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("utf-8");
     assert!(
-        stdout.contains("Debug:"),
-        "help should have a Debug section"
+        !stdout.contains("--step"),
+        "--step must not appear in help output after removal"
     );
     assert!(
-        stdout.contains("--step") && stdout.contains("debug tooling"),
-        "step should be documented as debug tooling"
+        !stdout.contains("Debug:"),
+        "Debug section must not appear in help output after --step removal"
     );
 }
 
@@ -335,15 +336,20 @@ fn daemon_start_single_pass_exits_cleanly_without_state() {
 }
 
 #[test]
-fn step_mode_still_available_as_debug_tooling() {
-    // Verify --step does not crash in a non-terminal environment
-    // (it exits cleanly because there is no state file).
+fn step_flag_removed_falls_through_to_help() {
+    // --step was removed; unknown flags fall through to the help catch-all.
     let output = calypso()
         .arg("--step")
         .output()
         .expect("run calypso --step");
 
+    // Falls through to help output — exits 0.
     assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).expect("utf-8");
+    assert!(
+        stdout.contains("Usage:"),
+        "expected help output for removed --step flag"
+    );
 }
 
 // ── --path without repository-state.json reaches the scheduler ───────────────

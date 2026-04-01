@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::claude::{ClaudeConfig, ClaudeSession};
-use crate::sm_audit;
 use crate::state::BuiltinEvidence;
 use crate::workflows;
 
@@ -35,7 +34,6 @@ pub enum DoctorCheckId {
     RequiredWorkflowFilesPresent,
     GitHooksPathConfigured,
     RequiredGitHooksInstalled,
-    StateMachineIntegrity,
     /// Detects YAML files placed at `.calypso/*.yml|*.yaml` (legacy local workflow
     /// layout). These files are ignored by the runtime — they should be moved to
     /// `.calypso/workflows/` to be registered as local workflow definitions.
@@ -88,7 +86,6 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredGitHooksInstalled => {
                 "builtin.doctor.required_git_hooks_installed"
             }
-            DoctorCheckId::StateMachineIntegrity => "builtin.doctor.sm_integrity",
             DoctorCheckId::LocalWorkflowLayout => "builtin.doctor.local_workflow_layout",
         }
     }
@@ -104,7 +101,6 @@ impl DoctorCheckId {
             DoctorCheckId::RequiredWorkflowFilesPresent => "required-workflows-present",
             DoctorCheckId::GitHooksPathConfigured => "git-hooks-path-configured",
             DoctorCheckId::RequiredGitHooksInstalled => "required-git-hooks-installed",
-            DoctorCheckId::StateMachineIntegrity => "state-machine-integrity",
             DoctorCheckId::LocalWorkflowLayout => "local-workflow-layout",
         }
     }
@@ -377,7 +373,6 @@ pub fn collect_doctor_report(
     let hooks_path = environment
         .git_hooks_path(repo_root)
         .map(|p| p.to_string_lossy().into_owned());
-    let sm_audit = sm_audit::run_audit(repo_root, is_hello_world);
     // Only fetch the github user when it may be needed for fix construction.
     let github_user = if !environment.has_github_remote(repo_root) {
         environment.github_user()
@@ -465,18 +460,6 @@ pub fn collect_doctor_report(
                 (!missing_git_hooks.is_empty()).then_some(missing_git_hooks.join(", ")),
                 repo_root,
                 hooks_path,
-            ),
-            make_check(
-                DoctorCheckId::StateMachineIntegrity,
-                DoctorCheckScope::LocalConfiguration,
-                sm_audit.error_count() == 0,
-                if sm_audit.findings.is_empty() {
-                    None
-                } else {
-                    Some(sm_audit::render_audit(&sm_audit))
-                },
-                repo_root,
-                None,
             ),
             make_check(
                 DoctorCheckId::LocalWorkflowLayout,
@@ -815,13 +798,6 @@ fn failing_doctor_fix(
             Some(DoctorFix::Sequence(steps))
         }
 
-        // No automated fix for SM integrity — manual review required.
-        DoctorCheckId::StateMachineIntegrity => Some(DoctorFix::Manual {
-            instructions:
-                "Review the state machine audit output and correct workflow references in Calypso workflow YAML files."
-                    .to_string(),
-        }),
-
         // Legacy local workflow layout: provide migration instructions.
         DoctorCheckId::LocalWorkflowLayout => {
             let files = detail.unwrap_or("unknown");
@@ -876,9 +852,6 @@ fn failing_fix(id: DoctorCheckId, detail: Option<&str>, extra: Option<&str>) -> 
             "Missing workflow files will be written and pushed: {}",
             detail.unwrap_or("unknown")
         )),
-        DoctorCheckId::StateMachineIntegrity => {
-            Some("Review the state machine audit findings and fix workflow references.".to_string())
-        }
         DoctorCheckId::LocalWorkflowLayout => Some(format!(
             "Legacy local workflow files found under .calypso/: {}. \
              Move them to .calypso/workflows/ to register them as local workflow definitions.",

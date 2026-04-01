@@ -1,19 +1,14 @@
 mod daemon;
 mod run_control;
-mod step;
 
 use calypso_runtime::operator_surface::OperatorSurface;
 use calypso_runtime::state::RepositoryState;
 use calypso_runtime::workflow_run::WorkflowRun;
-use calypso_templates::TemplateSet;
 use calypso_web::run_webview;
 use nightshift_core::app::{
-    render_fix_results, run_agents_json, run_agents_plain, run_doctor, run_doctor_fix_all,
-    run_doctor_fix_single, run_doctor_json, run_doctor_verbose, run_state_status_json,
-    run_state_status_plain, run_status, run_workflows_list, run_workflows_show,
-    run_workflows_validate,
+    render_fix_results, run_doctor, run_doctor_fix_all, run_doctor_fix_single, run_doctor_json,
+    run_doctor_verbose, run_status, run_workflows_list, run_workflows_show, run_workflows_validate,
 };
-use nightshift_core::execution::{ExecutionConfig, ExecutionOutcome, run_supervised_session};
 use nightshift_core::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,9 +59,6 @@ Run inspection and control:
   run force-transition <state> --reason <reason>
                       Force-transition to a state with recorded operator intent
 
-Debug:
-  --step              Drive the state machine one step at a time (debug tooling)
-
 Diagnostics:
   doctor              Check local prerequisites and environment
   doctor --verbose    Show detailed remediation steps for failing checks
@@ -74,16 +66,8 @@ Diagnostics:
   doctor --fix        Apply auto-fixes for all failing checks
   doctor --fix <id>   Apply an available fix for a specific doctor check
   status              Render the feature status for the project directory
-  state               Alias for `state status`
-  state --json        Alias for `state status --json`
-  state status        Show a human-readable summary of .calypso/repository-state.json
-  state status --json Output state status as JSON
-  state show          Print the current state file as raw JSON
-  agents              Show active agent sessions
-  agents --json       Output agent sessions as JSON
 
 Workflows:
-  template validate   Validate the local workflow template
   workflows list      List effective workflow names for the project directory
   workflows show <name>
                       Print the raw YAML for the named workflow
@@ -240,77 +224,6 @@ fn main() {
         [command, flag, path, _headless] if command == "status" && flag == "--run" => {
             render_run_status(path)
         }
-        // calypso state (no subcommand) — alias for `calypso state status`
-        [command] if command == "state" => match run_state_status_plain(&cwd) {
-            Ok(output) => println!("{output}"),
-            Err(error) => {
-                eprintln!("state status error: {error}");
-                std::process::exit(1);
-            }
-        },
-        [command, flag] if command == "state" && flag == "--json" => {
-            match run_state_status_json(&cwd) {
-                Ok(json) => println!("{json}"),
-                Err(error) => {
-                    eprintln!("state status error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        [command, subcommand] if command == "state" && subcommand == "show" => {
-            let state_path = cwd.join(".calypso").join("repository-state.json");
-            match RepositoryState::load_from_path(&state_path) {
-                Ok(state) => println!(
-                    "{}",
-                    state.to_json_pretty().expect("state should serialize")
-                ),
-                Err(error) => {
-                    eprintln!("state show error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // calypso state status [--json]
-        [command, subcommand] if command == "state" && subcommand == "status" => {
-            match run_state_status_plain(&cwd) {
-                Ok(output) => println!("{output}"),
-                Err(error) => {
-                    eprintln!("state status error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        [command, subcommand, flag]
-            if command == "state" && subcommand == "status" && flag == "--json" =>
-        {
-            match run_state_status_json(&cwd) {
-                Ok(json) => println!("{json}"),
-                Err(error) => {
-                    eprintln!("state status error: {error}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        // calypso agents [--json]
-        [command] if command == "agents" => match run_agents_plain(&cwd) {
-            Ok(output) => println!("{output}"),
-            Err(error) => {
-                eprintln!("agents error: {error}");
-                std::process::exit(1);
-            }
-        },
-        [command, flag] if command == "agents" && flag == "--json" => match run_agents_json(&cwd) {
-            Ok(json) => println!("{json}"),
-            Err(error) => {
-                eprintln!("agents error: {error}");
-                std::process::exit(1);
-            }
-        },
-        // calypso run <feature-id> --role <role>
-        [command, _feature_id, role_flag, role] if command == "run" && role_flag == "--role" => {
-            let state_path = cwd.join(".calypso/repository-state.json");
-            run_claude_session(&state_path.to_string_lossy(), role);
-        }
         // calypso webview
         [command] if command == "webview" => {
             if let Err(error) = run_webview(&cwd, 7373) {
@@ -325,9 +238,6 @@ fn main() {
                 eprintln!("webview error: {error}");
                 std::process::exit(1);
             }
-        }
-        [command, subcommand] if command == "template" && subcommand == "validate" => {
-            run_template_validate(&cwd);
         }
         // calypso workflows list
         [command, subcommand] if command == "workflows" && subcommand == "list" => {
@@ -353,15 +263,6 @@ fn main() {
                 }
             }
         }
-        // calypso --step — debug tooling: drive the state machine one step at a time
-        [flag] if flag == "--step" => {
-            let state_path = cwd.join(".calypso").join("repository-state.json");
-            if state_path.exists() {
-                run_state_machine_step(&cwd, &state_path);
-            } else {
-                println!("{}", run_doctor(&cwd));
-            }
-        }
         // calypso — no args: daemon-first continuous scheduling if initialized,
         // else show doctor output. The --select-flow flag falls back to legacy
         // interactive selection for backward compatibility.
@@ -377,70 +278,18 @@ fn main() {
 }
 
 fn run_project_dir(project_dir: &std::path::Path, select_flow: bool) {
-    let state_path = project_dir.join(".calypso").join("repository-state.json");
-    // Resolve --select-flow before checking whether the state file exists so that
-    // the interactive selector is shown even on an uninitialised project directory.
+    // Resolve --select-flow before dispatching so the interactive selector is
+    // shown even on an uninitialised project directory.
     let flow = resolve_select_flow(select_flow, project_dir);
     match flow {
         Some(SelectedFlow::Workflow(name)) => {
             run_workflow_auto(&name, project_dir);
         }
         None => {
-            if state_path.exists() {
-                run_state_machine_auto(project_dir, &state_path, None);
-            } else if !select_flow {
-                // No --select-flow flag was used: auto-detect local workflow files
-                // before falling back to doctor output.
-                let local_flows = collect_eligible_local_flows(project_dir);
-                match local_flows.len() {
-                    1 => {
-                        run_workflow_auto(&local_flows[0], project_dir);
-                    }
-                    n if n > 1 => {
-                        // Multiple local workflows: prompt the user to pick one.
-                        if let Some(SelectedFlow::Workflow(name)) =
-                            select_workflow_interactively(project_dir)
-                        {
-                            run_workflow_auto(&name, project_dir);
-                        }
-                    }
-                    _ => {
-                        // No local workflows: fall back to embedded doctor output.
-                        println!("{}", run_doctor(project_dir));
-                    }
-                }
-            } else {
-                // --select-flow was used but user cancelled or no eligible workflows.
-                println!("{}", run_doctor(project_dir));
-            }
+            // --select-flow was used but user cancelled or no eligible workflows.
+            println!("{}", run_doctor(project_dir));
         }
     }
-}
-
-/// Collect the names of all local (non-embedded) workflows that have a user-facing
-/// entry point (`workflow_dispatch` or `cron` trigger).
-///
-/// Returns a vec of workflow names suitable for passing to `run_workflow_auto`.
-fn collect_eligible_local_flows(cwd: &std::path::Path) -> Vec<String> {
-    use calypso_workflows::{WorkflowCatalog, WorkflowSource};
-
-    let catalog = WorkflowCatalog::load(cwd);
-    let mut names = Vec::new();
-
-    for entry in catalog.entries() {
-        // Skip embedded catalog entries — only consider project-local files.
-        if entry.handle.source == WorkflowSource::Embedded {
-            continue;
-        }
-        let Ok(wf) = entry.parse() else {
-            continue;
-        };
-        if wf.trigger.is_some() || wf.schedule.is_some() {
-            names.push(entry.handle.name.clone());
-        }
-    }
-
-    names
 }
 
 /// Strip `--select-flow` from `args` and return whether the flag was present plus the remaining args.
@@ -639,26 +488,6 @@ fn run_doctor_fix(check_id: &str, cwd: &std::path::Path) {
     }
 }
 
-fn run_template_validate(cwd: &std::path::Path) {
-    match TemplateSet::load_from_directory(cwd) {
-        Ok(template_set) => {
-            let errors = template_set.validate_coherence();
-            if errors.is_empty() {
-                println!("OK");
-            } else {
-                for error in &errors {
-                    eprintln!("coherence error: {error}");
-                }
-                std::process::exit(1);
-            }
-        }
-        Err(error) => {
-            eprintln!("template error: {error}");
-            std::process::exit(1);
-        }
-    }
-}
-
 fn render_status(path: &str) {
     let state = RepositoryState::load_from_path(std::path::Path::new(path))
         .expect("status state file should load");
@@ -672,135 +501,6 @@ fn render_run_status(path: &str) {
         .expect("workflow run file should exist");
     let surface = OperatorSurface::from_workflow_run(&run);
     println!("{}", surface.render());
-}
-
-fn run_claude_session(state_path: &str, role: &str) {
-    let config = ExecutionConfig::default();
-
-    match run_supervised_session(std::path::Path::new(state_path), role, &config) {
-        Err(err) => {
-            eprintln!("execution error: {err}");
-            std::process::exit(1);
-        }
-        Ok(outcome) => match outcome {
-            ExecutionOutcome::Ok {
-                summary,
-                artifact_refs,
-                advanced_to,
-            } => {
-                println!("Outcome: OK");
-                println!("Summary: {summary}");
-                if !artifact_refs.is_empty() {
-                    println!("Artifacts: {}", artifact_refs.join(", "));
-                }
-                if let Some(next) = advanced_to {
-                    println!("State advanced to: {}", next.as_str());
-                }
-            }
-            ExecutionOutcome::Nok { summary, reason } => {
-                println!("Outcome: NOK");
-                println!("Summary: {summary}");
-                println!("Reason: {reason}");
-                eprintln!("Session NOK: {reason}");
-                std::process::exit(1);
-            }
-            ExecutionOutcome::Aborted { reason } => {
-                println!("Outcome: ABORTED");
-                println!("Reason: {reason}");
-                std::process::exit(3);
-            }
-            ExecutionOutcome::ClarificationRequired(req) => {
-                println!("Outcome: CLARIFICATION");
-                println!("Question: {}", req.question);
-                eprintln!("Operator input required: {}", req.question);
-                std::process::exit(2);
-            }
-            ExecutionOutcome::ProviderFailure { detail } => {
-                eprintln!("Provider failure: {detail}");
-                std::process::exit(1);
-            }
-        },
-    }
-}
-
-fn resolve_state_machine_template(
-    repo_root: &std::path::Path,
-    flow_override: Option<&std::path::Path>,
-) -> Result<(TemplateSet, Option<String>), calypso_templates::TemplateError> {
-    use calypso_templates::{load_template_set_with_state_machine, resolve_template_set_for_path};
-
-    match flow_override {
-        Some(path) => match load_template_set_with_state_machine(path) {
-            Ok(template) => Ok((template, None)),
-            Err(_) => {
-                let name = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("selected file");
-                let note = format!(
-                    "note: {name} is a GitHub Actions workflow file; \
-                     running with the project's state machine template instead."
-                );
-                resolve_template_set_for_path(repo_root).map(|template| (template, Some(note)))
-            }
-        },
-        None => resolve_template_set_for_path(repo_root).map(|template| (template, None)),
-    }
-}
-
-fn run_state_machine_auto(
-    repo_root: &std::path::Path,
-    state_path: &std::path::Path,
-    flow_override: Option<&std::path::Path>,
-) {
-    use nightshift_core::driver::{DriverMode, DriverStepResult, StateMachineDriver};
-    use nightshift_core::execution::ExecutionConfig;
-
-    let (template, note) = match resolve_state_machine_template(repo_root, flow_override) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("template error: {error}");
-            std::process::exit(1);
-        }
-    };
-    if let Some(note) = note {
-        eprintln!("{note}");
-    }
-    let driver = StateMachineDriver {
-        mode: DriverMode::Auto,
-        state_path: state_path.to_path_buf(),
-        template,
-        config: ExecutionConfig::default(),
-        executor: None,
-    };
-
-    let results = driver.run_auto();
-    for result in &results {
-        match result {
-            DriverStepResult::Advanced(state) => {
-                println!("→ {}", state.as_str());
-            }
-            DriverStepResult::Terminal => {
-                println!("done");
-            }
-            DriverStepResult::Unchanged => {
-                println!("unchanged");
-            }
-            DriverStepResult::ClarificationRequired(q) => {
-                println!("clarification required: {q}");
-                eprintln!("operator input required: {q}");
-                std::process::exit(2);
-            }
-            DriverStepResult::Failed { reason } => {
-                eprintln!("step failed: {reason}");
-                std::process::exit(1);
-            }
-            DriverStepResult::Error(e) => {
-                eprintln!("driver error: {e}");
-                std::process::exit(1);
-            }
-        }
-    }
 }
 
 /// Run a workflow selected from the effective catalog through the shared interpreter.
@@ -989,56 +689,12 @@ fn workflow_agent_prompt(state_name: &str, cfg: &calypso_workflows::StateConfig)
     )
 }
 
-fn run_state_machine_step(repo_root: &std::path::Path, state_path: &std::path::Path) {
-    let (template, _) = match resolve_state_machine_template(repo_root, None) {
-        Ok(result) => result,
-        Err(error) => {
-            eprintln!("template error: {error}");
-            std::process::exit(1);
-        }
-    };
-    step::run_state_machine_step(state_path, template, None);
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
         BuildInfo, extract_path_flag, extract_positional_path_flag, extract_select_flow_flag,
-        render_help, render_version, resolve_state_machine_template,
+        render_help, render_version,
     };
-    use std::fs;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    const VALID_STATE_MACHINE: &str = r#"
-initial_state: local-start
-states:
-  - local-start
-  - done
-gate_groups:
-  - id: local-policy
-    label: Local Policy
-    gates:
-      - id: local-agent-gate
-        label: Local agent gate
-        task: local-agent
-"#;
-
-    const VALID_AGENTS: &str = r#"
-tasks:
-  - name: local-agent
-    kind: agent
-    role: implementer
-"#;
-
-    const VALID_PROMPTS: &str = r#"
-prompts:
-  local-agent: |
-    Execute the local workflow.
-"#;
-
-    static TEMPLATE_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     // ── extract_positional_path_flag ─────────────────────────────────────────
     // The positional [path] dispatch arm was removed from main(). A bare path-like
@@ -1241,73 +897,8 @@ prompts:
         assert!(output.contains("--json"), "missing --json flag");
     }
 
-    #[test]
-    fn resolve_state_machine_template_prefers_repo_override_when_present() {
-        let repo_root = temp_template_dir();
-        write_override_templates(&repo_root);
-
-        let (template, note) = resolve_state_machine_template(&repo_root, None)
-            .expect("repo override template should load");
-
-        assert_eq!(template.state_machine.initial_state, "local-start");
-        assert!(note.is_none());
-
-        fs::remove_dir_all(repo_root).expect("temp template directory should be removed");
-    }
-
-    #[test]
-    fn resolve_state_machine_template_falls_back_to_repo_override_for_gha_workflow() {
-        let repo_root = temp_template_dir();
-        write_override_templates(&repo_root);
-
-        let workflow_path = repo_root.join(".calypso").join("workflows");
-        fs::create_dir_all(&workflow_path).expect("workflow directory should be created");
-        let gha_workflow = workflow_path.join("turnstile.yaml");
-        fs::write(
-            &gha_workflow,
-            "name: turnstile\non:\n  workflow_dispatch:\njobs:\n  open:\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo open\n",
-        )
-        .expect("workflow fixture should write");
-
-        let (template, note) = resolve_state_machine_template(&repo_root, Some(&gha_workflow))
-            .expect("repo override template should load");
-
-        assert_eq!(template.state_machine.initial_state, "local-start");
-        assert_eq!(
-            note,
-            Some(
-                "note: turnstile.yaml is a GitHub Actions workflow file; running with the project's state machine template instead.".to_string()
-            )
-        );
-
-        fs::remove_dir_all(repo_root).expect("temp template directory should be removed");
-    }
-
     fn s(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| s.to_string()).collect()
-    }
-
-    fn temp_template_dir() -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        let counter = TEMPLATE_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "calypso-cli-main-template-test-{}-{unique}-{counter}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&path).expect("temp template directory should be created");
-        path
-    }
-
-    fn write_override_templates(root: &Path) {
-        fs::write(root.join("calypso-state-machine.yml"), VALID_STATE_MACHINE)
-            .expect("state machine override should write");
-        fs::write(root.join("calypso-agents.yml"), VALID_AGENTS)
-            .expect("agents override should write");
-        fs::write(root.join("calypso-prompts.yml"), VALID_PROMPTS)
-            .expect("prompts override should write");
     }
 
     fn sample_info() -> BuildInfo<'static> {
