@@ -311,7 +311,7 @@ fn run_force_transition_updates_state() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-// ── Default headless path uses daemon mode ──────────────────────────────────
+// ── Default path uses daemon mode (orchestrator) ────────────────────────────
 
 #[test]
 fn daemon_start_single_pass_exits_cleanly_without_state() {
