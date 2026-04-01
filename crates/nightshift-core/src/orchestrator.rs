@@ -1,6 +1,6 @@
-//! Headless orchestrator loop — single-pass doctor, state load, and gate evaluation.
+//! Orchestrator loop — single-pass and daemon scheduling modes.
 //!
-//! This module implements the headless mode for CI / daemon environments where
+//! This module implements the orchestrator for CI / daemon environments where
 //! no interactive TUI is available.  All output is structured log events written
 //! to stderr via the [`Logger`](crate::telemetry::Logger).
 
@@ -15,9 +15,9 @@ use crate::telemetry::{Component, LogEvent, LogFormat, LogLevel, Logger};
 use calypso_workflow_exec::{StepOutcome, WorkflowInterpreter};
 use calypso_workflows::StateKind;
 
-/// Configuration resolved from CLI flags when `--headless` is active.
+/// Configuration resolved from CLI flags when the orchestrator is active.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeadlessConfig {
+pub struct OrchestratorConfig {
     /// Resolved verbosity: Debug (default), Info (`-v`), or Trace (`-vv`).
     pub verbosity: LogLevel,
     /// Output format for log lines.
@@ -27,33 +27,48 @@ pub struct HeadlessConfig {
     pub env_log_override: Option<String>,
 }
 
-/// Outcome of a headless run, used for testing.
+/// Outcome of an orchestrator run, used for testing.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeadlessOutcome {
+pub struct OrchestratorOutcome {
     pub exit_code: i32,
 }
 
-/// Run the headless orchestrator with the given configuration.
+/// Run the orchestrator with the given configuration and scheduler mode.
 ///
-/// Returns the process exit code (0 = success, 1 = doctor failure / error).
-pub fn run_headless(cwd: &Path, config: &HeadlessConfig) -> i32 {
+/// - [`SchedulerMode::SinglePass`]: runs one scheduling pass and exits
+///   (suitable for CI / test environments).
+/// - [`SchedulerMode::Daemon`]: blocks on cron-scheduled workflows and fires
+///   them when their scheduled time arrives; runs until interrupted by a signal.
+///
+/// Returns the process exit code (0 = success, 1 = doctor failure / signal,
+/// 2 = configuration error).
+pub fn run_orchestrator(cwd: &Path, config: &OrchestratorConfig, mode: SchedulerMode) -> i32 {
     let logger = Logger::with_level(config.verbosity).with_format(config.log_format);
-    run_headless_with_logger(cwd, config, &logger)
+    run_orchestrator_with_logger(cwd, config, mode, &logger)
 }
 
 /// Inner implementation that accepts a logger — useful for testing.
-pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Logger) -> i32 {
+pub fn run_orchestrator_with_logger(
+    cwd: &Path,
+    config: &OrchestratorConfig,
+    mode: SchedulerMode,
+    logger: &Logger,
+) -> i32 {
     // 1. If env override, emit notice
     if let Some(env_val) = &config.env_log_override {
         logger.log_level_override_notice(env_val, config.verbosity);
     }
 
     // 2. Log startup
+    let startup_msg = match mode {
+        SchedulerMode::Daemon => "calypso daemon mode starting (continuous scheduling)",
+        SchedulerMode::SinglePass => "calypso orchestrator starting",
+    };
     logger.log_event(
         LogLevel::Info,
         Component::Cli,
         LogEvent::Startup,
-        "calypso headless mode starting",
+        startup_msg,
         BTreeMap::new(),
     );
 
@@ -88,14 +103,30 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     let doctor_exit = log_doctor_results(logger, &report);
 
     if doctor_exit != 0 {
-        logger.log_event(
-            LogLevel::Error,
-            Component::Doctor,
-            LogEvent::DoctorFailed,
-            "prerequisite checks failed",
-            BTreeMap::new(),
-        );
-        return doctor_exit;
+        match mode {
+            SchedulerMode::SinglePass => {
+                // Single-pass mode: doctor failures are fatal.
+                logger.log_event(
+                    LogLevel::Error,
+                    Component::Doctor,
+                    LogEvent::DoctorFailed,
+                    "prerequisite checks failed",
+                    BTreeMap::new(),
+                );
+                return doctor_exit;
+            }
+            SchedulerMode::Daemon => {
+                // Daemon mode: doctor failures are non-fatal — log a warning and
+                // continue so the interpreter scheduler is always reached.
+                logger.log_event(
+                    LogLevel::Warn,
+                    Component::Doctor,
+                    LogEvent::DoctorFailed,
+                    "prerequisite checks failed; continuing in daemon mode",
+                    BTreeMap::new(),
+                );
+            }
+        }
     }
 
     // Check for shutdown between phases
@@ -111,18 +142,19 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     }
 
     // 6. Enter orchestrator loop via the YAML workflow interpreter scheduler.
+    let scheduler_log_msg = match mode {
+        SchedulerMode::SinglePass => "entering interpreter scheduler",
+        SchedulerMode::Daemon => "entering interpreter scheduler (daemon mode)",
+    };
     logger.log_event(
         LogLevel::Info,
         Component::StateMachine,
         LogEvent::StateTransition,
-        "entering interpreter scheduler",
+        scheduler_log_msg,
         BTreeMap::new(),
     );
 
-    let scheduler_outcome =
-        run_interpreter_scheduler(&repo_root, SchedulerMode::SinglePass, &shutdown, logger);
-    // NOTE: run_headless always uses SinglePass for backward compatibility.
-    // For continuous daemon scheduling use run_headless_daemon_mode instead.
+    let scheduler_outcome = run_interpreter_scheduler(&repo_root, mode, &shutdown, logger);
 
     // Map scheduler outcome to exit code and log the result.
     let exit_code = match scheduler_outcome {
@@ -140,11 +172,16 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             ref workflow,
             ref initial_state,
         } => {
+            let fired_msg = match mode {
+                SchedulerMode::SinglePass => {
+                    format!("interpreter scheduler fired '{workflow}'")
+                }
+                SchedulerMode::Daemon => {
+                    format!("daemon scheduler fired '{workflow}'")
+                }
+            };
             logger
-                .entry(
-                    LogLevel::Info,
-                    &format!("interpreter scheduler fired '{workflow}'"),
-                )
+                .entry(LogLevel::Info, &fired_msg)
                 .component(Component::StateMachine)
                 .event(LogEvent::StateTransition)
                 .field("workflow", workflow.as_str())
@@ -153,11 +190,15 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             run_workflow_executor(logger, workflow, &shutdown)
         }
         crate::interpreter_scheduler::SchedulerOutcome::Interrupted => {
+            let interrupted_msg = match mode {
+                SchedulerMode::SinglePass => "interpreter scheduler interrupted",
+                SchedulerMode::Daemon => "daemon scheduler interrupted by signal",
+            };
             logger.log_event(
                 LogLevel::Warn,
                 Component::Cli,
                 LogEvent::Shutdown,
-                "interpreter scheduler interrupted",
+                interrupted_msg,
                 BTreeMap::new(),
             );
             // Use the signal's exit code (143 for SIGTERM, etc.) — default to 1.
@@ -166,11 +207,12 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
         crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries {
             ref user_action_workflows,
         } => {
+            let no_cron_msg = match mode {
+                SchedulerMode::SinglePass => "interpreter scheduler: no cron entries found",
+                SchedulerMode::Daemon => "daemon scheduler: no cron entries found; exiting",
+            };
             logger
-                .entry(
-                    LogLevel::Info,
-                    "interpreter scheduler: no cron entries found",
-                )
+                .entry(LogLevel::Info, no_cron_msg)
                 .component(Component::StateMachine)
                 .event(LogEvent::Startup)
                 .emit();
@@ -178,8 +220,12 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
             0
         }
         crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
+            let load_err_msg = match mode {
+                SchedulerMode::SinglePass => "interpreter scheduler load error",
+                SchedulerMode::Daemon => "daemon scheduler load error",
+            };
             logger
-                .entry(LogLevel::Error, "interpreter scheduler load error")
+                .entry(LogLevel::Error, load_err_msg)
                 .component(Component::StateMachine)
                 .field("error", e.as_str())
                 .emit();
@@ -188,193 +234,15 @@ pub fn run_headless_with_logger(cwd: &Path, config: &HeadlessConfig, logger: &Lo
     };
 
     // 9. Log completion
+    let complete_msg = match mode {
+        SchedulerMode::SinglePass => "orchestrator run complete",
+        SchedulerMode::Daemon => "daemon run complete",
+    };
     logger.log_event(
         LogLevel::Info,
         Component::Cli,
         LogEvent::Shutdown,
-        "headless run complete",
-        BTreeMap::new(),
-    );
-
-    exit_code
-}
-
-/// Run the headless daemon with continuous scheduling.
-///
-/// This is the daemon-first entry point for normal operation.  It follows the
-/// same pipeline as [`run_headless`] (doctor checks, state load, gate evaluation)
-/// but enters the interpreter scheduler in [`SchedulerMode::Daemon`] mode,
-/// which blocks on cron-scheduled workflows and fires them when their scheduled
-/// time arrives.
-///
-/// The daemon runs until interrupted by a signal (SIGINT/SIGTERM).
-///
-/// Returns the process exit code (0 = success, 1 = doctor failure / signal,
-/// 2 = configuration error).
-pub fn run_headless_daemon_mode(cwd: &Path, config: &HeadlessConfig) -> i32 {
-    let logger = Logger::with_level(config.verbosity).with_format(config.log_format);
-    run_headless_daemon_mode_with_logger(cwd, config, &logger)
-}
-
-/// Inner implementation of daemon mode that accepts a logger.
-pub fn run_headless_daemon_mode_with_logger(
-    cwd: &Path,
-    config: &HeadlessConfig,
-    logger: &Logger,
-) -> i32 {
-    // 1. If env override, emit notice
-    if let Some(env_val) = &config.env_log_override {
-        logger.log_level_override_notice(env_val, config.verbosity);
-    }
-
-    // 2. Log startup
-    logger.log_event(
-        LogLevel::Info,
-        Component::Cli,
-        LogEvent::Startup,
-        "calypso daemon mode starting (continuous scheduling)",
-        BTreeMap::new(),
-    );
-
-    // 3. Install signal handlers
-    let shutdown = install_signal_handlers();
-
-    // 4. Resolve repo root
-    let repo_root = match resolve_repo_root(cwd) {
-        Ok(root) => root,
-        Err(_) => {
-            logger.log_event(
-                LogLevel::Error,
-                Component::Cli,
-                LogEvent::DoctorFailed,
-                "not inside a git repository",
-                BTreeMap::new(),
-            );
-            return 1;
-        }
-    };
-
-    // 5. Run doctor checks
-    logger.log_event(
-        LogLevel::Info,
-        Component::Doctor,
-        LogEvent::DoctorCheck,
-        "running prerequisite checks",
-        BTreeMap::new(),
-    );
-
-    let report = collect_doctor_report(&HostDoctorEnvironment, &repo_root);
-    let doctor_exit = log_doctor_results(logger, &report);
-
-    if doctor_exit != 0 {
-        // Doctor failures are non-fatal in daemon mode: log a warning and
-        // continue so the interpreter scheduler is always reached.
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Doctor,
-            LogEvent::DoctorFailed,
-            "prerequisite checks failed; continuing in daemon mode",
-            BTreeMap::new(),
-        );
-    }
-
-    // Check for shutdown between phases
-    if let Some(signal) = shutdown.try_recv() {
-        logger.log_event(
-            LogLevel::Warn,
-            Component::Cli,
-            LogEvent::Shutdown,
-            &format!("received {signal}, shutting down"),
-            BTreeMap::new(),
-        );
-        return signal.exit_code();
-    }
-
-    // 6. Enter interpreter scheduler in Daemon mode (continuous scheduling).
-    //
-    // Unlike the single-pass mode in run_headless, Daemon mode blocks until
-    // a cron-scheduled workflow fires or a shutdown signal is received.
-    logger.log_event(
-        LogLevel::Info,
-        Component::StateMachine,
-        LogEvent::StateTransition,
-        "entering interpreter scheduler (daemon mode)",
-        BTreeMap::new(),
-    );
-
-    let scheduler_outcome =
-        run_interpreter_scheduler(&repo_root, SchedulerMode::Daemon, &shutdown, logger);
-
-    // Map scheduler outcome to exit code.
-    let exit_code = match scheduler_outcome {
-        crate::interpreter_scheduler::SchedulerOutcome::Fired {
-            ref workflow,
-            ref initial_state,
-        } => {
-            logger
-                .entry(
-                    LogLevel::Info,
-                    &format!("daemon scheduler fired '{workflow}'"),
-                )
-                .component(Component::StateMachine)
-                .event(LogEvent::StateTransition)
-                .field("workflow", workflow.as_str())
-                .field("initial_state", initial_state.as_str())
-                .emit();
-            run_workflow_executor(logger, workflow, &shutdown)
-        }
-        crate::interpreter_scheduler::SchedulerOutcome::Interrupted => {
-            logger.log_event(
-                LogLevel::Warn,
-                Component::Cli,
-                LogEvent::Shutdown,
-                "daemon scheduler interrupted by signal",
-                BTreeMap::new(),
-            );
-            1
-        }
-        crate::interpreter_scheduler::SchedulerOutcome::NoCronEntries {
-            ref user_action_workflows,
-        } => {
-            logger
-                .entry(
-                    LogLevel::Info,
-                    "daemon scheduler: no cron entries found; exiting",
-                )
-                .component(Component::StateMachine)
-                .event(LogEvent::Startup)
-                .emit();
-            print_no_cron_hint(user_action_workflows);
-            0
-        }
-        crate::interpreter_scheduler::SchedulerOutcome::LoadError(ref e) => {
-            logger
-                .entry(LogLevel::Error, "daemon scheduler load error")
-                .component(Component::StateMachine)
-                .field("error", e.as_str())
-                .emit();
-            2
-        }
-        crate::interpreter_scheduler::SchedulerOutcome::Discovered { entry_point_count } => {
-            // Daemon mode should not produce Discovered, but handle gracefully.
-            logger
-                .entry(
-                    LogLevel::Info,
-                    "daemon scheduler: discovered entry points (unexpected in daemon mode)",
-                )
-                .component(Component::StateMachine)
-                .field("entry_point_count", entry_point_count.to_string())
-                .emit();
-            0
-        }
-    };
-
-    // 7. Log completion
-    logger.log_event(
-        LogLevel::Info,
-        Component::Cli,
-        LogEvent::Shutdown,
-        "daemon run complete",
+        complete_msg,
         BTreeMap::new(),
     );
 
@@ -391,7 +259,7 @@ pub fn run_headless_daemon_mode_with_logger(
 /// with a success event so the loop progresses; full supervised execution is
 /// wired in by the operator surface layer above this module.
 ///
-/// Exit codes follow the headless convention:
+/// Exit codes follow the orchestrator convention:
 /// - 0: completed successfully (terminal state reached)
 /// - 1: interrupted by shutdown signal
 /// - 2: workflow load or graph error
@@ -628,7 +496,7 @@ fn log_doctor_results(logger: &Logger, report: &DoctorReport) -> i32 {
     if any_failing { 1 } else { 0 }
 }
 
-/// Print a user-facing hint when the daemon exits because no cron-scheduled
+/// Print a user-facing hint when the orchestrator exits because no cron-scheduled
 /// entry points were found.
 ///
 /// If `workflow_dispatch` workflows exist they are listed by name, and the
@@ -762,11 +630,11 @@ mod tests {
     }
 
     #[test]
-    fn headless_logs_startup_event() {
+    fn orchestrator_logs_startup_event() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
 
-        let config = HeadlessConfig {
+        let config = OrchestratorConfig {
             verbosity: LogLevel::Info,
             log_format: LogFormat::Json,
             env_log_override: None,
@@ -774,10 +642,10 @@ mod tests {
 
         // This will fail because we're not in a git repo, but it should still
         // emit the startup event before failing.
-        let tmp = std::env::temp_dir().join("calypso-headless-test-startup");
+        let tmp = std::env::temp_dir().join("calypso-orchestrator-test-startup");
         let _ = std::fs::create_dir_all(&tmp);
 
-        let exit = run_headless_with_logger(&tmp, &config, &logger);
+        let exit = run_orchestrator_with_logger(&tmp, &config, SchedulerMode::SinglePass, &logger);
         let _ = std::fs::remove_dir_all(&tmp);
 
         // Should have logged startup
@@ -791,20 +659,20 @@ mod tests {
     }
 
     #[test]
-    fn headless_env_override_emits_notice() {
+    fn orchestrator_env_override_emits_notice() {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
 
-        let config = HeadlessConfig {
+        let config = OrchestratorConfig {
             verbosity: LogLevel::Info,
             log_format: LogFormat::Json,
             env_log_override: Some("debug".to_string()),
         };
 
-        let tmp = std::env::temp_dir().join("calypso-headless-test-override");
+        let tmp = std::env::temp_dir().join("calypso-orchestrator-test-override");
         let _ = std::fs::create_dir_all(&tmp);
 
-        let _ = run_headless_with_logger(&tmp, &config, &logger);
+        let _ = run_orchestrator_with_logger(&tmp, &config, SchedulerMode::SinglePass, &logger);
         let _ = std::fs::remove_dir_all(&tmp);
 
         let output = writer.contents();
@@ -833,16 +701,16 @@ mod tests {
     }
 
     #[test]
-    fn headless_outcome_debug_and_equality() {
-        let a = HeadlessOutcome { exit_code: 0 };
+    fn orchestrator_outcome_debug_and_equality() {
+        let a = OrchestratorOutcome { exit_code: 0 };
         let b = a.clone();
         assert_eq!(a, b);
-        assert_eq!(format!("{a:?}"), "HeadlessOutcome { exit_code: 0 }");
+        assert_eq!(format!("{a:?}"), "OrchestratorOutcome { exit_code: 0 }");
     }
 
     #[test]
-    fn headless_config_debug_and_equality() {
-        let a = HeadlessConfig {
+    fn orchestrator_config_debug_and_equality() {
+        let a = OrchestratorConfig {
             verbosity: LogLevel::Warn,
             log_format: LogFormat::Json,
             env_log_override: None,
@@ -850,7 +718,7 @@ mod tests {
         let b = a.clone();
         assert_eq!(a, b);
         let debug = format!("{a:?}");
-        assert!(debug.contains("HeadlessConfig"));
+        assert!(debug.contains("OrchestratorConfig"));
     }
 
     /// Helper: create a ShutdownSignal with no signal queued.
@@ -955,8 +823,8 @@ mod tests {
     /// 2. The old Error-level "prerequisite checks failed" message must NOT appear.
     ///
     /// We test this by calling `log_doctor_results` directly with a failing check
-    /// and then verifying the warning path exists in `run_headless_daemon_mode_with_logger`
-    /// by inspecting the source-level behaviour through the logger.
+    /// and then verifying the warning path exists in `run_orchestrator_with_logger`
+    /// (daemon mode) by inspecting the source-level behaviour through the logger.
     #[test]
     fn daemon_mode_doctor_failure_logs_warn_not_error() {
         let writer = CaptureWriter::new();
@@ -979,7 +847,7 @@ mod tests {
         assert_eq!(exit, 1);
 
         // Now verify the warning continuation log would appear.
-        // We emit it the same way run_headless_daemon_mode_with_logger does.
+        // We emit it the same way run_orchestrator_with_logger (daemon mode) does.
         if exit != 0 {
             logger.log_event(
                 LogLevel::Warn,
@@ -1012,7 +880,7 @@ mod tests {
         }
     }
 
-    /// Regression: `run_headless_daemon_mode_with_logger` emits a startup event
+    /// Regression: `run_orchestrator_with_logger` in daemon mode emits a startup event
     /// before any doctor or scheduler work.  Verified on a non-git temp dir
     /// (fails at repo-root resolution) so the test returns quickly.
     #[test]
@@ -1020,7 +888,7 @@ mod tests {
         let writer = CaptureWriter::new();
         let logger = make_logger(writer.clone());
 
-        let config = HeadlessConfig {
+        let config = OrchestratorConfig {
             verbosity: LogLevel::Info,
             log_format: LogFormat::Json,
             env_log_override: None,
@@ -1036,7 +904,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp);
 
         // Non-git dir: resolves repo root fails → returns 1 immediately.
-        let exit = run_headless_daemon_mode_with_logger(&tmp, &config, &logger);
+        let exit = run_orchestrator_with_logger(&tmp, &config, SchedulerMode::Daemon, &logger);
         let _ = std::fs::remove_dir_all(&tmp);
 
         assert_eq!(exit, 1, "non-git dir must return exit code 1");
