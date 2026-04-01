@@ -120,7 +120,7 @@ fn emit_dispatch_log(logger: &Logger, cwd: &std::path::Path, args: &[String]) {
         .emit();
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let info = build_info();
     let logger = build_logger();
     let raw_args: Vec<String> = std::env::args().skip(1).collect();
@@ -139,9 +139,7 @@ fn main() {
     } else {
         (None, args_after_path)
     };
-    let cwd = path_override
-        .or(positional_path_override)
-        .unwrap_or_else(|| std::env::current_dir().expect("current directory should resolve"));
+    let cwd = resolve_cwd(path_override.or(positional_path_override))?;
 
     // Strip --select-flow from args before dispatching.
     let (select_flow, args_after_select_flow) = extract_select_flow_flag(&args_after_positional);
@@ -273,6 +271,7 @@ fn main() {
         }
         _ => println!("{}", render_help(info)),
     }
+    Ok(())
 }
 
 fn run_project_dir(project_dir: &std::path::Path, select_flow: bool) {
@@ -287,6 +286,21 @@ fn run_project_dir(project_dir: &std::path::Path, select_flow: bool) {
             // --select-flow was used but user cancelled or no eligible workflows.
             println!("{}", run_doctor(project_dir));
         }
+    }
+}
+
+/// Resolve the working directory from an explicit path override or `std::env::current_dir`.
+///
+/// Returns an `Err` with a human-readable message when no override is given and
+/// `std::env::current_dir()` fails (e.g. the process's CWD has been deleted or
+/// unmounted).
+fn resolve_cwd(
+    override_path: Option<std::path::PathBuf>,
+) -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
+    match override_path {
+        Some(p) => Ok(p),
+        None => std::env::current_dir()
+            .map_err(|e| format!("cannot resolve working directory: {e}").into()),
     }
 }
 
@@ -691,7 +705,7 @@ fn workflow_agent_prompt(state_name: &str, cfg: &calypso_workflows::StateConfig)
 mod tests {
     use super::{
         BuildInfo, extract_path_flag, extract_positional_path_flag, extract_select_flow_flag,
-        render_help, render_version,
+        render_help, render_version, resolve_cwd,
     };
 
     // ── extract_positional_path_flag ─────────────────────────────────────────
@@ -893,6 +907,26 @@ mod tests {
         let output = render_help(sample_info());
 
         assert!(output.contains("--json"), "missing --json flag");
+    }
+
+    // ── resolve_cwd ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_cwd_returns_override_when_provided() {
+        let override_path = std::path::PathBuf::from("/some/explicit/path");
+        let result = resolve_cwd(Some(override_path.clone()));
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), override_path);
+    }
+
+    #[test]
+    fn resolve_cwd_returns_ok_with_none_when_cwd_is_available() {
+        // std::env::current_dir() should succeed in a normal test environment.
+        let result = resolve_cwd(None);
+        assert!(
+            result.is_ok(),
+            "resolve_cwd should succeed when CWD is available"
+        );
     }
 
     fn s(items: &[&str]) -> Vec<String> {
