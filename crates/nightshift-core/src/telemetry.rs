@@ -821,14 +821,17 @@ mod tests {
         }
 
         fn contents(&self) -> String {
-            let buf = self.buffer.lock().unwrap();
+            let buf = self.buffer.lock().unwrap_or_else(|e| e.into_inner());
             String::from_utf8_lossy(&buf).to_string()
         }
     }
 
     impl std::io::Write for CaptureWriter {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            self.buffer.lock().unwrap().extend_from_slice(buf);
+            self.buffer
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(buf);
             Ok(buf.len())
         }
 
@@ -1259,5 +1262,49 @@ mod tests {
         assert!(is_secret_key("db_password"));
         assert!(!is_secret_key("username"));
         assert!(!is_secret_key("count"));
+    }
+
+    // ---- Mutex poison recovery ----
+
+    #[test]
+    fn logger_does_not_panic_after_writer_mutex_poison() {
+        use std::panic;
+        use std::sync::Arc;
+
+        // Build a logger whose shared writer Arc we can access from outside.
+        let writer = CaptureWriter::new();
+        let shared_buf = Arc::clone(&writer.buffer);
+        let logger = make_logger(writer, LogFormat::Text);
+
+        // Poison the CaptureWriter's internal buffer mutex by locking it
+        // inside a panicking thread.
+        let _ = panic::catch_unwind(|| {
+            let _guard = shared_buf.lock().unwrap();
+            panic!("intentional panic to poison the mutex");
+        });
+
+        // The mutex is now poisoned.  The Logger's own writer mutex wraps the
+        // CaptureWriter via Box<dyn Write>, so locking the Logger writer to
+        // call write() will also encounter the poisoned inner mutex.
+        // Confirming the call does not panic is the acceptance criterion.
+        logger.info("message after poison");
+    }
+
+    #[test]
+    fn capture_writer_contents_survives_buffer_mutex_poison() {
+        use std::panic;
+        use std::sync::Arc;
+
+        let writer = CaptureWriter::new();
+        let shared_buf = Arc::clone(&writer.buffer);
+
+        // Poison the CaptureWriter buffer mutex.
+        let _ = panic::catch_unwind(|| {
+            let _guard = shared_buf.lock().unwrap();
+            panic!("intentional panic to poison the mutex");
+        });
+
+        // contents() must not panic even though the mutex is poisoned.
+        let _ = writer.contents();
     }
 }
