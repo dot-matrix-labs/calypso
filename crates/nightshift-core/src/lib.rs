@@ -3,9 +3,7 @@ pub mod claude;
 // FUTURE: #48 — Codex provider; re-enable when multi-vendor registry is implemented
 // pub mod codex;
 pub mod doctor;
-pub mod driver;
 pub mod error;
-pub mod execution;
 pub mod feature_start;
 pub mod github;
 pub mod headless;
@@ -15,7 +13,6 @@ pub mod headless_sm_driver;
 pub mod init;
 pub mod interpreter_scheduler;
 pub mod keys;
-pub mod pinned_prompt;
 pub mod policy;
 pub mod pr_checklist;
 pub mod report;
@@ -24,10 +21,6 @@ pub use calypso_runtime::runtime;
 pub use calypso_runtime::state;
 pub mod signal;
 pub mod sm_audit;
-pub mod step_loop;
 pub mod telemetry;
 pub(crate) mod timefmt;
 pub mod workflows;
-
-#[cfg(any(test, feature = "testing"))]
-pub mod testing;

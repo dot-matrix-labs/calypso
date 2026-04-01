@@ -333,82 +333,31 @@ fn path_flag_routes_status_to_specified_directory() {
 }
 
 #[test]
-fn path_flag_routes_state_show_to_specified_directory() {
-    let state = sample_state();
-    let dir = temp_project_dir_with_state(&state);
-
-    let output = calypso()
-        .args(["--path"])
-        .arg(&dir)
-        .arg("state")
-        .arg("show")
-        .output()
-        .expect("failed to run calypso-cli --path <dir> state show");
-
-    std::fs::remove_dir_all(&dir).ok();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    // Output is the JSON state file — must contain the feature id we seeded
-    assert!(
-        stdout.contains("feat-tui-surface"),
-        "state show used the supplied directory"
-    );
-}
-
-// ── Routing: subcommands not yet covered ─────────────────────────────────────
-
-#[test]
-fn state_show_prints_json_for_current_directory() {
-    // Seed a state file under a temp dir and run state show from there.
-    let state = sample_state();
-    let dir = temp_project_dir_with_state(&state);
-
+fn state_show_falls_through_to_help_when_removed() {
+    // state show was removed; it should fall through to the help catch-all.
     let output = calypso()
         .args(["state", "show"])
-        .current_dir(&dir)
         .output()
         .expect("failed to run calypso-cli state show");
 
-    std::fs::remove_dir_all(&dir).ok();
-
+    // Falls through to help output — exits 0.
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert!(stdout.contains("feat-tui-surface"));
-    // Must be valid JSON
-    serde_json::from_str::<serde_json::Value>(&stdout)
-        .expect("state show output should be valid JSON");
+    assert!(stdout.contains("Usage:"), "expected help output for removed state show command");
 }
 
 #[test]
-fn state_show_fails_gracefully_when_no_state_file_exists() {
-    let dir = temp_non_git_dir();
-
-    let output = calypso()
-        .args(["state", "show"])
-        .current_dir(&dir)
-        .output()
-        .expect("failed to run calypso-cli state show");
-
-    std::fs::remove_dir_all(&dir).ok();
-
-    assert!(!output.status.success());
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
-    assert!(stderr.contains("state show error"));
-}
-
-#[test]
-fn template_validate_succeeds_for_bundled_templates() {
-    // Run from the cli crate root where the embedded templates live
+fn template_validate_falls_through_to_help_when_removed() {
+    // template validate was removed; it should fall through to the help catch-all.
     let output = calypso()
         .args(["template", "validate"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
         .output()
         .expect("failed to run calypso-cli template validate");
 
+    // Falls through to help output — exits 0.
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    assert_eq!(stdout.trim(), "OK");
+    assert!(stdout.contains("Usage:"), "expected help output for removed template validate command");
 }
 
 #[test]
@@ -534,93 +483,39 @@ fn help_output_does_not_expose_deprecated_commands() {
         !stdout.contains("keys rotate"),
         "help must not expose deprecated keys command"
     );
+    assert!(
+        !stdout.contains("template validate"),
+        "help must not expose removed template validate command"
+    );
+    assert!(
+        !stdout.contains("  state "),
+        "help must not expose removed state subcommand"
+    );
+    assert!(
+        !stdout.contains("  agents"),
+        "help must not expose removed agents subcommand"
+    );
+    assert!(
+        !stdout.contains("--step"),
+        "help must not expose removed --step flag"
+    );
 }
 
 // ── Logger integration tests ─────────────────────────────────────────────────
 
-/// `state show` with CALYPSO_LOG=info should produce valid JSON on stdout and
-/// emit a startup log line to stderr.
+/// The dispatch log event is emitted for each CLI invocation. This test verifies
+/// that the logger emits a startup entry to stderr for a basic doctor invocation.
 #[test]
-fn state_show_json_stdout_is_clean_with_calypso_log_info() {
-    let state = sample_state();
-    let dir = temp_project_dir_with_state(&state);
-
+fn calypso_log_info_emits_dispatch_event_to_stderr() {
     let output = calypso()
-        .args(["state", "show"])
-        .current_dir(&dir)
+        .args(["doctor"])
         .env("CALYPSO_LOG", "info")
         .output()
-        .expect("failed to run calypso-cli state show");
-
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert!(
-        output.status.success(),
-        "state show should succeed; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
+        .expect("failed to run calypso-cli doctor with CALYPSO_LOG=info");
 
     let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
     assert!(
-        stderr.contains("dispatching calypso-cli state show"),
-        "expected logger output on stderr; stderr: {stderr}"
+        stderr.contains("dispatching calypso-cli doctor"),
+        "expected dispatch log on stderr; got: {stderr}"
     );
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    serde_json::from_str::<serde_json::Value>(&stdout)
-        .expect("state show stdout should be valid JSON with no log noise mixed in");
-}
-
-/// With CALYPSO_LOG=error the logger should suppress INFO-level output.
-/// `state show` produces no dispatch log on stderr when CALYPSO_LOG=error.
-#[test]
-fn calypso_log_error_suppresses_info_output() {
-    let state = sample_state();
-    let dir = temp_project_dir_with_state(&state);
-
-    let output = calypso()
-        .args(["state", "show"])
-        .current_dir(&dir)
-        .env("CALYPSO_LOG", "error")
-        .output()
-        .expect("failed to run calypso-cli state show");
-
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert!(
-        output.status.success(),
-        "state show should succeed with CALYPSO_LOG=error"
-    );
-
-    let stderr = String::from_utf8(output.stderr).expect("stderr should be valid utf-8");
-    assert!(
-        !stderr.contains("dispatching calypso-cli state show"),
-        "CALYPSO_LOG=error should suppress the dispatch log; got stderr: {stderr}"
-    );
-}
-
-/// `state status --json` produces valid JSON on stdout and still logs to stderr.
-#[test]
-fn state_status_json_stdout_is_clean_with_calypso_log_info() {
-    let state = sample_state();
-    let dir = temp_project_dir_with_state(&state);
-
-    let output = calypso()
-        .args(["state", "status", "--json"])
-        .current_dir(&dir)
-        .env("CALYPSO_LOG", "info")
-        .output()
-        .expect("failed to run calypso-cli state status --json");
-
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert!(
-        output.status.success(),
-        "state status --json should succeed; stderr: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let stdout = String::from_utf8(output.stdout).expect("stdout should be valid utf-8");
-    serde_json::from_str::<serde_json::Value>(stdout.trim())
-        .expect("state status --json stdout should be valid JSON with no log noise");
 }
